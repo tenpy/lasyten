@@ -732,19 +732,29 @@ Coupling::elementary_decomposition() const
         if (!leg_R || !leg_L) {
             throw std::runtime_error("virtual legs must be ElementarySpaces");
         }
-        auto const& leg = leg_L;
-        std::map<Sector, std::vector<int64>> indices_of_sector;
-        auto const basis_sectors = leg->sectors_of_basis();
-        for (std::size_t i = 0; i < basis_sectors.size(); ++i) {
-            indices_of_sector[basis_sectors[i]].push_back(static_cast<int64>(i));
+        if (!leg_L->slices) {
+            throw SymmetryError(
+              "Elementary decomposition requires virtual spaces with explicit bases");
         }
+        auto const basis_perm = leg_L->basis_perm();
         auto& bond_masks_R = masks_R.emplace_back();
         auto& bond_masks_L = masks_L.emplace_back();
-        for (auto const& [sector, inds] : indices_of_sector) {
-            bond_masks_R.push_back(
-              Mask::from_indices(py::cast(inds), leg_R, factorization[b]->backend));
-            bond_masks_L.push_back(
-              Mask::from_indices(py::cast(inds), leg_L, factorization[b]->backend));
+        for (std::size_t i = 0; i < leg_L->sector_decomposition.size(); ++i) {
+            auto const sector_dim =
+              leg_L->Space::symmetry->sector_dim(leg_L->sector_decomposition[i]);
+            auto const start = (*leg_L->slices)[i][0];
+            for (int64 m = 0; m < leg_L->multiplicities[i]; ++m) {
+                std::vector<int64> indices;
+                indices.reserve(static_cast<std::size_t>(sector_dim));
+                for (int64 k = 0; k < sector_dim; ++k) {
+                    auto const internal_idx = start + m * sector_dim + k;
+                    indices.push_back(basis_perm[static_cast<std::size_t>(internal_idx)]);
+                }
+                bond_masks_R.push_back(
+                  Mask::from_indices(py::cast(indices), leg_R, factorization[b]->backend));
+                bond_masks_L.push_back(
+                  Mask::from_indices(py::cast(indices), leg_L, factorization[b]->backend));
+            }
         }
     }
 

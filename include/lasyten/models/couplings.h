@@ -123,9 +123,10 @@ class Coupling
 
     /// Decompose into a sum of "elementary" couplings.
     ///
-    /// A coupling is elementary if all of its virtual legs (``wL``, ``wR``) have a single
-    /// sector (``num_sectors == 1``). The decomposition is obtained by projecting every virtual
-    /// bond onto each of its sectors. Terms that vanish identically are omitted.
+    /// A coupling is elementary if each virtual leg (``wL``, ``wR``) has total multiplicity one
+    /// (``total_multiplicity == 1``), i.e. one sector appearing exactly once. The decomposition
+    /// is obtained by projecting every virtual bond onto each of its sector copies. Terms that
+    /// vanish identically are omitted.
     ///
     /// @returns Couplings on the same sites (and with the same name) whose sum is this coupling.
     [[nodiscard]] std::vector<Coupling> elementary_decomposition() const;

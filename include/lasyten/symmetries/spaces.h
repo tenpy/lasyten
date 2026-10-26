@@ -161,6 +161,9 @@ class Space : public virtual LegOrSpace
     SectorArray sector_decomposition;
     std::optional<std::string> sector_order;
     std::vector<int64> multiplicities;
+    /// The number of unique sectors appearing in this space, regardless of their multiplicity.
+    /// See :attr:`~lasyten.symmetries.spaces.Space.total_multiplicity` for the sum of the sector
+    /// multiplicities.
     int64 num_sectors = 0;
     std::optional<std::vector<int64>> sector_dims;
     std::vector<float64> sector_qdims;
@@ -236,6 +239,10 @@ class Space : public virtual LegOrSpace
 
     /// The multiplicity of a given sector in the `sector_decomposition`.
     [[nodiscard]] int64 sector_multiplicity(Sector sector) const;
+
+    /// The sum of the multiplicities of all sectors in this space.
+    /// See :attr:`~lasyten.symmetries.spaces.Space.num_sectors` for the number of unique sectors.
+    [[nodiscard]] int64 total_multiplicity() const;
 };
 
 /// A group of legs, i.e. resulting from `combine_legs`.

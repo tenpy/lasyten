@@ -1016,8 +1016,12 @@ def _random_hermitian_coupling(sites, seed):
 def test_elementary_decomposition(any_backend):
     # small spins keep the number of sector combinations (and dense conversions) low
     site_list = [s for s in generate_spin_dofs(any_backend) if isinstance(s, sites.SpinSite) and s.S <= 1]
+    saw_repeated_sector_copy = False
     for site in site_list:
         coupling = couplings.chiral_3spin_coupling([site, site, site], chi=0.7)
+        saw_repeated_sector_copy |= any(
+            W.get_leg_co_domain(leg).total_multiplicity > 1 for W in coupling.factorization for leg in ('wL', 'wR')
+        )
         terms = coupling.elementary_decomposition()
         assert len(terms) >= 1
         total = None
@@ -1025,11 +1029,12 @@ def test_elementary_decomposition(any_backend):
             term.test_sanity()
             assert term.sites == coupling.sites
             for W in term.factorization:
-                assert W.get_leg_co_domain('wL').num_sectors == 1
-                assert W.get_leg_co_domain('wR').num_sectors == 1
+                assert W.get_leg_co_domain('wL').total_multiplicity == 1
+                assert W.get_leg_co_domain('wR').total_multiplicity == 1
             arr = term.to_numpy(understood_braiding=True)
             total = arr if total is None else total + arr
         npt.assert_allclose(total, coupling.to_numpy(understood_braiding=True), atol=1e-12)
+    assert saw_repeated_sector_copy
 
 
 def test_coupling_permute():

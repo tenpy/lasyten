@@ -132,6 +132,7 @@ def test_ElementarySpace(any_symmetry, make_any_sectors, np_random):
         assert s1.sector_decomposition_where(s1.sector_decomposition[expect]) == expect
         assert s1.sector_decomposition_where(s1.sector_decomposition[expect]) == expect
         assert s1.sector_multiplicity(s1.sector_decomposition[expect]) == s1.multiplicities[expect]
+    assert s1.total_multiplicity == sum(s1.multiplicities)
 
     print('check from_basis')
     if any_symmetry.can_be_dropped:

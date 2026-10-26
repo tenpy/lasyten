@@ -653,6 +653,12 @@ Space::sector_multiplicity(Sector sector) const
     return multiplicities[static_cast<std::size_t>(*idx)];
 }
 
+int64
+Space::total_multiplicity() const
+{
+    return std::accumulate(multiplicities.begin(), multiplicities.end(), int64{ 0 });
+}
+
 namespace {
 
 [[nodiscard]] std::optional<std::vector<int64>>

@@ -368,7 +368,13 @@ bind_spaces(py::module_& m)
                 self.multiplicities = std::move(*m);
             }
         })
-      .def_readonly("num_sectors", &Space::num_sectors)
+      .def_readonly("num_sectors",
+                    &Space::num_sectors,
+                    R"pydoc(The number of unique sectors appearing in this space, regardless of
+their multiplicity. See :attr:`~lasyten.symmetries.spaces.Space.total_multiplicity` for the sum of
+the sector multiplicities.)pydoc")
+      .def_property_readonly(
+        "total_multiplicity", &Space::total_multiplicity, DOC(lasyten, Space, total_multiplicity))
       .def_property_readonly("sector_dims",
                              [](Space const& self) -> py::object {
                                  if (!self.sector_dims) {
