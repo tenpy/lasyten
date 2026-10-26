@@ -77,6 +77,9 @@ bind_models_couplings(py::module_& m)
            py::arg("all_sites"),
            py::arg("coupling_positions"),
            DOC(lasyten, Coupling, stretch_with_identities))
+      .def("elementary_decomposition",
+           &Coupling::elementary_decomposition,
+           DOC(lasyten, Coupling, elementary_decomposition))
       .def(
         "permute",
         [](

@@ -5,6 +5,7 @@
 #include <lasyten/symmetries/factors/fibonacci_anyon_category.h>
 #include <lasyten/symmetries/symmetry.h>
 #include <lasyten/tensors/constructors.h>
+#include <lasyten/tensors/mask.h>
 #include <lasyten/tensors/ops_algebra.h>
 #include <lasyten/tensors/planar.h>
 #include <lasyten/tools.h>
@@ -713,6 +714,74 @@ Coupling::stretch_with_identities(std::vector<Site::Ptr> const& all_sites,
         new_sites.push_back(all_sites[static_cast<std::size_t>(pos)]);
     }
     return Coupling(new_sites, new_factorization, name);
+}
+
+std::vector<Coupling>
+Coupling::elementary_decomposition() const
+{
+    std::size_t const n = factorization.size();
+    // Projections of bond b (between tensors b and b+1) onto its k-th sector, as seen from the
+    // wR leg of tensor b (masks_R) and from the wL leg of tensor b + 1 (masks_L). These legs are
+    // dual to each other, but share the basis order, so the same indices select the sector.
+    std::vector<std::vector<MaskPtr>> masks_R;
+    std::vector<std::vector<MaskPtr>> masks_L;
+    for (std::size_t b = 0; b + 1 < n; ++b) {
+        auto leg_R = std::dynamic_pointer_cast<ElementarySpace>(factorization[b]->get_leg("wR"));
+        auto leg_L =
+          std::dynamic_pointer_cast<ElementarySpace>(factorization[b + 1]->get_leg("wL"));
+        if (!leg_R || !leg_L) {
+            throw std::runtime_error("virtual legs must be ElementarySpaces");
+        }
+        auto const& leg = leg_L;
+        std::map<Sector, std::vector<int64>> indices_of_sector;
+        auto const basis_sectors = leg->sectors_of_basis();
+        for (std::size_t i = 0; i < basis_sectors.size(); ++i) {
+            indices_of_sector[basis_sectors[i]].push_back(static_cast<int64>(i));
+        }
+        auto& bond_masks_R = masks_R.emplace_back();
+        auto& bond_masks_L = masks_L.emplace_back();
+        for (auto const& [sector, inds] : indices_of_sector) {
+            bond_masks_R.push_back(
+              Mask::from_indices(py::cast(inds), leg_R, factorization[b]->backend));
+            bond_masks_L.push_back(
+              Mask::from_indices(py::cast(inds), leg_L, factorization[b]->backend));
+        }
+    }
+
+    std::vector<Coupling> result;
+    std::vector<std::size_t> choice(masks_R.size(), 0);
+    for (auto const& bond_masks : masks_R) {
+        if (bond_masks.empty()) {
+            return result;
+        }
+    }
+    while (true) {
+        std::vector<SymmetricTensorPtr> tensors;
+        bool vanishes = false;
+        for (std::size_t i = 0; i < n && !vanishes; ++i) {
+            TensorPtr W = factorization[i];
+            if (i > 0) {
+                W = apply_mask(W, masks_L[i - 1][choice[i - 1]], "wL");
+            }
+            if (i + 1 < n) {
+                W = apply_mask(W, masks_R[i][choice[i]], "wR");
+            }
+            vanishes = norm(TensorCPtr{ W }).as_float64() == 0.;
+            tensors.push_back(as_symmetric(W));
+        }
+        if (!vanishes) {
+            result.emplace_back(sites, std::move(tensors), name);
+        }
+        // advance the odometer over the sectors of all bonds
+        std::size_t b = 0;
+        while (b < choice.size() && ++choice[b] == masks_R[b].size()) {
+            choice[b++] = 0;
+        }
+        if (b == choice.size()) {
+            break;
+        }
+    }
+    return result;
 }
 
 Coupling

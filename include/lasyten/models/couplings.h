@@ -121,6 +121,15 @@ class Coupling
       std::vector<Site::Ptr> const& all_sites,
       std::vector<int64> const& coupling_positions) const;
 
+    /// Decompose into a sum of "elementary" couplings.
+    ///
+    /// A coupling is elementary if all of its virtual legs (``wL``, ``wR``) have a single
+    /// sector (``num_sectors == 1``). The decomposition is obtained by projecting every virtual
+    /// bond onto each of its sectors. Terms that vanish identically are omitted.
+    ///
+    /// @returns Couplings on the same sites (and with the same name) whose sum is this coupling.
+    [[nodiscard]] std::vector<Coupling> elementary_decomposition() const;
+
     /// Permute the sites of this coupling, braiding through the (possibly anyonic) legs.
     ///
     /// Realizes `permutation` as a sequence of elementary adjacent-site transpositions and

@@ -1013,6 +1013,25 @@ def _random_hermitian_coupling(sites, seed):
     return couplings.Coupling.from_dense_block(mat.reshape(shape), sites, name='random', understood_braiding=True)
 
 
+def test_elementary_decomposition(any_backend):
+    # small spins keep the number of sector combinations (and dense conversions) low
+    site_list = [s for s in generate_spin_dofs(any_backend) if isinstance(s, sites.SpinSite) and s.S <= 1]
+    for site in site_list:
+        coupling = couplings.chiral_3spin_coupling([site, site, site], chi=0.7)
+        terms = coupling.elementary_decomposition()
+        assert len(terms) >= 1
+        total = None
+        for term in terms:
+            term.test_sanity()
+            assert term.sites == coupling.sites
+            for W in term.factorization:
+                assert W.get_leg_co_domain('wL').num_sectors == 1
+                assert W.get_leg_co_domain('wR').num_sectors == 1
+            arr = term.to_numpy(understood_braiding=True)
+            total = arr if total is None else total + arr
+        npt.assert_allclose(total, coupling.to_numpy(understood_braiding=True), atol=1e-12)
+
+
 def test_coupling_permute():
     """Coupling.permute should reorder the sites/operator like conjugating by a basis
     permutation, cache repeated requests, and correctly track `_levels`."""
