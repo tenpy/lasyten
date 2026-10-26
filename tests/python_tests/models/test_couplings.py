@@ -883,6 +883,24 @@ def test_identity_tensor_site():
     tensor_s1.test_sanity()
 
 
+def test_get_onsite_W_block():
+    site = SpinSite(S=0.5, conserve='Sz')
+    coupling = heisenberg_coupling([site, site])
+    w = coupling.factorization[0].get_leg_co_domain('wR')
+
+    for overbraid in [True, False]:
+        ident = site.get_onsite_W_block('Id', w, overbraid=overbraid)
+        expect = site.identity_tensor(w, overbraid=overbraid)
+        assert ident.labels == ['wL', 'p', 'wR', 'p*']
+        assert abs(ident.to_numpy() - expect.to_numpy()).max() < 1e-14
+
+    block = site.get_onsite_W_block('Sz', w, wL_label='a', wR_label='b')
+    assert block.labels == ['a', 'p', 'b', 'p*']
+    assert block.get_leg_co_domain('a') == w
+    assert block.get_leg_co_domain('b') == w
+    block.test_sanity()
+
+
 def test_stretch_with_identities():
     # stretch_with_identities(all_sites, coupling_positions) places this coupling's own tensors
     # at `coupling_positions` within `all_sites`, filling any gaps with identities on whatever

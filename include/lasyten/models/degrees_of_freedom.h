@@ -126,6 +126,34 @@ class Site : public virtual std::enable_shared_from_this<Site>
     /// @returns Identity tensor with legs ``[wL, p, wR, p*]``.
     [[nodiscard]] SymmetricTensorPtr identity_tensor(ElementarySpace::Ptr w,
                                                      bool overbraid = true);
+    /// Build an MPO tensor that applies an on-site operator and acts as identity on a virtual leg.
+    ///
+    /// The result is ``outer(op, id_w)`` with ``op = get_op(opname)`` (legs ``p, p*``) and
+    /// ``id_w`` the identity on the virtual leg ``w`` (legs ``w, w*``), with the legs then
+    /// permuted to the order ``[wL, p, wR, p*]``. Compared to `identity_tensor`, the identity on
+    /// the physical leg is replaced by the operator.
+    ///
+    /// Braiding: in ``outer(op, id_w)`` the codomain is ``[p, w]``. Moving the virtual leg ``w``
+    /// to the left of ``p`` means that the virtual line and the operator's physical line cross.
+    /// This is only relevant for symmetries with non-symmetric braids (anyons).
+    /// - ``overbraid=True``: the *virtual* line passes **over** the physical line, i.e. the
+    ///   virtual leg is in front of the operator. This is ``bend_right=False`` in `permute_legs`.
+    /// - ``overbraid=False``: the virtual line passes **under** the physical line, i.e. the
+    ///   operator is in front of the virtual leg (``bend_right=True``).
+    /// The same convention as in `identity_tensor` is used.
+    ///
+    /// @param opname Name of the operator, translated with `get_op`.
+    /// @param w Virtual leg for the `wL` and `wR` legs (they are the same).
+    /// @param overbraid If the virtual leg passes over (``True``, default) or under (``False``)
+    /// the physical legs, see above.
+    /// @param wL_label Label of the left virtual leg of the result.
+    /// @param wR_label Label of the right virtual leg of the result.
+    /// @returns Tensor with legs ``[wL, p, wR, p*]`` (using the given virtual labels).
+    [[nodiscard]] SymmetricTensorPtr get_onsite_W_block(std::string const& opname,
+                                                        ElementarySpace::Ptr w,
+                                                        bool overbraid = true,
+                                                        std::string const& wL_label = "wL",
+                                                        std::string const& wR_label = "wR");
     /// The index of a basis state.
     [[nodiscard]] int64 state_index(py::object label) const;
     /// The indices of multiple basis states

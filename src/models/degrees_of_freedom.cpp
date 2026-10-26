@@ -496,6 +496,26 @@ Site::identity_tensor(ElementarySpace::Ptr w, bool overbraid)
     return std::dynamic_pointer_cast<SymmetricTensor>(permuted);
 }
 
+SymmetricTensorPtr
+Site::get_onsite_W_block(std::string const& opname,
+                         ElementarySpace::Ptr w,
+                         bool overbraid,
+                         std::string const& wL_label,
+                         std::string const& wR_label)
+{
+    auto op = std::const_pointer_cast<Tensor>(TensorCPtr{ get_op(opname) })->as_SymmetricTensor();
+    auto id_w = SymmetricTensor::from_eye(
+      product_of_legs(std::vector<Leg::Ptr>{ std::move(w) }), backend, OptionalLabels{ "w" });
+    auto tensor = outer(op, id_w);
+    auto permuted = permute_legs(tensor,
+                                 std::vector<LegRef>{ "w", "p" },
+                                 std::vector<LegRef>{ "p*", "w*" },
+                                 std::nullopt,
+                                 !overbraid);
+    permuted->relabel({ { "w", wL_label }, { "w*", wR_label } });
+    return std::dynamic_pointer_cast<SymmetricTensor>(permuted);
+}
+
 int64
 Site::state_index(py::object label) const
 {

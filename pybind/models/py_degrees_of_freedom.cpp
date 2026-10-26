@@ -103,6 +103,14 @@ bind_models_degrees_of_freedom(py::module_& m)
            py::arg("w"),
            py::arg("overbraid") = true,
            DOC(lasyten, Site, identity_tensor))
+      .def("get_onsite_W_block",
+           &Site::get_onsite_W_block,
+           py::arg("opname"),
+           py::arg("w"),
+           py::arg("overbraid") = true,
+           py::arg("wL_label") = "wL",
+           py::arg("wR_label") = "wR",
+           DOC(lasyten, Site, get_onsite_W_block))
       .def("state_index", &Site::state_index, py::arg("label"), DOC(lasyten, Site, state_index))
       .def("state_indices",
            &Site::state_indices,
