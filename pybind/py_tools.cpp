@@ -68,6 +68,24 @@ bind_tools(py::module_& m)
       "Statistics of the memo of the number of fusion trees (``fusion_trees.size``).");
     m.def("clear_tree_size_cache", &clear_tree_size_cache, "Remove all entries of the size memo.");
 
+    m.def(
+      "packed_symbol_info",
+      [] {
+          auto const s = packed_file_stats();
+          py::dict d;
+          d["files"] = s.files;
+          d["index_bytes"] = s.index_bytes;
+          d["data_bytes_in_ram"] = s.data_bytes_in_ram;
+          return d;
+      },
+      "Memory held by open SU(N) symbol files in the packed layout (files, index_bytes, "
+      "data_bytes_in_ram); not part of the symbol cache budget.");
+    m.def("_set_packed_data_in_ram_max_bytes",
+          &set_packed_data_in_ram_max_bytes,
+          py::arg("max_bytes"),
+          "Test hook: block data of packed files up to this size is held in RAM; returns the old "
+          "value.");
+
     m.def("permutation_as_swaps",
           &lasyten::permutation_as_swaps,
           py::arg("permutation"),

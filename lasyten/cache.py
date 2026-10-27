@@ -18,6 +18,7 @@ from ._core import (
     clear_symbol_cache,
     clear_tree_plan_cache,
     clear_tree_size_cache,
+    packed_symbol_info,
     symbol_cache_info,
     tree_plan_cache_info,
     tree_size_cache_info,
@@ -35,12 +36,16 @@ def cache_info() -> dict[str, dict[str, int]]:
         Keys ``'symbols'``, ``'tree_plans'`` and ``'tree_sizes'``; each maps to a dict with the
         entries ``hits``, ``misses``, ``evictions``, ``rejected`` (insertions that were not cached),
         ``entries``, ``bytes`` (estimated size of the stored entries) and ``capacity_bytes``.
+        The key ``'packed_files'`` maps to the memory held by open SU(N) symbol files in the packed
+        layout, which is not part of the symbol cache budget: ``files``, ``index_bytes`` and
+        ``data_bytes_in_ram``.
 
     """
     return {
         'symbols': symbol_cache_info(),
         'tree_plans': tree_plan_cache_info(),
         'tree_sizes': tree_size_cache_info(),
+        'packed_files': packed_symbol_info(),
     }
 
 

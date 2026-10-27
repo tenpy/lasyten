@@ -50,6 +50,10 @@ std::string su_n_data_file_path(int N,
 /// Clebsch-Gordan coefficients and F/R symbols need to be calculated with the
 /// clebsch_gordan_coefficients package and exported as HDF5 files.
 ///
+/// The F and R files may be in the folder layout (one dataset per key) or in the packed layout
+/// (root attribute ``Layout = "packed_v1"``, the keys and blocks stored in four arrays); the
+/// layout is detected for each file and does not change the results.
+///
 /// Construct from filenames (or via :func:`from_config`, which resolves standard paths)::
 ///
 ///     SUN(N, cg_path, f_path, r_path, descriptive_name=None)

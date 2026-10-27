@@ -6,6 +6,8 @@
 #include <lasyten/symmetries/fusion_symbol.h>
 #include <lasyten/tools/lru_cache.h>
 
+#include "sun_packed.h"
+
 #include <hdf5_io/h5_ops.h>
 
 #include <algorithm>
@@ -458,6 +460,9 @@ struct SunState
     std::atomic<int64> h_f{ -1 };
     std::atomic<int64> h_r{ -1 };
     bool legacy_f_file = true;
+    // F / R file in the packed layout (null: folder layout)
+    std::shared_ptr<sun_packed::PackedIndex const> f_packed;
+    std::shared_ptr<sun_packed::PackedIndex const> r_packed;
 };
 
 /// Check the group ``F_sym`` / ``R_sym`` of a symbol file in a single pass over its keys: there is
@@ -646,8 +651,21 @@ SUN::SUN(int N_,
         throw std::invalid_argument("Files must contain data for same N!");
     }
     sanity_check_hdf5(*CGfile_);
-    sanity_check_hdf5(*Ffile_);
-    sanity_check_hdf5(*Rfile_);
+    // F and R files are in the folder layout (one dataset per key) or in the packed layout
+    std::shared_ptr<sun_packed::PackedIndex const> f_packed;
+    std::shared_ptr<sun_packed::PackedIndex const> r_packed;
+    if (sun_packed::is_packed_layout(*Ffile_, Fpath)) {
+        f_packed = sun_packed::PackedIndex::load(Ffile_, Fpath, 'F', N);
+        f_packed->check(file_attr_int64(*Ffile_, "Highest_Weight"));
+    } else {
+        sanity_check_hdf5(*Ffile_);
+    }
+    if (sun_packed::is_packed_layout(*Rfile_, Rpath)) {
+        r_packed = sun_packed::PackedIndex::load(Rfile_, Rpath, 'R', N);
+        r_packed->check(file_attr_int64(*Rfile_, "Highest_Weight"));
+    } else {
+        sanity_check_hdf5(*Rfile_);
+    }
     // Files written by the same generator run carry the same 'CG_Run_Id'; F and R symbols only
     // fit to the CG coefficients they were computed from.
     {
@@ -671,6 +689,8 @@ SUN::SUN(int N_,
     auto state = std::make_shared<SunState>();
     state->id = next_id.fetch_add(1);
     state->legacy_f_file = H5Aexists(Ffile_->getId(), "Gauge_Version") <= 0;
+    state->f_packed = std::move(f_packed);
+    state->r_packed = std::move(r_packed);
     state_ = state;
 }
 
@@ -1029,7 +1049,11 @@ SUN::_f_symbol(Sector a, Sector b, Sector c, Sector d, Sector e, Sector f) const
               key += sector_bracket(s);
           }
           auto root = f_root();
-          if (hdf5_io::h5_contains(root, std::string("F_sym/") + key)) {
+          if (state.f_packed) {
+              if (auto const i = state.f_packed->find(std::array<Sector, 6>{ a, b, c, d, e, f })) {
+                  return SymbolValue{ state.f_packed->read(*i) };
+              }
+          } else if (hdf5_io::h5_contains(root, std::string("F_sym/") + key)) {
               hid_t fsym = hdf5_io::h5_open(root, "F_sym");
               hid_t dset = hdf5_io::h5_open(fsym, key);
               auto buf = hdf5_io::h5_read_buffer(dset);
@@ -1102,7 +1126,11 @@ SUN::_r_symbol(Sector a, Sector b, Sector c) const
             key += sector_bracket(s);
         }
         auto root = r_root();
-        if (hdf5_io::h5_contains(root, std::string("R_sym/") + key)) {
+        if (state.r_packed) {
+            if (auto const i = state.r_packed->find(std::array<Sector, 3>{ a, b, c })) {
+                return SymbolValue{ state.r_packed->read(*i) };
+            }
+        } else if (hdf5_io::h5_contains(root, std::string("R_sym/") + key)) {
             hid_t rsym = hdf5_io::h5_open(root, "R_sym");
             hid_t dset = hdf5_io::h5_open(rsym, key);
             auto buf = hdf5_io::h5_read_buffer(dset);
@@ -1169,6 +1197,14 @@ SUN::sanity_check_hdf5(HighFive::File const& file) const
     auto H = file_attr_int64(f, "Highest_Weight");
     auto Nattr = file_attr_int64(f, "N");
     auto root = file_root(f);
+    if (sun_packed::is_packed_layout(f, f.getName())) {
+        // symbol file in the packed layout: check its index (the data is not needed)
+        char const kind = hdf5_io::h5_contains(root, "F_packed") ? 'F' : 'R';
+        std::shared_ptr<HighFive::File> borrowed(&f, [](HighFive::File*) {});
+        sun_packed::PackedIndex::load(borrowed, f.getName(), kind, static_cast<int>(Nattr), false)
+          ->check(H);
+        return;
+    }
     auto keys0 = hdf5_io::h5_link_names(root.getId());
     if (keys0.empty()) {
         throw std::invalid_argument("SUN sanity_check_hdf5: empty HDF5 file");

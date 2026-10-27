@@ -177,6 +177,25 @@ CacheStats symbol_cache_stats();
 /// Remove all entries of the SU(N) symbol cache.
 void clear_symbol_cache();
 
+/// Memory held by open SU(N) symbol files in the packed layout (see ``SUN``): the index of every
+/// file and, for small files, its block data. This memory is *not* part of the symbol cache
+/// budget.
+struct PackedFileStats
+{
+    /// Number of open packed F / R files.
+    std::uint64_t files = 0;
+    /// Bytes of the indices (labels, shapes, offsets) held in RAM.
+    std::uint64_t index_bytes = 0;
+    /// Bytes of block data held in RAM.
+    std::uint64_t data_bytes_in_ram = 0;
+};
+
+PackedFileStats packed_file_stats();
+
+/// Test hook: the block data of a packed file is held in RAM if it is not larger than this many
+/// bytes (default 256 MB; checked when the file is opened). Returns the previous value.
+std::size_t set_packed_data_in_ram_max_bytes(std::size_t max_bytes);
+
 /// Statistics of the cache for fusion-tree mappings ("tree plans"). Budget:
 /// ``tree_plan_cache_mb``.
 CacheStats tree_plan_cache_stats();
