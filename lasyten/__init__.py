@@ -13,6 +13,7 @@ get_config()  # initialize config
 
 # note: order matters!
 from . import (
+    cache,
     config,
     tools,
     block_backends,
@@ -193,6 +194,7 @@ __all__ = [
     'backends',
     'bend_legs',
     'block_backends',
+    'cache',
     'combine_legs',
     'combine_to_matrix',
     'complex_conj',

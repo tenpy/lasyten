@@ -169,6 +169,7 @@ class SUN : public Group
     std::shared_ptr<HighFive::File> CGfile_;
     std::shared_ptr<HighFive::File> Ffile_;
     std::shared_ptr<HighFive::File> Rfile_;
+    std::shared_ptr<void> state_; // per-object cache state, defined in sun.cpp (SunState)
 
     HighFive::Group cg_root() const;
     HighFive::Group f_root() const;

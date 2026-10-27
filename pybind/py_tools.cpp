@@ -1,4 +1,5 @@
 #include <lasyten/tools.h>
+#include <lasyten/tools/lru_cache.h>
 
 #include "doc_plus.h"
 #include "docstrings/tools.h"
@@ -37,6 +38,25 @@ bind_tools(py::module_& m)
           py::arg("idx"),
           py::arg("length"),
           "Convert to a valid non-negative index into the given length.");
+
+    auto stats_dict = [](CacheStats const& s) {
+        py::dict d;
+        d["hits"] = s.hits;
+        d["misses"] = s.misses;
+        d["evictions"] = s.evictions;
+        d["rejected"] = s.rejected;
+        d["entries"] = s.entries;
+        d["bytes"] = s.bytes;
+        d["capacity_bytes"] = s.capacity_bytes;
+        return d;
+    };
+    m.def(
+      "symbol_cache_info",
+      [stats_dict] { return stats_dict(symbol_cache_stats()); },
+      "Statistics (hits, misses, evictions, rejected, entries, bytes, capacity_bytes) of the "
+      "RAM cache for SU(N) F symbols, R symbols and fusion outcomes.");
+    m.def(
+      "clear_symbol_cache", &clear_symbol_cache, "Remove all entries of the SU(N) symbol cache.");
 
     m.def("permutation_as_swaps",
           &lasyten::permutation_as_swaps,
