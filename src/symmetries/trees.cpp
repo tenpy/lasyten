@@ -1,9 +1,11 @@
 #include <lasyten/symmetries/trees.h>
 
 #include <lasyten/block_backend/numpy.h>
+#include <lasyten/config.h>
 #include <lasyten/symmetries/exceptions.h>
 #include <lasyten/symmetries/fusion_symbol.h>
 #include <lasyten/tools.h>
+#include <lasyten/tools/lru_cache.h>
 
 #include <algorithm>
 #include <cassert>
@@ -15,6 +17,7 @@
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -1633,11 +1636,70 @@ fusion_trees::all_trees() const
     return out;
 }
 
+namespace {
+
+/// Memo of ``fusion_trees::size``: the number of trees depends only on the symmetry, the uncoupled
+/// sectors and the coupled sector. The computation recurses over all fusion outcomes of the first
+/// two legs, so it is called very often with few distinct arguments. The weak pointer guards
+/// against a symmetry object that was destroyed and whose address was reused.
+struct TreeSizeEntry
+{
+    std::weak_ptr<Symmetry> symmetry;
+    std::size_t size = 0;
+};
+using TreeSizeCache = ByteLRU<std::string, TreeSizeEntry>;
+
+TreeSizeCache&
+tree_size_cache()
+{
+    static TreeSizeCache cache(
+      [] {
+          // one eighth of the tree-plan budget
+          return static_cast<std::size_t>(get_config().tree_plan_cache_mb) *
+                 (std::size_t{ 1 } << 20) / 8;
+      },
+      [](std::string const& key, TreeSizeEntry const&) {
+          constexpr std::size_t node_overhead = 112; // list node + hash node + control block
+          return 2 * (sizeof(std::string) + key.capacity()) + sizeof(TreeSizeEntry) +
+                 node_overhead;
+      });
+    return cache;
+}
+
+void
+tree_size_key_put_sector(std::string& k, Sector const& s)
+{
+    k.push_back(static_cast<char>(s.len()));
+    for (std::size_t i = 0; i < s.len(); ++i) {
+        k.append(reinterpret_cast<char const*>(&s.q[i]), sizeof(int16_t));
+    }
+}
+
+} // namespace
+
+CacheStats
+tree_size_cache_stats()
+{
+    return tree_size_cache().stats();
+}
+
+void
+clear_tree_size_cache()
+{
+    tree_size_cache().clear();
+}
+
+std::size_t
+FusionTree::approx_bytes() const
+{
+    return sizeof(FusionTree) + uncoupled.capacity() * sizeof(Sector) +
+           inner_sectors.capacity() * sizeof(Sector) + are_dual.capacity() +
+           multiplicities.capacity() * sizeof(int64);
+}
+
 std::size_t
 fusion_trees::size() const
 {
-    // OPTIMIZE caching ?
-
     if (num_uncoupled == 0) {
         return coupled == symmetry->trivial_sector ? 1 : 0;
     }
@@ -1646,6 +1708,21 @@ fusion_trees::size() const
     }
     if (num_uncoupled == 2) {
         return static_cast<std::size_t>(symmetry->n_symbol(uncoupled[0], uncoupled[1], coupled));
+    }
+
+    std::string memo_key;
+    {
+        auto const* symmetry_address = symmetry.get();
+        memo_key.append(reinterpret_cast<char const*>(&symmetry_address),
+                        sizeof(symmetry_address));
+        for (std::size_t i = 0; i < num_uncoupled; ++i) {
+            tree_size_key_put_sector(memo_key, uncoupled[i]);
+        }
+        tree_size_key_put_sector(memo_key, coupled);
+        if (auto const hit = tree_size_cache().find(memo_key);
+            hit && hit->symmetry.lock() == symmetry) {
+            return hit->size;
+        }
     }
 
     Sector const a1 = uncoupled[0];
@@ -1661,6 +1738,7 @@ fusion_trees::size() const
         std::size_t const num_subtrees = fusion_trees(symmetry, rest_unc, coupled).size();
         count += static_cast<std::size_t>(symmetry->_n_symbol(a1, a2, b)) * num_subtrees;
     }
+    tree_size_cache().insert(std::move(memo_key), TreeSizeEntry{ symmetry, count });
     return count;
 }
 

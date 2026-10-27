@@ -57,6 +57,16 @@ bind_tools(py::module_& m)
       "RAM cache for SU(N) F symbols, R symbols and fusion outcomes.");
     m.def(
       "clear_symbol_cache", &clear_symbol_cache, "Remove all entries of the SU(N) symbol cache.");
+    m.def(
+      "tree_plan_cache_info",
+      [stats_dict] { return stats_dict(tree_plan_cache_stats()); },
+      "Statistics of the RAM cache for fusion-tree mappings ('tree plans').");
+    m.def("clear_tree_plan_cache", &clear_tree_plan_cache, "Remove all tree-plan cache entries.");
+    m.def(
+      "tree_size_cache_info",
+      [stats_dict] { return stats_dict(tree_size_cache_stats()); },
+      "Statistics of the memo of the number of fusion trees (``fusion_trees.size``).");
+    m.def("clear_tree_size_cache", &clear_tree_size_cache, "Remove all entries of the size memo.");
 
     m.def("permutation_as_swaps",
           &lasyten::permutation_as_swaps,

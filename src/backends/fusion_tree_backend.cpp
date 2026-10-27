@@ -10,6 +10,7 @@
 #include <lasyten/symmetries/sector_numpy.h>
 #include <lasyten/symmetries/trees.h>
 #include <lasyten/tools.h>
+#include <lasyten/tools/lru_cache.h>
 #include <lasyten/tools/warn.h>
 
 #include <algorithm>
@@ -25,8 +26,11 @@
 #include <set>
 #include <span>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
 #include <typeinfo>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <hdf5_io/constants.h>
@@ -681,6 +685,143 @@ FusionTreeBackend::almost_equal(TensorCPtr a, TensorCPtr b, float64 rtol, float6
     return ok;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Cache of tree mappings ("plans") built by `apply_instructions`.
+// The mapping depends only on the trees of the tensor -- the symmetry, sector lists and duality of
+// the flat legs of codomain and domain, the coupled sector of every used block -- and on the
+// instructions; it is applied to the data afterwards (`transform_tensor`, const). The key is made
+// of exactly these inputs, so a hit returns the mapping the uncached code would have built.
+// Least-recently-used entries are evicted when the estimated size exceeds ``tree_plan_cache_mb``.
+namespace {
+
+void
+plan_key_put(std::string& k, std::int64_t v)
+{
+    k.append(reinterpret_cast<char const*>(&v), sizeof(v));
+}
+
+void
+plan_key_put_sector(std::string& k, Sector const& s)
+{
+    k.push_back(static_cast<char>(s.len()));
+    for (std::size_t i = 0; i < s.len(); ++i) {
+        k.append(reinterpret_cast<char const*>(&s.q[i]), sizeof(int16_t));
+    }
+}
+
+void
+plan_key_put_product(std::string& k, TensorProduct::Ptr const& tp)
+{
+    auto const legs = tp->flat_legs();
+    plan_key_put(k, static_cast<std::int64_t>(legs.size()));
+    for (auto const& leg : legs) {
+        plan_key_put(k, leg->is_dual ? 1 : 0);
+        auto const space = leg->as_space();
+        plan_key_put(k, static_cast<std::int64_t>(space->sector_decomposition.size()));
+        for (Sector const& s : space->sector_decomposition) {
+            plan_key_put_sector(k, s);
+        }
+    }
+}
+
+std::string
+plan_key(std::vector<Instruction> const& instructions,
+         TensorProduct::Ptr const& codomain,
+         TensorProduct::Ptr const& domain,
+         BlockInds const& block_inds,
+         bool mixes_codomain_domain)
+{
+    std::string k;
+    auto const* symmetry_address = codomain->symmetry.get();
+    k.append(reinterpret_cast<char const*>(&symmetry_address), sizeof(symmetry_address));
+    plan_key_put(k, mixes_codomain_domain ? 1 : 2);
+    for (Instruction const& inst : instructions) {
+        std::visit(
+          [&](auto const& i) {
+              using T = std::decay_t<decltype(i)>;
+              if constexpr (std::is_same_v<T, BraidInstruction>) {
+                  plan_key_put(k, 0);
+                  plan_key_put(k, i.codomain ? 1 : 0);
+                  plan_key_put(k, i.idx);
+                  plan_key_put(k, i.overbraid ? 1 : 0);
+              } else if constexpr (std::is_same_v<T, BendInstruction>) {
+                  plan_key_put(k, 1);
+                  plan_key_put(k, i.bend_down ? 1 : 0);
+              } else {
+                  plan_key_put(k, 2);
+                  plan_key_put(k, i.codomain ? 1 : 0);
+                  plan_key_put(k, static_cast<std::int64_t>(i.idcs.size()));
+                  for (auto v : i.idcs) {
+                      plan_key_put(k, v);
+                  }
+                  plan_key_put(k, i.overtwist ? 1 : 0);
+              }
+          },
+          inst);
+    }
+    plan_key_put_product(k, codomain);
+    plan_key_put_product(k, domain);
+    plan_key_put(k, static_cast<std::int64_t>(block_inds.nrows()));
+    for (std::size_t r = 0; r < block_inds.nrows(); ++r) {
+        plan_key_put_sector(
+          k, codomain->sector_decomposition[static_cast<std::size_t>(block_inds(r, 0))]);
+    }
+    return k;
+}
+
+struct PlanEntry
+{
+    std::weak_ptr<Symmetry> symmetry;
+    std::shared_ptr<void const> mapping;
+    std::size_t bytes = 0;
+};
+using PlanCache = ByteLRU<std::string, PlanEntry>;
+
+PlanCache&
+plan_cache()
+{
+    static PlanCache cache(
+      [] {
+          return static_cast<std::size_t>(get_config().tree_plan_cache_mb) *
+                 (std::size_t{ 1 } << 20);
+      },
+      [](std::string const& key, PlanEntry const& entry) {
+          constexpr std::size_t node_overhead = 112; // list node + hash node + control block
+          return 2 * (sizeof(std::string) + key.capacity()) + sizeof(PlanEntry) + node_overhead +
+                 entry.bytes;
+      });
+    return cache;
+}
+
+/// The mapping for `key`: from the cache, or built by `make()` (returning a unique_ptr) and
+/// cached.
+template<class Mapping, class Make>
+std::shared_ptr<Mapping const>
+cached_plan(std::string const& key, Symmetry::Ptr const& symmetry, Make&& make)
+{
+    auto& cache = plan_cache();
+    if (auto const hit = cache.find(key); hit && hit->symmetry.lock() == symmetry) {
+        return std::static_pointer_cast<Mapping const>(hit->mapping);
+    }
+    std::shared_ptr<Mapping const> mapping(make());
+    cache.insert(key, PlanEntry{ symmetry, mapping, mapping->approx_bytes() });
+    return mapping;
+}
+
+} // namespace
+
+CacheStats
+tree_plan_cache_stats()
+{
+    return plan_cache().stats();
+}
+
+void
+clear_tree_plan_cache()
+{
+    plan_cache().clear();
+}
+
 TensorBackend::DataPtr
 FusionTreeBackend::apply_instructions(TensorCPtr tensor,
                                       py::object instructions,
@@ -695,10 +836,14 @@ FusionTreeBackend::apply_instructions(TensorCPtr tensor,
     auto domain = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
     auto instructions_vec = instructions_from_python(instructions);
 
+    auto const key =
+      plan_key(instructions_vec, codomain, domain, t_data->block_inds, mixes_codomain_domain);
     FusionTreeData::Ptr res;
     if (mixes_codomain_domain) {
-        auto mapping = TreePairMapping::from_instructions(
-          instructions_vec, codomain, domain, py::cast(t_data->block_inds));
+        auto mapping = cached_plan<TreePairMapping>(key, codomain->symmetry, [&] {
+            return TreePairMapping::from_instructions(
+              instructions_vec, codomain, domain, py::cast(t_data->block_inds));
+        });
         res = mapping->transform_tensor(*t_data,
                                         codomain,
                                         domain,
@@ -708,8 +853,10 @@ FusionTreeBackend::apply_instructions(TensorCPtr tensor,
                                         domain_idcs,
                                         block_backend);
     } else {
-        auto mapping = FactorizedTreeMapping::from_instructions(
-          instructions_vec, codomain, domain, py::cast(t_data->block_inds));
+        auto mapping = cached_plan<FactorizedTreeMapping>(key, codomain->symmetry, [&] {
+            return FactorizedTreeMapping::from_instructions(
+              instructions_vec, codomain, domain, py::cast(t_data->block_inds));
+        });
         res = mapping->transform_tensor(*t_data,
                                         codomain,
                                         domain,
