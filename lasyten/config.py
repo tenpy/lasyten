@@ -56,6 +56,21 @@ The following options are available::
     ------------------------------  -----------  ----------------------------------------------------------------------
     su_n_data_filename_base         (see below)  Stem of the SU(N) data file names.
     ------------------------------  -----------  ----------------------------------------------------------------------
+    su_n_symbol_cache_mb            256          Memory budget in MB of the RAM cache for SU(N) F symbols, R symbols
+                                                 and fusion outcomes (least-recently-used entries are evicted).
+                                                 ``0`` disables the cache. Read at insertion time.
+    ------------------------------  -----------  ----------------------------------------------------------------------
+    tree_plan_cache_mb              256          Memory budget in MB of the RAM cache for fusion-tree mappings and
+                                                 the ``fusion_trees`` size memo. ``0`` disables the caches.
+    ------------------------------  -----------  ----------------------------------------------------------------------
+    su2_cg_hweight                  0            Highest weight of the CG file of the production SU(2) symmetry
+                                                 (``conserve='SU2'``). ``0`` auto-detects the largest weight found
+                                                 in ``su_n_data_path``.
+    ------------------------------  -----------  ----------------------------------------------------------------------
+    su2_f_hweight                   0            Same for the F-symbol file.
+    ------------------------------  -----------  ----------------------------------------------------------------------
+    su2_r_hweight                   0            Same for the R-symbol file.
+    ------------------------------  -----------  ----------------------------------------------------------------------
     coupling_cutoff                 1e-13        Default singular-value cutoff when factorizing a Coupling
                                                  (``from_dense_block`` / ``from_tensor``).
     ==============================  ===========  ======================================================================

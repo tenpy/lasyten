@@ -59,6 +59,11 @@ bind_config(py::module_& m)
       .def_readonly("fusion_tree_eps", &LasytenConfig::fusion_tree_eps)
       .def_readonly("su_n_data_path", &LasytenConfig::su_n_data_path)
       .def_readonly("su_n_data_filename_base", &LasytenConfig::su_n_data_filename_base)
+      .def_readonly("su_n_symbol_cache_mb", &LasytenConfig::su_n_symbol_cache_mb)
+      .def_readonly("tree_plan_cache_mb", &LasytenConfig::tree_plan_cache_mb)
+      .def_readonly("su2_cg_hweight", &LasytenConfig::su2_cg_hweight)
+      .def_readonly("su2_f_hweight", &LasytenConfig::su2_f_hweight)
+      .def_readonly("su2_r_hweight", &LasytenConfig::su2_r_hweight)
       .def_readonly("coupling_cutoff", &LasytenConfig::coupling_cutoff)
       .def_static("all_option_keys",
                   &LasytenConfig::all_option_keys,

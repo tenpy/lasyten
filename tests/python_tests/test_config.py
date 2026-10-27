@@ -168,3 +168,42 @@ def test_su_n_data_file_path():
     assert su_n_data_file_path(3, 'CG', 7, path='/a/b/') == '/a/b/su_n_clebsch_gordan_data_N3_CG_hweight7.hdf5'
     with temporary_options(su_n_data_path='/x', su_n_data_filename_base='b'):
         assert su_n_data_file_path(3, 'R', 4) == '/x/b_N3_R_hweight4.hdf5'
+
+
+def test_cache_option_defaults():
+    config = LasytenConfig()
+    assert config.get_option('su_n_symbol_cache_mb') == 256
+    assert config.get_option('tree_plan_cache_mb') == 256
+    for key in ('su2_cg_hweight', 'su2_f_hweight', 'su2_r_hweight'):
+        assert config.get_option(key) == 0  # 0 = detect from the data directory
+
+
+@pytest.mark.parametrize(
+    'key', ['su_n_symbol_cache_mb', 'tree_plan_cache_mb', 'su2_cg_hweight', 'su2_f_hweight', 'su2_r_hweight']
+)
+def test_cache_option_validation(key):
+    config = LasytenConfig()
+    config.set_option(key, 0)
+    config.set_option(key, 64)
+    assert config.get_option(key) == 64
+    config.set_option(key, '128')  # envvars and YAML files give strings
+    assert config.get_option(key) == 128
+    with pytest.raises(ValueError):
+        config.set_option(key, -1)
+
+
+def test_cache_option_env_override(monkeypatch):
+    with monkeypatch.context() as m:
+        m.setenv('LASYTEN_SU_N_SYMBOL_CACHE_MB', '17')
+        m.setenv('LASYTEN_TREE_PLAN_CACHE_MB', '0')
+        restore_defaults()
+        assert get_option('su_n_symbol_cache_mb') == 17
+        assert get_option('tree_plan_cache_mb') == 0
+    restore_defaults()
+    assert get_option('su_n_symbol_cache_mb') == 256
+
+
+def test_cache_option_temporary():
+    with temporary_options(su_n_symbol_cache_mb=3):
+        assert get_option('su_n_symbol_cache_mb') == 3
+    assert get_option('su_n_symbol_cache_mb') == 256

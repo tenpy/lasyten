@@ -219,6 +219,11 @@ LasytenConfig::all_option_keys()
         "fusion_tree_eps",
         "su_n_data_path",
         "su_n_data_filename_base",
+        "su_n_symbol_cache_mb",
+        "tree_plan_cache_mb",
+        "su2_cg_hweight",
+        "su2_f_hweight",
+        "su2_r_hweight",
         "coupling_cutoff",
     };
     return keys;
@@ -245,6 +250,21 @@ LasytenConfig::set_option(const std::string& key, int64 value)
     } else if (key == "maxlines_tensors") {
         check_min(value, 0, key);
         maxlines_tensors = value;
+    } else if (key == "su_n_symbol_cache_mb") {
+        check_min(value, 0, key);
+        su_n_symbol_cache_mb = value;
+    } else if (key == "tree_plan_cache_mb") {
+        check_min(value, 0, key);
+        tree_plan_cache_mb = value;
+    } else if (key == "su2_cg_hweight") {
+        check_min(value, 0, key);
+        su2_cg_hweight = value;
+    } else if (key == "su2_f_hweight") {
+        check_min(value, 0, key);
+        su2_f_hweight = value;
+    } else if (key == "su2_r_hweight") {
+        check_min(value, 0, key);
+        su2_r_hweight = value;
     } else if (key == "fusion_tree_eps" || key == "coupling_cutoff") {
         set_option(key, static_cast<float64>(value));
     } else if (std::ranges::contains(all_option_keys(), key)) {
@@ -288,7 +308,9 @@ void
 LasytenConfig::set_option(const std::string& key, const std::string& value)
 {
     if (key == "print_linewidth" || key == "print_indent" || key == "maxlines_spaces" ||
-        key == "maxlines_tensors") {
+        key == "maxlines_tensors" || key == "su_n_symbol_cache_mb" ||
+        key == "tree_plan_cache_mb" || key == "su2_cg_hweight" || key == "su2_f_hweight" ||
+        key == "su2_r_hweight") {
         set_option(key, parse_int64(value));
     } else if (key == "check_fusion" || key == "implicit_scalar_conversion") {
         set_option(key, coerce_bool(value));
@@ -471,6 +493,16 @@ LasytenConfig::get_option(const std::string& key) const
         return py::cast(su_n_data_path);
     if (key == "su_n_data_filename_base")
         return py::cast(su_n_data_filename_base);
+    if (key == "su_n_symbol_cache_mb")
+        return py::cast(su_n_symbol_cache_mb);
+    if (key == "tree_plan_cache_mb")
+        return py::cast(tree_plan_cache_mb);
+    if (key == "su2_cg_hweight")
+        return py::cast(su2_cg_hweight);
+    if (key == "su2_f_hweight")
+        return py::cast(su2_f_hweight);
+    if (key == "su2_r_hweight")
+        return py::cast(su2_r_hweight);
     if (key == "coupling_cutoff")
         return py::cast(coupling_cutoff);
     throw py::key_error("Invalid option name: " + key);
@@ -513,6 +545,11 @@ LasytenConfig::save_hdf5(lasyten::hdf5::Saver& saver,
     saver.save_float64(subpath + "fusion_tree_eps", fusion_tree_eps);
     saver.save_string(subpath + "su_n_data_path", su_n_data_path);
     saver.save_string(subpath + "su_n_data_filename_base", su_n_data_filename_base);
+    saver.save_int64(subpath + "su_n_symbol_cache_mb", su_n_symbol_cache_mb);
+    saver.save_int64(subpath + "tree_plan_cache_mb", tree_plan_cache_mb);
+    saver.save_int64(subpath + "su2_cg_hweight", su2_cg_hweight);
+    saver.save_int64(subpath + "su2_f_hweight", su2_f_hweight);
+    saver.save_int64(subpath + "su2_r_hweight", su2_r_hweight);
     saver.save_float64(subpath + "coupling_cutoff", coupling_cutoff);
 }
 
@@ -544,6 +581,13 @@ LasytenConfig::from_hdf5(lasyten::hdf5::Loader& loader,
     load_opt("su_n_data_path", [&](hid_t id) { obj.su_n_data_path = loader.load_string(id); });
     load_opt("su_n_data_filename_base",
              [&](hid_t id) { obj.su_n_data_filename_base = loader.load_string(id); });
+    load_opt("su_n_symbol_cache_mb",
+             [&](hid_t id) { obj.su_n_symbol_cache_mb = loader.load_int64(id); });
+    load_opt("tree_plan_cache_mb",
+             [&](hid_t id) { obj.tree_plan_cache_mb = loader.load_int64(id); });
+    load_opt("su2_cg_hweight", [&](hid_t id) { obj.su2_cg_hweight = loader.load_int64(id); });
+    load_opt("su2_f_hweight", [&](hid_t id) { obj.su2_f_hweight = loader.load_int64(id); });
+    load_opt("su2_r_hweight", [&](hid_t id) { obj.su2_r_hweight = loader.load_int64(id); });
     load_opt("coupling_cutoff", [&](hid_t id) { obj.coupling_cutoff = loader.load_float64(id); });
     (void)h5gr;
     return obj;

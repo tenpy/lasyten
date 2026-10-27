@@ -20,6 +20,7 @@ set (TestsToRun
   test_sector.cpp
   test_sector_casters.cpp
   test_block_inds.cpp
+  test_lru_cache.cpp
 )
 
 create_test_sourcelist(Tests CommonCppTests.cpp ${TestsToRun})

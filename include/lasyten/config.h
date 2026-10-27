@@ -49,6 +49,20 @@ class LasytenConfig
     /// Stem of the SU(N) data file names. The full name is
     /// ``<base>_N{N}_{CG|F|R}_hweight{H}.hdf5``.
     std::string su_n_data_filename_base = "su_n_clebsch_gordan_data";
+    /// Memory budget in MB of the RAM cache for SU(N) F symbols, R symbols and fusion outcomes
+    /// (least-recently-used entries are evicted when the estimated size exceeds it).
+    /// ``0`` disables the cache. The value is read whenever an entry is inserted, so it can be
+    /// changed at runtime (e.g. with ``temporary_options``).
+    int64 su_n_symbol_cache_mb = 256;
+    /// Memory budget in MB of the RAM cache for fusion-tree mappings ("tree plans") and the
+    /// ``fusion_trees::size`` memo. ``0`` disables the caches. Read at insertion time.
+    int64 tree_plan_cache_mb = 256;
+    /// Highest weight of the Clebsch-Gordan / F / R files of the production SU(2) symmetry
+    /// (``conserve='SU2'``). ``0`` (default) auto-detects the largest weight available in
+    /// ``su_n_data_path``; a positive value pins it.
+    int64 su2_cg_hweight = 0;
+    int64 su2_f_hweight = 0;
+    int64 su2_r_hweight = 0;
     /// Default singular-value cutoff when factorizing a `Coupling` (`from_dense_block` /
     /// `from_tensor`). Singular values below this threshold are discarded.
     float64 coupling_cutoff = 1.0e-13;
