@@ -50,6 +50,8 @@ inline AllSpeciesTag const ALL_SPECIES{};
 ///     on what symmetry is enforced. Operators that are symmetric under a small symmetry may
 ///     not be symmetric under a larger symmetry, and are thus not available as `onsite_operators`.
 ///     Each must have the `leg` of the site as the only factor in its domain and codomain.
+/// hc_ops : {str: str}
+///     Mapping from each known onsite operator name to the name of its hermitian conjugate.
 ///
 /// TODO put some
 class Site : public virtual std::enable_shared_from_this<Site>
@@ -63,6 +65,7 @@ class Site : public virtual std::enable_shared_from_this<Site>
     TensorBackend::Ptr backend;
     std::string default_device;
     std::map<std::string, SymmetricTensorPtr> onsite_operators;
+    std::map<std::string, std::string> hc_ops;
 
     Site(ElementarySpace::Ptr leg,
          std::map<std::string, int64> state_labels = {},
@@ -79,13 +82,24 @@ class Site : public virtual std::enable_shared_from_this<Site>
     [[nodiscard]] float64 dim() const;
 
     /// Add an operator to the `onsite_operators`.
+    ///
+    /// If `hc` is not specified, infer the hermitian-conjugate name by comparing this operator's
+    /// adjoint with onsite operators already registered on the site.
     void add_onsite_operator(std::string const& name,
                              py::object op,
                              std::optional<bool> is_diagonal = std::nullopt,
-                             bool understood_braiding = false);
+                             bool understood_braiding = false,
+                             std::optional<std::string> hc = std::nullopt);
 
     /// Whether `name` labels a valid onsite operator of this site.
     [[nodiscard]] bool valid_opname(std::string const& name) const;
+    /// Rename an onsite operator while preserving its hermitian-conjugate mapping.
+    void rename_op(std::string const& old_name, std::string const& new_name);
+    /// Return the name of the hermitian conjugate of an operator or operator product.
+    ///
+    /// For a product of onsite operator names separated by whitespace, reverse their order and
+    /// replace each name with its registered hermitian conjugate.
+    [[nodiscard]] std::string get_hc_op_name(std::string const& name) const;
     /// Return operator of given name.
     ///
     /// @param name The name of the operator to be returned. In case of multiple operator names

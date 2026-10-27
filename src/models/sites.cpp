@@ -956,11 +956,11 @@ SpinHalfFermionSite::SpinHalfFermionSite(Prepared&& prepared,
 
     if (!factor_is_su2(sym_S_factor)) {
         add_individual_occupation_ops();
-        if (auto node = onsite_operators.extract("N0")) {
-            onsite_operators["Nup"] = std::move(node.mapped());
+        if (onsite_operators.contains("N0")) {
+            rename_op("N0", "Nup");
         }
-        if (auto node = onsite_operators.extract("N1")) {
-            onsite_operators["Ndown"] = std::move(node.mapped());
+        if (onsite_operators.contains("N1")) {
+            rename_op("N1", "Ndown");
         }
     }
     add_total_occupation_ops();

@@ -70,10 +70,22 @@ def test_site(np_random, block_backend, symmetry_backend, use_sym):
     site.add_onsite_operator('op2', op2)
     assert site.onsite_operators['op2'] is op2
 
+    site.add_onsite_operator('silly_op_hc', lasyten.dagger(op1))
+    site.add_onsite_operator('op2_hc', lasyten.dagger(op2), hc='op2')
+    assert site.hc_ops['silly_op'] == 'silly_op_hc'
+    assert site.hc_ops['silly_op_hc'] == 'silly_op'
+    assert site.hc_ops['op2'] == 'op2_hc'
+    assert site.hc_ops['op2_hc'] == 'op2'
+    assert site.get_hc_op_name('silly_op op2') == 'op2_hc silly_op_hc'
+
     op3_dense = np.diag(np.arange(10, 10 + dim))
     site.add_onsite_operator('op3', op3_dense, is_diagonal=True)
     assert isinstance(site.onsite_operators['op3'], lasyten.DiagonalTensor)
     npt.assert_equal(site.onsite_operators['op3'].to_numpy(), op3_dense)
+    assert site.get_hc_op_name('op3') == 'op3'
+    with pytest.raises(ValueError, match='hermitian conjugate of operator unknown unknown'):
+        site.get_hc_op_name('unknown')
+    site.test_sanity()
 
     # test get_op and multiplication of operators
     # the correct order of multiplication is checked using the spin algebra in test_spin_site
@@ -82,6 +94,10 @@ def test_site(np_random, block_backend, symmetry_backend, use_sym):
     for ops in combinations:
         ops_name = site.multiply_op_names(ops)
         assert lasyten.almost_equal(site.multiply_operators(ops), site.get_op(ops_name))
+
+    site.rename_op('op3', 'op3_renamed')
+    assert site.get_hc_op_name('op3_renamed') == 'op3_renamed'
+    site.test_sanity()
 
     # if use_sym:
     #     leg2 = leg.drop_symmetry(1)
