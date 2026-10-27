@@ -60,6 +60,9 @@ def test_site(np_random, block_backend, symmetry_backend, use_sym):
     site = degrees_of_freedom.Site(leg, backend=backend, state_labels=labels)
     assert site.state_index('x10') == 0
     assert site.state_index('x17') == 7
+    site.test_op('Id')
+    with pytest.raises(ValueError, match='unknown operator name'):
+        site.test_op('unknown')
     assert set(site.onsite_operators.keys()) == set(('Id',))
     op1 = lasyten.SymmetricTensor.from_random_uniform([leg], [leg], backend=backend, labels=['p', 'p*'])
     site.add_onsite_operator('silly_op', op1)
@@ -166,6 +169,17 @@ def test_spin_site(any_backend, spin):
             if site.double_total_spin == 1:
                 expect_ops.update(Sigmax=False, Sigmay=False)
         check_operator_availability(site, expect_ops)
+
+        if conserve == 'SU(2)':
+            with pytest.raises(lasyten.SymmetryError, match='known but unavailable'):
+                site.test_op('Sz')
+        elif conserve != 'None':
+            with pytest.raises(lasyten.SymmetryError, match='known but unavailable'):
+                site.test_op('Sx')
+        else:
+            site.test_op('Sx Sy')
+        with pytest.raises(ValueError, match='unknown operator name'):
+            site.test_op('not_a_spin_operator')
 
         site_list.append(site)
     check_same_operators(site_list)
@@ -390,6 +404,17 @@ def test_spin_half_fermion_site(block_backend, np_random):
             expect_ops.update(dN=True, dNdN=True)
         check_operator_availability(site, expect_ops)
 
+        if conserve_S == 'SU(2)':
+            with pytest.raises(lasyten.SymmetryError, match='known but unavailable'):
+                site.test_op('Nup')
+        elif conserve_S != 'None':
+            with pytest.raises(lasyten.SymmetryError, match='known but unavailable'):
+                site.test_op('Sx')
+        else:
+            site.test_op('Sx')
+        with pytest.raises(ValueError, match='unknown operator name'):
+            site.test_op('not_a_spin_operator')
+
         site_list.append(site)
     check_same_operators(site_list)
 
@@ -426,6 +451,11 @@ def test_clock_site(any_backend, q):
         if conserve == 'None':
             expect_ops.update(X=False, Xhc=False, Xphc=False)
         check_operator_availability(site, expect_ops)
+        if conserve == 'None':
+            site.test_op('X')
+        else:
+            with pytest.raises(lasyten.SymmetryError, match='known but unavailable'):
+                site.test_op('X')
 
         site_list.append(site)
     check_same_operators(site_list)

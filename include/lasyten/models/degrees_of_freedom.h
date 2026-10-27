@@ -93,6 +93,11 @@ class Site : public virtual std::enable_shared_from_this<Site>
 
     /// Whether `name` labels a valid onsite operator of this site.
     [[nodiscard]] bool valid_opname(std::string const& name) const;
+    /// Validate an onsite operator name or whitespace-separated operator product.
+    ///
+    /// Raises `SymmetryError` for built-in operators unavailable under this site's symmetry and
+    /// `std::invalid_argument` for names that are not known to the site.
+    void test_op(std::string const& opname) const;
     /// Rename an onsite operator while preserving its hermitian-conjugate mapping.
     void rename_op(std::string const& old_name, std::string const& new_name);
     /// Return the name of the hermitian conjugate of an operator or operator product.

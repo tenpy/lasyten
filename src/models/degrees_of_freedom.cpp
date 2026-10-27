@@ -1,4 +1,5 @@
 #include <lasyten/models/degrees_of_freedom.h>
+#include <lasyten/models/sites.h>
 
 #include <lasyten/backends/backend_factory.h>
 #include <lasyten/symmetries/exceptions.h>
@@ -23,6 +24,7 @@
 #include <functional>
 #include <hdf5_io/constants.h>
 #include <hdf5_io/h5_ops.h>
+#include <initializer_list>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <numeric>
@@ -219,6 +221,48 @@ add_onsite_operators_from_map(Site& site,
     for (auto const& [name, op] : onsite_operators) {
         site.add_onsite_operator(name, py::cast(op));
     }
+}
+
+bool
+is_known_but_unavailable(Site const& site, std::string const& name)
+{
+    auto one_of = [&name](std::initializer_list<std::string_view> names) {
+        for (auto candidate : names) {
+            if (candidate == name) {
+                return true;
+            }
+        }
+        return false;
+    };
+    auto is_no_symmetry = [](std::optional<std::string> const& conserve) {
+        return !conserve.has_value() || *conserve == "None" || *conserve == "none";
+    };
+    auto is_su2 = [](std::optional<std::string> const& conserve) {
+        return conserve.has_value() &&
+               (*conserve == "SU(2)" || *conserve == "SU2" || *conserve == "Stot");
+    };
+
+    if (auto const* spin = dynamic_cast<SpinSite const*>(&site)) {
+        if (is_su2(spin->conserve) &&
+            (name == "Sz" || (spin->double_total_spin == 1 && name == "Sigmaz"))) {
+            return true;
+        }
+        return !is_no_symmetry(spin->conserve) &&
+               (one_of({ "Sx", "Sy", "Sp", "Sm" }) ||
+                (spin->double_total_spin == 1 && one_of({ "Sigmax", "Sigmay" })));
+    }
+    if (auto const* spin_fermion = dynamic_cast<SpinHalfFermionSite const*>(&site)) {
+        if (is_su2(spin_fermion->conserve_S) &&
+            one_of({ "Nup", "Ndown", "Sz", "Sigmaz" })) {
+            return true;
+        }
+        return !is_no_symmetry(spin_fermion->conserve_S) &&
+               one_of({ "Sx", "Sy", "Sp", "Sm", "Sigmax", "Sigmay" });
+    }
+    if (auto const* clock = dynamic_cast<ClockSite const*>(&site)) {
+        return !is_no_symmetry(clock->conserve) && one_of({ "X", "Xhc", "Xphc" });
+    }
+    return false;
 }
 
 } // namespace
@@ -445,6 +489,27 @@ bool
 Site::valid_opname(std::string const& name) const
 {
     return onsite_operators.contains(name);
+}
+
+void
+Site::test_op(std::string const& opname) const
+{
+    std::istringstream stream(opname);
+    bool found_name = false;
+    for (std::string name; stream >> name;) {
+        found_name = true;
+        if (valid_opname(name)) {
+            continue;
+        }
+        if (is_known_but_unavailable(*this, name)) {
+            throw SymmetryError(std::format(
+              "Operator '{}' is known but unavailable for the site's symmetry", name));
+        }
+        throw std::invalid_argument(std::format("unknown operator name: {}", name));
+    }
+    if (!found_name) {
+        throw std::invalid_argument("operator name must not be empty");
+    }
 }
 
 void

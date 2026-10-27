@@ -91,6 +91,10 @@ bind_models_degrees_of_freedom(py::module_& m)
            py::arg("hc") = py::none(),
            DOC(lasyten, Site, add_onsite_operator))
       .def("valid_opname", &Site::valid_opname, py::arg("name"), DOC(lasyten, Site, valid_opname))
+      .def("test_op",
+           &Site::test_op,
+           py::arg("opname"),
+           "Check that an onsite operator name is known and available under this site's symmetry.")
       .def("rename_op",
            &Site::rename_op,
            py::arg("old_name"),
