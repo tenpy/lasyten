@@ -303,7 +303,9 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
                  std::optional<OptionalLabels> labels,
                  std::optional<Dtype> dtype_opt,
                  std::optional<OptionalLabels> row_labels,
-                 std::optional<OptionalLabels> col_labels)
+                 std::optional<OptionalLabels> col_labels,
+                 std::optional<std::vector<ElementarySpace::Ptr>> row_summands,
+                 std::optional<std::vector<ElementarySpace::Ptr>> col_summands)
 {
     // --- hints from Python tensor_from_grid ---
     // check input
@@ -312,6 +314,26 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
     // find op from same row
     // for each sector in the direct sum, find which multiplicities come from which space
     // ---
+    auto n_rows = static_cast<int64>(grid.size());
+    int64 n_cols = n_rows > 0 ? static_cast<int64>(grid[0].size()) : 0;
+    for (auto const& row : grid) {
+        if (static_cast<int64>(row.size()) != n_cols) {
+            throw std::invalid_argument("grid rows must have equal length");
+        }
+    }
+    if (row_labels.has_value() && static_cast<int64>(row_labels->size()) != n_rows) {
+        throw std::invalid_argument("row_labels must have one entry per grid row");
+    }
+    if (col_labels.has_value() && static_cast<int64>(col_labels->size()) != n_cols) {
+        throw std::invalid_argument("col_labels must have one entry per grid column");
+    }
+    if (row_summands.has_value() && static_cast<int64>(row_summands->size()) != n_rows) {
+        throw std::invalid_argument("row_summands must have one entry per grid row");
+    }
+    if (col_summands.has_value() && static_cast<int64>(col_summands->size()) != n_cols) {
+        throw std::invalid_argument("col_summands must have one entry per grid column");
+    }
+
     std::vector<TensorCPtr> ops;
     for (auto const& row : grid) {
         for (auto const& op : row) {
@@ -367,74 +389,55 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
         }
     }
 
-    auto n_rows = static_cast<int64>(grid.size());
-    int64 n_cols = n_rows > 0 ? static_cast<int64>(grid[0].size()) : 0;
-    for (auto const& row : grid) {
-        if (static_cast<int64>(row.size()) != n_cols) {
-            throw std::invalid_argument("grid rows must have equal length");
+    std::vector<ElementarySpace::Ptr> left_spaces =
+      row_summands.value_or(std::vector<ElementarySpace::Ptr>(static_cast<std::size_t>(n_rows)));
+    for (int64 i = 0; i < n_rows; ++i) {
+        auto& row_space = left_spaces[static_cast<std::size_t>(i)];
+        if (row_summands.has_value() && !row_space) {
+            throw std::invalid_argument("row_summands must not contain null spaces");
         }
-    }
-    if (row_labels.has_value() && static_cast<int64>(row_labels->size()) != n_rows) {
-        throw std::invalid_argument("row_labels must have one entry per grid row");
-    }
-    if (col_labels.has_value() && static_cast<int64>(col_labels->size()) != n_cols) {
-        throw std::invalid_argument("col_labels must have one entry per grid column");
-    }
-
-    std::vector<TensorPtr> right_ops(static_cast<std::size_t>(n_cols));
-    if (n_rows > 0) {
-        right_ops = grid[0];
-    }
-    for (int64 i = 0; i < n_cols; ++i) {
-        if (right_ops[static_cast<std::size_t>(i)]) {
-            continue;
-        }
-        for (int64 r = 0; r < n_rows; ++r) {
-            auto const& new_op = grid[static_cast<std::size_t>(r)][static_cast<std::size_t>(i)];
-            if (!new_op) {
+        for (auto const& op : grid[static_cast<std::size_t>(i)]) {
+            if (!op) {
                 continue;
             }
-            right_ops[static_cast<std::size_t>(i)] = new_op;
-            break;
+            auto cell_space = std::dynamic_pointer_cast<ElementarySpace>((*op->codomain)[0]);
+            if (!row_space) {
+                row_space = cell_space;
+            } else if (!row_space->equals_es(*cell_space)) {
+                throw std::invalid_argument(
+                  "row_summands must agree with the first codomain leg of every tensor in its row");
+            }
         }
-    }
-    for (auto const& op : right_ops) {
-        if (!op) {
-            throw std::invalid_argument("Must have at least one nonzero entry in each column.");
+        if (!row_space) {
+            throw std::invalid_argument(
+              "Must specify row_summands for each entirely empty grid row.");
         }
-    }
-    std::vector<ElementarySpace::Ptr> right_spaces;
-    right_spaces.reserve(right_ops.size());
-    for (auto const& op : right_ops) {
-        right_spaces.push_back(std::dynamic_pointer_cast<ElementarySpace>((*op->domain)[-1]));
     }
 
-    std::vector<TensorPtr> left_ops(static_cast<std::size_t>(n_rows));
-    for (int64 i = 0; i < n_rows; ++i) {
-        left_ops[static_cast<std::size_t>(i)] = grid[static_cast<std::size_t>(i)][0];
-    }
-    for (int64 i = 0; i < n_rows; ++i) {
-        if (left_ops[static_cast<std::size_t>(i)]) {
-            continue;
+    std::vector<ElementarySpace::Ptr> right_spaces =
+      col_summands.value_or(std::vector<ElementarySpace::Ptr>(static_cast<std::size_t>(n_cols)));
+    for (int64 j = 0; j < n_cols; ++j) {
+        auto& col_space = right_spaces[static_cast<std::size_t>(j)];
+        if (col_summands.has_value() && !col_space) {
+            throw std::invalid_argument("col_summands must not contain null spaces");
         }
-        for (int64 c = 0; c < n_cols; ++c) {
-            auto const& new_op = grid[static_cast<std::size_t>(i)][static_cast<std::size_t>(c)];
-            if (!new_op) {
+        for (int64 i = 0; i < n_rows; ++i) {
+            auto const& op = grid[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)];
+            if (!op) {
                 continue;
             }
-            left_ops[static_cast<std::size_t>(i)] = new_op;
-            break;
+            auto cell_space = std::dynamic_pointer_cast<ElementarySpace>((*op->domain)[-1]);
+            if (!col_space) {
+                col_space = cell_space;
+            } else if (!col_space->equals_es(*cell_space)) {
+                throw std::invalid_argument(
+                  "col_summands must agree with the last domain leg of every tensor in its column");
+            }
         }
-    }
-    for (auto const& op : left_ops) {
-        if (!op) {
-            throw std::invalid_argument("Must have at least one nonzero entry in each row.");
+        if (!col_space) {
+            throw std::invalid_argument(
+              "Must specify col_summands for each entirely empty grid column.");
         }
-    }
-    std::vector<ElementarySpace::Ptr> left_spaces;
-    left_spaces.reserve(left_ops.size());
-    for (auto const& op : left_ops) {
-        left_spaces.push_back(std::dynamic_pointer_cast<ElementarySpace>((*op->codomain)[0]));
     }
 
     std::vector<ElementarySpace::Ptr> left_rest(left_spaces.begin() + 1, left_spaces.end());

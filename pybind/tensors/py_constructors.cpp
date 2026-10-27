@@ -159,7 +159,9 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
          py::object labels,
          py::object dtype,
          std::optional<OptionalLabels> row_labels,
-         std::optional<OptionalLabels> col_labels) {
+         std::optional<OptionalLabels> col_labels,
+         std::optional<std::vector<ElementarySpace::Ptr>> row_summands,
+         std::optional<std::vector<ElementarySpace::Ptr>> col_summands) {
           std::optional<Dtype> dtype_opt;
           if (!dtype.is_none()) {
               dtype_opt = dtype.cast<Dtype>();
@@ -174,7 +176,13 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
               g.push_back(std::move(row));
           }
           auto res = tensor_from_grid(
-            std::move(g), std::nullopt, dtype_opt, std::move(row_labels), std::move(col_labels));
+            std::move(g),
+            std::nullopt,
+            dtype_opt,
+            std::move(row_labels),
+            std::move(col_labels),
+            std::move(row_summands),
+            std::move(col_summands));
           if (!labels.is_none()) {
               res->set_labels(parse_tensor_init_labels(labels, res->codomain, res->domain));
           }
@@ -186,10 +194,13 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
       py::kw_only(),
       py::arg("row_labels") = py::none(),
       py::arg("col_labels") = py::none(),
+      py::arg("row_summands") = py::none(),
+      py::arg("col_summands") = py::none(),
       doc_plus(DOC(lasyten, tensor_from_grid),
                R"pydoc(
 In Python, ``grid`` is ``list[list[SymmetricTensor | None]]`` (``None`` = zero cell);
-``labels`` / ``dtype`` / ``row_labels`` / ``col_labels`` use ``None`` for C++ ``nullopt``.
+``labels`` / ``dtype`` / ``row_labels`` / ``col_labels`` / ``row_summands`` /
+``col_summands`` use ``None`` for C++ ``nullopt``.
 )pydoc"));
 
     m.def(
