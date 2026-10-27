@@ -1,0 +1,7 @@
+- ``SUN`` reads F and R symbol files in the packed layout of the SU(N) data generator
+  (``Layout = "packed_v1"``: four arrays per file instead of one HDF5 dataset per key, which is much
+  faster to open and uses much less space for millions of keys). The layout is detected for each file
+  from the ``Layout`` attribute; files without it keep being read as before and the symbols are
+  identical in both layouts. The index of a packed file (about 50 bytes per F key for SU(2)) and the
+  block data of small files are held in RAM; this memory is not part of the symbol cache budget and
+  is reported by ``lasyten.cache.cache_info()['packed_files']``.
