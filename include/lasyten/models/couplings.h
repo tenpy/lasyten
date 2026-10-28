@@ -186,19 +186,28 @@ class Coupling
 ///
 /// \f[
 ///     h_{ij} = \mathtt{Jx} S_i^x S_j^x + \mathtt{Jy} S_i^y S_j^y + \mathtt{Jz} S_i^z S_j^z
+///       + \mathtt{Jpp} S_i^+ S_j^+ + \mathtt{Jmp} S_i^- S_j^+
+///       + \mathtt{Jpm} S_i^+ S_j^- + \mathtt{Jmm} S_i^- S_j^-
 /// \f]
+/// where \f$S^\pm = S^x \pm i S^y\f$.
 ///
 /// @param sites The sites that the coupling acts on. Note that the order matters for the final leg
 /// order.
 /// @param Jx, Jy, Jz Prefactor, as given above. By default, all prefactors vanish.
 /// @param backend, device, name Optional tensor backend, device, and coupling name.
+/// @param Jpp, Jmp, Jpm, Jmm Prefactors for the ladder-operator terms above. By default, all
+/// prefactors vanish.
 [[nodiscard]] Coupling spin_spin_coupling(std::vector<Site::Ptr> sites,
                                           float64 Jx = 0,
                                           float64 Jy = 0,
                                           float64 Jz = 0,
                                           py::object backend = py::none(),
                                           py::object device = py::none(),
-                                          py::object name = py::none());
+                                          py::object name = py::none(),
+                                          complex128 Jpp = {},
+                                          complex128 Jmp = {},
+                                          complex128 Jpm = {},
+                                          complex128 Jmm = {});
 
 /// Single-site coupling of a spin to an external field.
 ///

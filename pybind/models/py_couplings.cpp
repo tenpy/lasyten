@@ -134,6 +134,10 @@ bind_models_couplings(py::module_& m)
           py::arg("backend") = py::none(),
           py::arg("device") = py::none(),
           py::arg("name") = py::none(),
+          py::arg("Jpp") = complex128{},
+          py::arg("Jmp") = complex128{},
+          py::arg("Jpm") = complex128{},
+          py::arg("Jmm") = complex128{},
           DOC(lasyten, spin_spin_coupling));
 
     m.def("spin_field_coupling",
