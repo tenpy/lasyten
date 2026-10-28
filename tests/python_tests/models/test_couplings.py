@@ -190,6 +190,9 @@ def test_spin_spin_coupling(any_backend, np_random):
             tensor = coupling.to_tensor()
             # hermiticity
             assert tensors.almost_equal(tensor.hc, tensor)
+            assert tensors.almost_equal(coupling.hc.to_tensor(), tensor)
+            assert tensors.almost_equal(coupling.dagger().to_tensor(), tensor.hc)
+            assert coupling.dagger(new_name='renamed').name == 'renamed'
             # trace is zero
             npt.assert_almost_equal(tensors.trace(tensor).to_numpy(), 0)
             if site1 == site2:

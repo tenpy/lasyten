@@ -100,6 +100,10 @@ class Coupling
 
     /// Convert to a tensor.
     [[nodiscard]] SymmetricTensorPtr to_tensor() const;
+    /// The hermitian conjugate (dagger) of this coupling, on the same sites.
+    ///
+    /// @param new_name Name of the result. By default, the name of this coupling is kept.
+    [[nodiscard]] Coupling dagger(std::optional<std::string> new_name = std::nullopt) const;
     /// Convert to a numpy array.
     [[nodiscard]] py::array to_numpy(
       std::optional<std::vector<std::variant<int64, std::string>>> leg_order = std::nullopt,

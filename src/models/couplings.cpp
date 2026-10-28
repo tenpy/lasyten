@@ -641,6 +641,16 @@ Coupling::to_tensor() const
     return as_symmetric(permute_legs(res, codom_labels, dom_labels, std::nullopt, false));
 }
 
+Coupling
+Coupling::dagger(std::optional<std::string> new_name) const
+{
+    // TODO: optimize. This is essentially `MPO.dagger()`: dagger each factorization tensor,
+    //  permute its legs and flip the arrows of the virtual legs. Flipping arrows is not well
+    //  supported yet, so we go via the full tensor for now.
+    SymmetricTensorPtr res = as_symmetric(lasyten::dagger(TensorCPtr{ to_tensor() }));
+    return from_tensor(res, sites, new_name ? new_name : name);
+}
+
 py::array
 Coupling::to_numpy(std::optional<std::vector<std::variant<int64, std::string>>> leg_order,
                    py::object dtype,
