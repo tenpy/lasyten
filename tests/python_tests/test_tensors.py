@@ -29,8 +29,9 @@ from lasyten.symmetries import (
     SymmetryError,
     TensorProduct,
 )
-from lasyten.tensors import ChargedTensor, DiagonalTensor, HiddenLegTensor, Mask, SymmetricTensor, Tensor
+from lasyten.tensors import ChargedTensor, DiagonalTensor, HiddenLegTensor, LegLabels, Mask, SymmetricTensor, Tensor
 from lasyten.testing import assert_equivalent_legs, assert_tensors_almost_equal, random_tensor, swap_gate_numpy
+from lasyten.tools import hdf5_io
 from lasyten.tools.misc import duplicate_entries, inverse_permutation, iter_common_noncommon_sorted_arrays, to_valid_idx
 
 fermion_parity = FermionParity().as_Symmetry()
@@ -164,6 +165,53 @@ def test_base_Tensor(make_compatible_space, compatible_backend):
     assert tens2.labels.are('a', 'c', 'b', 'e*', 'd*')
     assert tens2.labels.are('c', 'e*', 'd*', 'a', 'b', planar=True)
     assert not tens2.labels.are('a', 'c', 'b', 'e*', 'd*', planar=True)
+
+
+def test_LegLabels_api(make_compatible_space, compatible_backend, tmp_path):
+    """Exercise the composed LegLabels API (list-like access, rename, HDF5)."""
+    ll = LegLabels(['a', '', 'c'])
+    assert isinstance(ll, LegLabels)
+    assert ll == ['a', '', 'c']
+    assert len(ll) == 3
+    assert ll[0] == 'a' and ll[1] == ''
+    assert ll.as_list() == ['a', '', 'c']
+
+    ll[1] = 'b'
+    ll['a'] = 'a0'
+    assert ll.as_list() == ['a0', 'b', 'c']
+    assert ll.index('b') == 1
+    assert ll.index(-1) == 2
+    assert ll.indices(['c', 0]) == [2, 0]
+    assert 'b' in ll
+    assert ll.has('b', 'c')
+    assert not ll.has('missing')
+
+    ll.update({'b': 'bb'})
+    assert ll[1] == 'bb'
+    ll.set(['x', 'y', 'z'])
+    assert ll == ['x', 'y', 'z']
+
+    a, b = make_compatible_space(), make_compatible_space()
+    t = DummyTensor([a], [b], backend=compatible_backend, labels=['p', 'p*'], dtype=Dtype.float64)
+    assert isinstance(t.labels, LegLabels)
+    assert t.labels == ['p', 'p*']
+    t.labels = ['x', 'x*']
+    assert t.labels.as_list() == ['x', 'x*']
+    t.labels[0] = 'y'
+    assert t.labels[0] == 'y'
+    t.labels['y'] = 'z'
+    assert t.labels.as_list() == ['z', 'x*']
+    t.labels.update({'z': 'p', 'x*': 'p*'})
+    assert t.labels == ['p', 'p*']
+
+    path = tmp_path / 'leg_labels.hdf5'
+    h5py = pytest.importorskip('h5py')
+    with h5py.File(path, 'w') as f:
+        hdf5_io.save_to_hdf5(f, ll)
+    with h5py.File(path, 'r') as f:
+        loaded = hdf5_io.load_from_hdf5(f)
+    assert isinstance(loaded, LegLabels)
+    assert loaded.as_list() == ll.as_list()
 
 
 @pytest.mark.parametrize('leg_nums', [(1, 1), (2, 1), (3, 0), (0, 3)], ids=['1->1', '1->2', '0->3', '3->0'])
