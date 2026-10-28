@@ -704,7 +704,7 @@ bind_elementary_space(py::module_& m)
         "direct_sum",
         [](ElementarySpace const& self,
            py::args others_obj,
-           std::optional<OptionalLabels> summand_labels) {
+           std::optional<LegLabelList> summand_labels) {
             std::vector<ElementarySpace::Ptr> others;
             others.reserve(static_cast<std::size_t>(others_obj.size()));
             for (py::handle item : others_obj) {
@@ -768,7 +768,7 @@ bind_direct_sum_space(py::module_& m)
 
     cls.def(
       py::init(
-        [](py::sequence spaces_obj, bool is_dual, std::optional<OptionalLabels> summand_labels) {
+        [](py::sequence spaces_obj, bool is_dual, std::optional<LegLabelList> summand_labels) {
             std::vector<ElementarySpace::Ptr> spaces;
             spaces.reserve(static_cast<std::size_t>(spaces_obj.size()));
             for (py::handle item : spaces_obj) {
@@ -788,7 +788,7 @@ bind_direct_sum_space(py::module_& m)
     cls
       .def_static(
         "from_spaces",
-        [](py::sequence spaces_obj, bool is_dual, std::optional<OptionalLabels> summand_labels) {
+        [](py::sequence spaces_obj, bool is_dual, std::optional<LegLabelList> summand_labels) {
             std::vector<ElementarySpace::Ptr> spaces;
             spaces.reserve(static_cast<std::size_t>(spaces_obj.size()));
             for (py::handle item : spaces_obj) {
@@ -875,7 +875,7 @@ bind_direct_sum_space(py::module_& m)
         [](DirectSumSpace const& self,
            py::object which,
            std::shared_ptr<TensorBackend> backend,
-           std::optional<OptionalLabels> labels,
+           std::optional<LegLabelList> labels,
            std::optional<std::string> device) {
             DirectSumSpace::SummandRef ref =
               py::isinstance<py::str>(which)
@@ -894,7 +894,7 @@ bind_direct_sum_space(py::module_& m)
         [](DirectSumSpace const& self,
            py::object which,
            std::shared_ptr<TensorBackend> backend,
-           std::optional<OptionalLabels> labels,
+           std::optional<LegLabelList> labels,
            std::optional<std::string> device) {
             DirectSumSpace::SummandRef ref =
               py::isinstance<py::str>(which)

@@ -134,26 +134,22 @@ make_python_charged_tensor(py::object invariant_part, py::object charged_state)
 }
 
 py::object
-labels_to_py(OptionalLabels const& labels)
+labels_to_py(LegLabelList const& labels)
 {
     py::list out;
     for (auto const& lab : labels) {
-        if (lab.has_value()) {
-            out.append(*lab);
-        } else {
-            out.append(py::none());
-        }
+        out.append(lab); // empty string = unset
     }
     return out;
 }
 
-OptionalLabels
+LegLabelList
 leg_labels_from_py(py::object seq)
 {
-    OptionalLabels out;
+    LegLabelList out;
     for (auto item : py::reinterpret_borrow<py::iterable>(seq)) {
         if (item.is_none()) {
-            out.push_back(std::nullopt);
+            out.push_back("");
         } else {
             out.push_back(item.cast<std::string>());
         }
@@ -162,12 +158,18 @@ leg_labels_from_py(py::object seq)
 }
 
 py::object
-leg_label_to_py(OptionalLabel const& lab)
+leg_label_to_py(std::string const& lab)
 {
-    if (lab.has_value()) {
-        return py::cast(*lab);
+    return py::cast(lab);
+}
+
+[[nodiscard]] std::string
+py_label_as_string(py::handle obj)
+{
+    if (obj.is_none()) {
+        return "";
     }
-    return py::none();
+    return obj.cast<std::string>();
 }
 
 template<typename... Args>
@@ -228,25 +230,25 @@ same_device2(py::object t1, py::object t2, std::string const& error_msg = "Incom
     return device;
 }
 
-std::pair<OptionalLabel, OptionalLabel>
+std::pair<std::string, std::string>
 parse_eigenvalue_labels(py::object new_labels)
 {
     py::object labels_iter = to_iterable(new_labels);
     py::ssize_t nlab = py::len(labels_iter);
-    OptionalLabel b;
-    OptionalLabel c;
+    std::string b;
+    std::string c;
     if (nlab == 0) {
-        b = std::nullopt;
-        c = std::nullopt;
+        b = "";
+        c = "";
     } else if (nlab == 1) {
         auto lab0 = labels_iter.attr("__getitem__")(0);
-        b = lab0.is_none() ? std::nullopt : std::optional(lab0.cast<std::string>());
+        b = py_label_as_string(lab0);
         c = _dual_leg_label(b);
     } else if (nlab == 2) {
         auto lab0 = labels_iter.attr("__getitem__")(0);
         auto lab1 = labels_iter.attr("__getitem__")(1);
-        b = lab0.is_none() ? std::nullopt : std::optional(lab0.cast<std::string>());
-        c = lab1.is_none() ? std::nullopt : std::optional(lab1.cast<std::string>());
+        b = py_label_as_string(lab0);
+        c = py_label_as_string(lab1);
     } else {
         throw std::invalid_argument(std::format(
           "Expected 0, 1 or 2 new_labels for eigenvalues. Got {}.", static_cast<int>(nlab)));
@@ -372,9 +374,9 @@ std::vector<std::string>
 stripped_hidden_labels(py::object tensor)
 {
     std::vector<std::string> res;
-    for (auto const& lab : leg_labels_from_py(tensor.attr("labels"))) {
+    for (auto const& lab : leg_labels_from_py(tensor.attr("labels").attr("as_list")())) {
         if (HiddenLegTensor::is_hidden_leg_label(lab)) {
-            res.push_back(*HiddenLegTensor::strip_hidden_prefix(lab));
+            res.push_back(HiddenLegTensor::strip_hidden_prefix(lab));
         }
     }
     return res;
@@ -391,7 +393,7 @@ rehide_factor(py::object factor, std::vector<std::string> const& hidden, int64 n
     if (hidden.empty()) {
         return factor;
     }
-    auto labs = leg_labels_from_py(factor.attr("labels"));
+    auto labs = leg_labels_from_py(factor.attr("labels").attr("as_list")());
     auto num_legs = static_cast<int64>(labs.size());
     if (new_leg_idx < 0) {
         new_leg_idx += num_legs;
@@ -399,10 +401,10 @@ rehide_factor(py::object factor, std::vector<std::string> const& hidden, int64 n
     std::vector<std::variant<int64, std::string>> which;
     for (int64 i = 0; i < num_legs; ++i) {
         auto const& lab = labs[static_cast<std::size_t>(i)];
-        if (i == new_leg_idx || !lab.has_value()) {
+        if (i == new_leg_idx || lab.empty()) {
             continue;
         }
-        if (std::find(hidden.begin(), hidden.end(), *lab) != hidden.end()) {
+        if (std::find(hidden.begin(), hidden.end(), lab) != hidden.end()) {
             which.emplace_back(i);
         }
     }
@@ -427,7 +429,7 @@ apply_mask_DiagonalTensor_py(py::object tensor, py::object mask)
         auto init = parse_tensor_init(py::make_tuple(mask.attr("small_leg")),
                                       py::make_tuple(mask.attr("small_leg")),
                                       backend,
-                                      tensor.attr("labels"),
+                                      tensor.attr("labels").attr("as_list")(),
                                       true);
         auto dt = SymmetricTensor::_parse_default_dtype(std::nullopt, init.symmetry);
         if (!dt.has_value()) {
@@ -444,7 +446,7 @@ apply_mask_DiagonalTensor_py(py::object tensor, py::object mask)
     auto data = backend->apply_mask_to_DiagonalTensor(tensor.cast<DiagonalTensorCPtr>(),
                                                       mask.cast<MaskCPtr>());
     return make_python_diagonal_tensor(
-      std::move(data), mask.attr("small_leg"), backend, tensor.attr("labels"));
+      std::move(data), mask.attr("small_leg"), backend, tensor.attr("labels").attr("as_list")());
 }
 
 std::tuple<py::object, py::object>
@@ -459,28 +461,22 @@ eigh_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object 
     // ---
     py::object labels_iter = to_iterable(new_labels);
     py::ssize_t nlab = py::len(labels_iter);
-    OptionalLabel a;
-    OptionalLabel b;
-    OptionalLabel c;
+    std::string a;
+    std::string b;
+    std::string c;
     if (nlab == 1) {
-        a = c = labels_iter.attr("__getitem__")(0).is_none()
-                  ? std::nullopt
-                  : std::optional(labels_iter.attr("__getitem__")(0).cast<std::string>());
+        a = c = py_label_as_string(labels_iter.attr("__getitem__")(0));
         b = _dual_leg_label(a);
     } else if (nlab == 2) {
-        a = c = labels_iter.attr("__getitem__")(0).is_none()
-                  ? std::nullopt
-                  : std::optional(labels_iter.attr("__getitem__")(0).cast<std::string>());
-        b = labels_iter.attr("__getitem__")(1).is_none()
-              ? std::nullopt
-              : std::optional(labels_iter.attr("__getitem__")(1).cast<std::string>());
+        a = c = py_label_as_string(labels_iter.attr("__getitem__")(0));
+        b = py_label_as_string(labels_iter.attr("__getitem__")(1));
     } else if (nlab == 3) {
         auto lab0 = labels_iter.attr("__getitem__")(0);
         auto lab1 = labels_iter.attr("__getitem__")(1);
         auto lab2 = labels_iter.attr("__getitem__")(2);
-        a = lab0.is_none() ? std::nullopt : std::optional(lab0.cast<std::string>());
-        b = lab1.is_none() ? std::nullopt : std::optional(lab1.cast<std::string>());
-        c = lab2.is_none() ? std::nullopt : std::optional(lab2.cast<std::string>());
+        a = py_label_as_string(lab0);
+        b = py_label_as_string(lab1);
+        c = py_label_as_string(lab2);
     } else {
         throw std::invalid_argument(
           std::format("Expected 1, 2 or 3 new_labels. Got {}.", static_cast<int>(nlab)));
@@ -494,21 +490,18 @@ eigh_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object 
         throw NotImplemented("eigh for ChargedTensor");
     }
     if (is_DiagonalTensor(tensor)) {
-        OptionalLabel cod_lab =
-          tensor.attr("codomain_labels").attr("__getitem__")(0).is_none()
-            ? std::nullopt
-            : std::optional(
-                tensor.attr("codomain_labels").attr("__getitem__")(0).cast<std::string>());
+        std::string cod_lab =
+          tensor.attr("codomain_labels").attr("__getitem__")(0).cast<std::string>();
         auto leg_sp = as_space_leg(tensor.attr("leg"));
         auto V =
           py::cast(SymmetricTensor::from_eye(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
                                                std::dynamic_pointer_cast<Leg>(leg_sp) }),
                                              tensor.attr("backend").cast<TensorBackend::Ptr>(),
-                                             OptionalLabels{ cod_lab, a },
+                                             LegLabelList{ cod_lab, a },
                                              tensor.attr("dtype").cast<Dtype>(),
                                              tensor.attr("device").cast<std::string>()));
-        py::object W = tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true)
-                         .attr("set_labels")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
+        py::object W = tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true);
+        W.attr("labels").attr("set")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
         return { W, V };
     }
     tensor = tensor.attr("as_SymmetricTensor")();
@@ -569,28 +562,22 @@ eig_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object s
 {
     py::object labels_iter = to_iterable(new_labels);
     py::ssize_t nlab = py::len(labels_iter);
-    OptionalLabel a;
-    OptionalLabel b;
-    OptionalLabel c;
+    std::string a;
+    std::string b;
+    std::string c;
     if (nlab == 1) {
-        a = c = labels_iter.attr("__getitem__")(0).is_none()
-                  ? std::nullopt
-                  : std::optional(labels_iter.attr("__getitem__")(0).cast<std::string>());
+        a = c = py_label_as_string(labels_iter.attr("__getitem__")(0));
         b = _dual_leg_label(a);
     } else if (nlab == 2) {
-        a = c = labels_iter.attr("__getitem__")(0).is_none()
-                  ? std::nullopt
-                  : std::optional(labels_iter.attr("__getitem__")(0).cast<std::string>());
-        b = labels_iter.attr("__getitem__")(1).is_none()
-              ? std::nullopt
-              : std::optional(labels_iter.attr("__getitem__")(1).cast<std::string>());
+        a = c = py_label_as_string(labels_iter.attr("__getitem__")(0));
+        b = py_label_as_string(labels_iter.attr("__getitem__")(1));
     } else if (nlab == 3) {
         auto lab0 = labels_iter.attr("__getitem__")(0);
         auto lab1 = labels_iter.attr("__getitem__")(1);
         auto lab2 = labels_iter.attr("__getitem__")(2);
-        a = lab0.is_none() ? std::nullopt : std::optional(lab0.cast<std::string>());
-        b = lab1.is_none() ? std::nullopt : std::optional(lab1.cast<std::string>());
-        c = lab2.is_none() ? std::nullopt : std::optional(lab2.cast<std::string>());
+        a = py_label_as_string(lab0);
+        b = py_label_as_string(lab1);
+        c = py_label_as_string(lab2);
     } else {
         throw std::invalid_argument(
           std::format("Expected 1, 2 or 3 new_labels. Got {}.", static_cast<int>(nlab)));
@@ -603,21 +590,18 @@ eig_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object s
         throw std::invalid_argument("eig requires matching domain and codomain");
     }
     if (is_DiagonalTensor(tensor)) {
-        OptionalLabel cod_lab =
-          tensor.attr("codomain_labels").attr("__getitem__")(0).is_none()
-            ? std::nullopt
-            : std::optional(
-                tensor.attr("codomain_labels").attr("__getitem__")(0).cast<std::string>());
+        std::string cod_lab =
+          tensor.attr("codomain_labels").attr("__getitem__")(0).cast<std::string>();
         auto leg_sp = as_space_leg(tensor.attr("leg"));
         auto V =
           py::cast(SymmetricTensor::from_eye(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
                                                std::dynamic_pointer_cast<Leg>(leg_sp) }),
                                              tensor.attr("backend").cast<TensorBackend::Ptr>(),
-                                             OptionalLabels{ cod_lab, a },
+                                             LegLabelList{ cod_lab, a },
                                              tensor.attr("dtype").cast<Dtype>(),
                                              tensor.attr("device").cast<std::string>()));
-        py::object W = tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true)
-                         .attr("set_labels")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
+        py::object W = tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true);
+        W.attr("labels").attr("set")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
         return { W, V };
     }
 
@@ -654,8 +638,9 @@ eigvalsh_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::obj
         throw std::invalid_argument("eigvalsh requires matching domain and codomain");
     }
     if (is_DiagonalTensor(tensor)) {
-        return tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true)
-          .attr("set_labels")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
+        py::object W = tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true);
+        W.attr("labels").attr("set")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
+        return W;
     }
     auto prep = prepare_square_eigen(tensor, new_leg_dual, "eigvalsh");
     auto [w_data, new_leg] = prep.backend->eigvalsh(
@@ -680,8 +665,9 @@ eigvals_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::obje
         throw std::invalid_argument("eigvals requires matching domain and codomain");
     }
     if (is_DiagonalTensor(tensor)) {
-        return tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true)
-          .attr("set_labels")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
+        py::object W = tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true);
+        W.attr("labels").attr("set")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
+        return W;
     }
     auto prep = prepare_square_eigen(tensor, new_leg_dual, "eigvals");
     auto [w_data, new_leg] = prep.backend->eigvals(
@@ -873,7 +859,7 @@ svd_py(py::object tensor,
         return { U, S, Vh };
     }
 
-    std::optional<OptionalLabels> svd_labs;
+    std::optional<LegLabelList> svd_labs;
     if (!new_labels.is_none()) {
         svd_labs = leg_labels_from_py(to_iterable(new_labels));
     }
@@ -956,14 +942,9 @@ truncate_singular_values_py(py::object S,
                                         std::optional<float64>{ svd_min },
                                         minimize_error);
     if (mask_labels.is_none()) {
-        py::object lab0 = S.attr("labels").attr("__getitem__")(0);
-        OptionalLabel dual;
-        if (lab0.is_none()) {
-            dual = _dual_leg_label(std::nullopt);
-        } else {
-            dual = _dual_leg_label(lab0.cast<std::string>());
-        }
-        mask_labels = py_list(lab0, leg_label_to_py(dual));
+        std::string lab0 = py_label_as_string(S.attr("labels").attr("__getitem__")(0));
+        std::string dual = _dual_leg_label(lab0);
+        mask_labels = py_list(leg_label_to_py(lab0), leg_label_to_py(dual));
     }
     py::object mask = make_python_mask(std::move(mask_data),
                                        S.attr("leg"),
@@ -1016,26 +997,22 @@ truncated_svd_py(py::object tensor,
 namespace {
 
 py::object
-labels_to_py_opt(std::optional<OptionalLabels> const& labels)
+labels_to_py_opt(std::optional<LegLabelList> const& labels)
 {
     if (!labels.has_value()) {
         return py::none();
     }
     py::list out;
     for (auto const& lab : *labels) {
-        if (lab.has_value()) {
-            out.append(*lab);
-        } else {
-            out.append(py::none());
-        }
+        out.append(lab);
     }
     return out;
 }
 
 py::object
-labels_to_py_opt(OptionalLabels const& labels)
+labels_to_py_opt(LegLabelList const& labels)
 {
-    return labels_to_py_opt(std::optional<OptionalLabels>{ labels });
+    return labels_to_py_opt(std::optional<LegLabelList>{ labels });
 }
 
 py::object
@@ -1068,7 +1045,7 @@ apply_mask_DiagonalTensor(DiagonalTensorCPtr tensor, MaskCPtr mask)
 
 std::tuple<DiagonalTensorPtr, TensorPtr>
 eigh(TensorCPtr tensor,
-     OptionalLabels new_labels,
+     LegLabelList new_labels,
      bool new_leg_dual,
      std::optional<std::string> sort)
 {
@@ -1078,10 +1055,7 @@ eigh(TensorCPtr tensor,
 }
 
 std::tuple<DiagonalTensorPtr, TensorPtr>
-eig(TensorCPtr tensor,
-    OptionalLabels new_labels,
-    bool new_leg_dual,
-    std::optional<std::string> sort)
+eig(TensorCPtr tensor, LegLabelList new_labels, bool new_leg_dual, std::optional<std::string> sort)
 {
     py::object sort_py = sort.has_value() ? py::cast(*sort) : py::none();
     auto [W, V] = eig_py(py::cast(tensor), labels_to_py_opt(new_labels), new_leg_dual, sort_py);
@@ -1090,7 +1064,7 @@ eig(TensorCPtr tensor,
 
 DiagonalTensorPtr
 eigvalsh(TensorCPtr tensor,
-         OptionalLabels new_labels,
+         LegLabelList new_labels,
          bool new_leg_dual,
          std::optional<std::string> sort)
 {
@@ -1101,7 +1075,7 @@ eigvalsh(TensorCPtr tensor,
 
 DiagonalTensorPtr
 eigvals(TensorCPtr tensor,
-        OptionalLabels new_labels,
+        LegLabelList new_labels,
         bool new_leg_dual,
         std::optional<std::string> sort)
 {
@@ -1141,7 +1115,7 @@ entropy(DiagonalTensorCPtr p, float64 n)
 
 std::tuple<TensorPtr, TensorPtr>
 lq(TensorCPtr tensor,
-   std::optional<OptionalLabels> new_labels,
+   std::optional<LegLabelList> new_labels,
    bool new_leg_dual,
    bool charge_leg_top)
 {
@@ -1152,7 +1126,7 @@ lq(TensorCPtr tensor,
 
 std::tuple<TensorPtr, TensorPtr>
 qr(TensorCPtr tensor,
-   std::optional<OptionalLabels> new_labels,
+   std::optional<LegLabelList> new_labels,
    bool new_leg_dual,
    bool charge_leg_top)
 {
@@ -1163,7 +1137,7 @@ qr(TensorCPtr tensor,
 
 std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr>
 svd(TensorCPtr tensor,
-    std::optional<OptionalLabels> new_labels,
+    std::optional<LegLabelList> new_labels,
     bool new_leg_dual,
     bool charge_leg_top,
     std::optional<std::string> algorithm)
@@ -1191,7 +1165,7 @@ truncate_singular_values(DiagonalTensorCPtr S,
                          float64 trunc_cut,
                          float64 svd_min,
                          bool minimize_error,
-                         std::optional<OptionalLabels> mask_labels)
+                         std::optional<LegLabelList> mask_labels)
 {
     auto [mask, err, new_norm] = truncate_singular_values_py(py::cast(S),
                                                              chi_max,
@@ -1206,7 +1180,7 @@ truncate_singular_values(DiagonalTensorCPtr S,
 
 std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr, float64, float64>
 truncated_svd(TensorCPtr tensor,
-              std::optional<OptionalLabels> new_labels,
+              std::optional<LegLabelList> new_labels,
               bool new_leg_dual,
               bool charge_leg_top,
               std::optional<std::string> algorithm,

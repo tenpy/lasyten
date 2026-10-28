@@ -606,11 +606,11 @@ def test_DirectSumSpace_summand_labels(make_any_space, max_mult=3, max_sectors=3
     # unlabeled by default
     d = spaces.DirectSumSpace([a, b, c])
     d.test_sanity()
-    assert d.summand_labels == [None, None, None]
+    assert d.summand_labels == ['', '', '']
 
-    d = spaces.DirectSumSpace([a, b, c], summand_labels=['IdL', None, 'IdR'])
+    d = spaces.DirectSumSpace([a, b, c], summand_labels=['IdL', '', 'IdR'])
     d.test_sanity()
-    assert d.summand_labels == ['IdL', None, 'IdR']
+    assert d.summand_labels == ['IdL', '', 'IdR']
     assert d.has_summand_label('IdL')
     assert not d.has_summand_label('other')
     assert d.get_summand_idx('IdL') == 0
@@ -623,11 +623,11 @@ def test_DirectSumSpace_summand_labels(make_any_space, max_mult=3, max_sectors=3
 
     # duplicate labels are rejected
     with pytest.raises(ValueError):
-        spaces.DirectSumSpace([a, b, c], summand_labels=['x', 'x', None])
+        spaces.DirectSumSpace([a, b, c], summand_labels=['x', 'x', ''])
 
     # length mismatch is rejected
     with pytest.raises(ValueError):
-        spaces.DirectSumSpace([a, b, c], summand_labels=['x', None])
+        spaces.DirectSumSpace([a, b, c], summand_labels=['x', ''])
 
     # structural equality ignores labels
     unlabeled = spaces.DirectSumSpace([a, b, c])
@@ -635,13 +635,13 @@ def test_DirectSumSpace_summand_labels(make_any_space, max_mult=3, max_sectors=3
 
     # labels are preserved through structure-preserving ops
     dual = d.dual
-    assert dual.summand_labels == ['IdL', None, 'IdR']
+    assert dual.summand_labels == ['IdL', '', 'IdR']
     opp = d.with_opposite_duality()
-    assert opp.summand_labels == ['IdL', None, 'IdR']
+    assert opp.summand_labels == ['IdL', '', 'IdR']
 
     # nested DirectSumSpace summands propagate their own labels
     nested_inner = spaces.DirectSumSpace([b, c], summand_labels=['x', 'y'])
-    nested = spaces.DirectSumSpace([a, nested_inner], summand_labels=['IdL', None])
+    nested = spaces.DirectSumSpace([a, nested_inner], summand_labels=['IdL', ''])
     assert nested.spaces == [a, b, c]
     assert nested.summand_labels == ['IdL', 'x', 'y']
 

@@ -103,7 +103,7 @@ class Mask : public Tensor
          bool is_projection,
          TensorBackend::Ptr backend,
          Symmetry::Ptr symmetry,
-         OptionalLabels labels,
+         LegLabelList labels,
          std::string device);
 
     ~Mask() override = default;
@@ -134,7 +134,7 @@ class Mask : public Tensor
     [[nodiscard]] static Ptr from_eye(Space::Ptr leg,
                                       bool is_projection = true,
                                       TensorBackend::Ptr backend = nullptr,
-                                      std::optional<OptionalLabels> labels = std::nullopt,
+                                      std::optional<LegLabelList> labels = std::nullopt,
                                       std::optional<std::string> device = std::nullopt);
 
     /// Create a projection Mask from a boolean block.
@@ -153,7 +153,7 @@ class Mask : public Tensor
     [[nodiscard]] static Ptr from_block_mask(BlockBackend::BlockPtr block_mask,
                                              Space::Ptr large_leg,
                                              TensorBackend::Ptr backend = nullptr,
-                                             std::optional<OptionalLabels> labels = std::nullopt,
+                                             std::optional<LegLabelList> labels = std::nullopt,
                                              std::optional<std::string> device = std::nullopt);
 
     /// Create a projection Mask from a boolean DiagonalTensor.
@@ -181,7 +181,7 @@ class Mask : public Tensor
     [[nodiscard]] static Ptr from_indices(py::object indices,
                                           Space::Ptr large_leg,
                                           TensorBackend::Ptr backend = nullptr,
-                                          std::optional<OptionalLabels> labels = std::nullopt,
+                                          std::optional<LegLabelList> labels = std::nullopt,
                                           std::optional<std::string> device = std::nullopt);
 
     /// Create a random projection Mask.
@@ -204,7 +204,7 @@ class Mask : public Tensor
                                          TensorBackend::Ptr backend = nullptr,
                                          float64 p_keep = 0.5,
                                          int64 min_keep = 0,
-                                         std::optional<OptionalLabels> labels = std::nullopt,
+                                         std::optional<LegLabelList> labels = std::nullopt,
                                          std::optional<std::string> device = std::nullopt,
                                          py::object np_random = py::none());
 
@@ -219,7 +219,7 @@ class Mask : public Tensor
     ///     The projection (or inclusion) Mask that keeps all states
     [[nodiscard]] static Ptr from_zero(Space::Ptr large_leg,
                                        TensorBackend::Ptr backend = nullptr,
-                                       std::optional<OptionalLabels> labels = std::nullopt,
+                                       std::optional<LegLabelList> labels = std::nullopt,
                                        std::optional<std::string> device = std::nullopt);
 
     /// Import Mask from hdf5

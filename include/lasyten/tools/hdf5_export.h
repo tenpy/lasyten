@@ -58,11 +58,10 @@ void save_optional_i64_vector(lasyten::hdf5::Saver& saver,
   lasyten::hdf5::Loader& loader,
   std::string const& path);
 
-void save_optional_labels(lasyten::hdf5::Saver& saver,
-                          std::string const& path,
-                          OptionalLabels const& labels);
-[[nodiscard]] OptionalLabels load_optional_labels(lasyten::hdf5::Loader& loader,
-                                                  std::string const& path);
+void save_leg_labels(lasyten::hdf5::Saver& saver,
+                     std::string const& path,
+                     LegLabelList const& labels);
+[[nodiscard]] LegLabelList load_leg_labels(lasyten::hdf5::Loader& loader, std::string const& path);
 
 void save_dtype_string(lasyten::hdf5::Saver& saver, std::string const& path, Dtype dt);
 [[nodiscard]] Dtype load_dtype_string(lasyten::hdf5::Loader& loader, std::string const& path);

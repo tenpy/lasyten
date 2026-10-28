@@ -84,12 +84,12 @@ levels_from_label_dict(SymmetricTensorPtr const& tensor,
                        std::map<std::string, int64> const& level_dict)
 {
     LevelsSpec spec(static_cast<std::size_t>(tensor->num_legs), std::nullopt);
-    auto labels = tensor->labels();
+    auto labels = tensor->labels.as_list();
     for (std::size_t i = 0; i < labels.size(); ++i) {
-        if (!labels[i].has_value()) {
+        if (labels[i].empty()) {
             continue;
         }
-        auto it = level_dict.find(*labels[i]);
+        auto it = level_dict.find(labels[i]);
         if (it != level_dict.end()) {
             spec[i] = it->second;
         }
@@ -153,7 +153,7 @@ swap_adjacent_factors(SymmetricTensorPtr const& Wa, SymmetricTensorPtr const& Wb
                                 std::vector<LegRef>{ "wR" },
                                 std::nullopt,
                                 false));
-    Wa_prepped->relabel({ { "p", "p0" }, { "p*", "p0*" } });
+    Wa_prepped->labels.update({ { "p", "p0" }, { "p*", "p0*" } });
     SymmetricTensorPtr Wb_prepped =
       as_symmetric(permute_legs(Wb,
                                 std::vector<LegRef>{ "wL" },
@@ -178,11 +178,11 @@ swap_adjacent_factors(SymmetricTensorPtr const& Wa, SymmetricTensorPtr const& Wb
                                   true));
 
     auto [left, right] =
-      horizontal_factorization(T, 2, 1, OptionalLabels{ "wR", "wL" }, std::nullopt);
+      horizontal_factorization(T, 2, 1, LegLabelList{ "wR", "wL" }, std::nullopt);
     SymmetricTensorPtr Wleft = as_symmetric(std::move(left));
     SymmetricTensorPtr Wright = as_symmetric(std::move(right));
-    Wleft->relabel({ { "p1", "p" }, { "p1*", "p*" } });
-    Wright->relabel({ { "p0", "p" }, { "p0*", "p*" } });
+    Wleft->labels.update({ { "p1", "p" }, { "p1*", "p*" } });
+    Wright->labels.update({ { "p0", "p" }, { "p0*", "p*" } });
     return { Wleft, Wright };
 }
 
@@ -304,8 +304,8 @@ structural_key(Coupling const& coupling)
             shape_list.append(d);
         }
         py::list labels_list;
-        for (auto const& lab : t->labels()) {
-            labels_list.append(lab.has_value() ? py::object(py::str(*lab)) : py::none());
+        for (auto const& lab : t->labels.as_list()) {
+            labels_list.append(py::str(lab));
         }
         py::list codomain_spaces;
         for (auto const& f : t->codomain->factors) {
@@ -436,9 +436,9 @@ Coupling::test_sanity() const
             throw std::runtime_error("Coupling tensor must have 2 codomain and 2 domain legs");
         }
         static std::vector<std::string> const expected_labels = { "wL", "p", "wR", "p*" };
-        auto labels = W->labels();
+        auto labels = W->labels.as_list();
         for (std::size_t j = 0; j < expected_labels.size(); ++j) {
-            if (!labels[j].has_value() || *labels[j] != expected_labels[j]) {
+            if (labels[j] != expected_labels[j]) {
                 throw std::runtime_error("Coupling tensor labels must be ['wL', 'p', 'wR', 'p*']");
             }
         }
@@ -489,7 +489,7 @@ Coupling::from_dense_block(py::object operator_,
     for (std::size_t i = 0; i < sites.size(); ++i) {
         p_labels.push_back(std::format("p{}", i));
     }
-    OptionalLabels labels;
+    LegLabelList labels;
     for (auto const& pl : p_labels) {
         labels.emplace_back(pl);
     }
@@ -537,14 +537,14 @@ Coupling::from_tensor(SymmetricTensorPtr operator_,
     for (std::size_t i = 0; i < sites.size(); ++i) {
         p_labels.push_back(std::format("p{}", i));
     }
-    OptionalLabels expected_labels;
+    LegLabelList expected_labels;
     for (auto const& pl : p_labels) {
         expected_labels.emplace_back(pl);
     }
     for (auto it = p_labels.rbegin(); it != p_labels.rend(); ++it) {
         expected_labels.emplace_back(*it + "*");
     }
-    if (operator_->labels() != expected_labels) {
+    if (operator_->labels.as_list() != expected_labels) {
         throw std::invalid_argument("operator labels do not match expected p-label order");
     }
 
@@ -562,32 +562,33 @@ Coupling::from_tensor(SymmetricTensorPtr operator_,
         SymmetricTensorPtr W =
           as_symmetric(add_trivial_leg(operator_, std::nullopt, 0, std::nullopt, "wL"));
         W = as_symmetric(add_trivial_leg(W, std::nullopt, std::nullopt, 1, "wR"));
-        W->relabel({ { "p0", "p" }, { "p0*", "p*" } });
+        W->labels.update({ { "p0", "p" }, { "p0*", "p*" } });
         factorization = { W };
     } else {
         SymmetricTensorPtr rest = operator_;
         auto [W0, rest0] =
-          horizontal_factorization(rest, 1, 1, OptionalLabels{ "wR", "wL" }, cutoff);
+          horizontal_factorization(rest, 1, 1, LegLabelList{ "wR", "wL" }, cutoff);
         W0 = as_symmetric(W0);
         rest = as_symmetric(rest0);
-        W0->relabel({ { "p0", "p" }, { "p0*", "p*" } });
+        W0->labels.update({ { "p0", "p" }, { "p0*", "p*" } });
         factorization.push_back(
           as_symmetric(add_trivial_leg(W0, std::nullopt, 0, std::nullopt, "wL")));
 
         for (std::size_t i = 1; i + 1 < sites.size(); ++i) {
             auto [Wi, resti] =
-              horizontal_factorization(rest, 2, 1, OptionalLabels{ "wR", "wL" }, cutoff);
+              horizontal_factorization(rest, 2, 1, LegLabelList{ "wR", "wL" }, cutoff);
             Wi = as_symmetric(Wi);
             rest = as_symmetric(resti);
-            Wi->relabel({ { std::format("p{}", i), "p" }, { std::format("p{}*", i), "p*" } });
+            Wi->labels.update(
+              { { std::format("p{}", i), "p" }, { std::format("p{}*", i), "p*" } });
             factorization.push_back(as_symmetric(Wi));
         }
 
         if (rest->num_codomain_legs() != 2 || rest->num_domain_legs() != 1) {
             throw std::runtime_error("Unexpected remaining legs after horizontal factorization");
         }
-        rest->relabel({ { std::format("p{}", sites.size() - 1), "p" },
-                        { std::format("p{}*", sites.size() - 1), "p*" } });
+        rest->labels.update({ { std::format("p{}", sites.size() - 1), "p" },
+                              { std::format("p{}*", sites.size() - 1), "p*" } });
         factorization.push_back(
           as_symmetric(add_trivial_leg(rest, std::nullopt, std::nullopt, 1, "wR")));
     }
@@ -604,7 +605,7 @@ Coupling::to_tensor() const
                                     std::vector<LegRef>{ LegRef{ int64(1) } },
                                     std::nullopt,
                                     false));
-    res->relabel({ { "p", "p0" }, { "p*", "p0*" } });
+    res->labels.update({ { "p", "p0" }, { "p*", "p0*" } });
 
     int64 const num_sites = static_cast<int64>(sites.size());
     for (int64 i = 1; i < num_sites; ++i) {
@@ -1301,7 +1302,7 @@ sector_projection_coupling(std::vector<Site::Ptr> sites,
         legs.push_back(as_leg(s->leg));
     }
     auto codomain = std::make_shared<TensorProduct>(legs);
-    OptionalLabels labels;
+    LegLabelList labels;
     for (std::size_t i = 0; i < sites.size(); ++i) {
         labels.emplace_back(std::format("p{}", i));
     }

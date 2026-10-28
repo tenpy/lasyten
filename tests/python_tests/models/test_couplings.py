@@ -195,7 +195,7 @@ def test_spin_spin_coupling(any_backend, np_random):
             if site1 == site2:
                 # commutation relation
                 tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-                tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+                tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
                 assert tensors.almost_equal(tensor_commuted, tensor)
 
             # check eigenvalues of special cases
@@ -277,7 +277,7 @@ def test_aklt_coupling(any_backend, np_random):
             if site1 == site2:
                 # commutation relation
                 tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-                tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+                tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
                 assert tensors.almost_equal(tensor_commuted, tensor)
 
             if isinstance(site1, sites.SpinSite):
@@ -323,7 +323,7 @@ def test_chiral_3spin_coupling(any_backend, np_random):
                 # cyclic permutation relation
                 tensor_commuted = tensors.permute_legs(tensor, codomain=[2, 0, 1], domain=[3, 5, 4])
                 relabel = {'p2': 'p0', 'p1': 'p2', 'p0': 'p1', 'p2*': 'p0*', 'p1*': 'p2*', 'p0*': 'p1*'}
-                tensor_commuted.relabel(relabel)
+                tensor_commuted.labels.update(relabel)
                 assert tensors.almost_equal(tensor_commuted, tensor)
 
     check_coupling(couplings.chiral_3spin_coupling, site_num=3, invalid_site_nums=[1, 2], boson_fermion_mixing=False)
@@ -425,7 +425,7 @@ def test_density_density_interaction(any_backend, np_random):
         if all(species1 == species2):
             # commutation relation
             tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-            tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+            tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
             assert tensors.almost_equal(tensor_commuted, tensor)
         # check eigenvalues
         Nmax = site.Nmax if isinstance(site, sites.SpinlessBosonSite) else [1] * site.num_species
@@ -493,7 +493,7 @@ def test_hopping(any_backend, np_random):
             # a_0_k^\dagger a_1_l + hc -> (exchange legs) -> -1 * a_0_l a_1_k^\dagger + hc
             # = a_1_k^\dagger a_0_l + hc = a_0_l^\dagger a_1_k + hc
             tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-            tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+            tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
             assert tensors.almost_equal(tensor_commuted, tensor)
 
     check_coupling(couplings.hopping, site_num=2, invalid_site_nums=[1, 3], boson_fermion_mixing=True)
@@ -547,7 +547,7 @@ def test_pairing(any_backend, np_random):
         if symmetric:
             # commutation relation
             tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-            tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+            tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
             assert tensors.almost_equal(tensor_commuted, site.anti_commute_sign * tensor)
 
     check_coupling(couplings.pairing, site_num=2, invalid_site_nums=[1, 3], boson_fermion_mixing=True)
@@ -614,7 +614,7 @@ def test_clock_clock_coupling(any_backend, np_random):
         npt.assert_almost_equal(tensors.trace(tensor).to_numpy(), 0)
         # commutation relation
         tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-        tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+        tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
         assert tensors.almost_equal(tensor_commuted, tensor)
 
     check_coupling(couplings.clock_clock_coupling, site_num=2, invalid_site_nums=[1, 3], boson_fermion_mixing=False)
@@ -1153,8 +1153,8 @@ def test_coupling_permute_matches_direct_permute_legs(site_factory, label):
     }
     tensor_direct = permute_legs(coupling.to_tensor(), codomain=['p1', 'p0'], domain=['p1*', 'p0*'], levels=level_dict)
     # relabel to the same p{new_pos} convention Coupling.permute uses (site formerly at 1 is now p0)
-    tensor_direct = tensor_direct.relabel({'p0': 'q1', 'p1': 'q0', 'p0*': 'q1*', 'p1*': 'q0*'})
-    tensor_direct = tensor_direct.relabel({'q0': 'p0', 'q1': 'p1', 'q0*': 'p0*', 'q1*': 'p1*'})
+    tensor_direct.labels.update({'p0': 'q1', 'p1': 'q0', 'p0*': 'q1*', 'p1*': 'q0*'})
+    tensor_direct.labels.update({'q0': 'p0', 'q1': 'p1', 'q0*': 'p0*', 'q1*': 'p1*'})
 
     labels = ['p0', 'p1', 'p0*', 'p1*']
     dim_permuted = permuted.to_tensor().to_numpy(labels, understood_braiding=True)

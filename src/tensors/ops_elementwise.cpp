@@ -206,8 +206,12 @@ exp(TensorCPtr obj)
           sym,
           [bb](BlockBackend::BlockPtr const& block) { return bb->matrix_exp(block); },
           std::nullopt);
-        auto res = std::make_shared<SymmetricTensor>(
-          std::move(data), sym->codomain, sym->domain, backend, sym->symmetry, sym->labels());
+        auto res = std::make_shared<SymmetricTensor>(std::move(data),
+                                                     sym->codomain,
+                                                     sym->domain,
+                                                     backend,
+                                                     sym->symmetry,
+                                                     sym->labels.as_list());
         if (combine) {
             return split_legs(res, std::vector<LegRef>{ int64{ 0 }, int64{ 1 } });
         }

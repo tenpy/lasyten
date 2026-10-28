@@ -81,7 +81,7 @@ maybe_wrap_hidden(TensorPtr result, bool wrap_if_hidden_labels)
         return result;
     }
     if (as_Diagonal(result) || as_Mask(result) || as_Identity(result)) {
-        if (HiddenLegTensor::has_hidden_leg_labels(result->labels())) {
+        if (HiddenLegTensor::has_hidden_leg_labels(result->labels.as_list())) {
             throw std::runtime_error(
               "Internal error: DiagonalTensor/Mask/Identity with hidden labels");
         }
@@ -120,7 +120,7 @@ reject_hidden_leg_arguments(TensorCPtr tensor, std::vector<int64> const& leg_idc
     if (!as_Hidden(tensor)) {
         return;
     }
-    auto const& labs = tensor->labels();
+    auto const& labs = tensor->labels.as_list();
     for (auto idx : leg_idcs) {
         if (idx < 0) {
             idx += tensor->num_legs;
@@ -129,12 +129,13 @@ reject_hidden_leg_arguments(TensorCPtr tensor, std::vector<int64> const& leg_idc
             continue;
         }
         if (HiddenLegTensor::is_hidden_leg_label(labs[static_cast<std::size_t>(idx)])) {
-            throw std::invalid_argument(
-              std::format("{}: cannot specify hidden leg '{}' (index {}) in arguments. "
-                          "Hidden legs are handled implicitly.",
-                          op,
-                          labs[static_cast<std::size_t>(idx)].value_or("?"),
-                          idx));
+            throw std::invalid_argument(std::format(
+              "{}: cannot specify hidden leg '{}' (index {}) in arguments. "
+              "Hidden legs are handled implicitly.",
+              op,
+              labs[static_cast<std::size_t>(idx)].empty() ? "?"
+                                                          : labs[static_cast<std::size_t>(idx)],
+              idx));
         }
     }
 }
@@ -148,23 +149,23 @@ implicit_hidden_contraction_pairs(TensorCPtr tensor1, TensorCPtr tensor2)
     if (!h1 || !h2) {
         return pairs;
     }
-    auto const& labs1 = tensor1->labels();
-    auto const& labs2 = tensor2->labels();
+    auto const& labs1 = tensor1->labels.as_list();
+    auto const& labs2 = tensor2->labels.as_list();
     std::vector<std::pair<int64, std::string>> hidden1;
     std::vector<std::pair<int64, std::string>> hidden2;
     for (int64 i = 0; i < tensor1->num_legs; ++i) {
         if (HiddenLegTensor::is_hidden_leg_label(labs1[static_cast<std::size_t>(i)])) {
-            hidden1.emplace_back(i, *labs1[static_cast<std::size_t>(i)]);
+            hidden1.emplace_back(i, labs1[static_cast<std::size_t>(i)]);
         }
     }
     for (int64 i = 0; i < tensor2->num_legs; ++i) {
         if (HiddenLegTensor::is_hidden_leg_label(labs2[static_cast<std::size_t>(i)])) {
-            hidden2.emplace_back(i, *labs2[static_cast<std::size_t>(i)]);
+            hidden2.emplace_back(i, labs2[static_cast<std::size_t>(i)]);
         }
     }
     std::vector<bool> used2(hidden2.size(), false);
     for (auto const& [i1, lab1] : hidden1) {
-        auto dual1 = _dual_leg_label(OptionalLabel{ lab1 });
+        auto dual1 = _dual_leg_label(lab1);
         for (std::size_t j = 0; j < hidden2.size(); ++j) {
             if (used2[j]) {
                 continue;
@@ -177,7 +178,7 @@ implicit_hidden_contraction_pairs(TensorCPtr tensor1, TensorCPtr tensor2)
                   "implicitly.",
                   lab1));
             }
-            if (dual1 && *dual1 == lab2) {
+            if (dual1 == lab2) {
                 pairs.emplace_back(i1, i2);
                 used2[j] = true;
                 break;
@@ -225,21 +226,21 @@ leg_refs_from_ints(std::vector<int64> const& idcs)
     return out;
 }
 
-OptionalLabel
-relabel_one(OptionalLabel lab, std::optional<std::map<std::string, std::string>> const& relabel)
+std::string
+relabel_one(std::string lab, std::optional<std::map<std::string, std::string>> const& relabel)
 {
-    if (!lab.has_value() || !relabel.has_value()) {
+    if (lab.empty() || !relabel.has_value()) {
         return lab;
     }
-    auto it = relabel->find(*lab);
+    auto it = relabel->find(lab);
     if (it != relabel->end()) {
         return it->second;
     }
     return lab;
 }
 
-OptionalLabels
-apply_relabel(OptionalLabels labels,
+LegLabelList
+apply_relabel(LegLabelList labels,
               std::optional<std::map<std::string, std::string>> const& relabel)
 {
     if (!relabel.has_value()) {
@@ -251,10 +252,10 @@ apply_relabel(OptionalLabels labels,
     return labels;
 }
 
-OptionalLabels
-dual_labels_reversed(OptionalLabels const& labs)
+LegLabelList
+dual_labels_reversed(LegLabelList const& labs)
 {
-    OptionalLabels dual_labs;
+    LegLabelList dual_labs;
     for (auto it = labs.rbegin(); it != labs.rend(); ++it) {
         dual_labs.push_back(_dual_leg_label(*it));
     }
@@ -288,7 +289,7 @@ make_mask_native(TensorBackend::DataPtr data,
                  Space::Ptr space_out,
                  bool is_projection,
                  TensorBackend::Ptr backend,
-                 OptionalLabels labels)
+                 LegLabelList labels)
 {
     return std::make_shared<Mask>(std::move(data),
                                   std::move(space_in),
@@ -305,7 +306,7 @@ make_symmetric_native(TensorBackend::DataPtr data,
                       TensorProduct::Ptr codomain,
                       TensorProduct::Ptr domain,
                       TensorBackend::Ptr backend,
-                      OptionalLabels labels)
+                      LegLabelList labels)
 {
     return std::make_shared<SymmetricTensor>(std::move(data),
                                              std::move(codomain),
@@ -319,7 +320,7 @@ make_symmetric_native(TensorBackend::DataPtr data,
 make_diagonal_native(TensorBackend::DataPtr data,
                      Space::Ptr leg,
                      TensorBackend::Ptr backend,
-                     OptionalLabels labels)
+                     LegLabelList labels)
 {
     return std::make_shared<DiagonalTensor>(
       std::move(data), std::move(leg), std::move(backend), leg->symmetry, std::move(labels));
@@ -475,14 +476,14 @@ charge_leg_label()
     return ChargedTensor::_CHARGE_LEG_LABEL;
 }
 
-[[nodiscard]] OptionalLabels
+[[nodiscard]] LegLabelList
 labels_from_tensor(TensorCPtr t)
 {
-    return t->labels();
+    return t->labels.as_list();
 }
 
-[[nodiscard]] OptionalLabels
-identity_labels(OptionalLabels labels)
+[[nodiscard]] LegLabelList
+identity_labels(LegLabelList labels)
 {
     return labels;
 }
@@ -500,7 +501,7 @@ backend_item(TensorCPtr t)
 }
 
 [[nodiscard]] IdentityPtr
-make_identity_native(Space::Ptr leg, TensorBackend::Ptr backend, OptionalLabels labels)
+make_identity_native(Space::Ptr leg, TensorBackend::Ptr backend, LegLabelList labels)
 {
     auto dt = SymmetricTensor::_parse_default_dtype(std::nullopt, leg->symmetry);
     if (!dt.has_value()) {
@@ -515,10 +516,10 @@ make_identity_native(Space::Ptr leg, TensorBackend::Ptr backend, OptionalLabels 
                                       std::move(device_s));
 }
 
-OptionalLabels
-nested_flat_labels(OptionalLabels codomain_labels, OptionalLabels domain_labels)
+LegLabelList
+nested_flat_labels(LegLabelList codomain_labels, LegLabelList domain_labels)
 {
-    OptionalLabels res = std::move(codomain_labels);
+    LegLabelList res = std::move(codomain_labels);
     for (auto it = domain_labels.rbegin(); it != domain_labels.rend(); ++it) {
         res.push_back(*it);
     }
@@ -549,7 +550,7 @@ splice_tp_factors(TensorProduct::Ptr const& base,
 [[nodiscard]] int64
 leg_ref_index(TensorCPtr tensor, LegRef const& leg)
 {
-    return std::visit([&](auto const& x) -> int64 { return tensor->get_leg_idcs(x).at(0); }, leg);
+    return std::visit([&](auto const& x) -> int64 { return tensor->labels.index(x); }, leg);
 }
 
 [[nodiscard]] std::optional<int64>
@@ -765,11 +766,11 @@ space_factor0(TensorProduct::Ptr const& tp)
 }
 
 [[nodiscard]] TensorPtr
-shallow_copy_labels(TensorCPtr t, OptionalLabels labels)
+shallow_copy_labels(TensorCPtr t, LegLabelList labels)
 {
     TensorPtr mut = std::const_pointer_cast<Tensor>(t);
     TensorPtr res = mut->copy(/*deep=*/false);
-    res->set_labels(std::move(labels));
+    res->labels.set(std::move(labels));
     return res;
 }
 
@@ -790,7 +791,7 @@ dagger(TensorCPtr tensor)
     if (auto m = as_Mask(tensor)) {
         auto backend = m->backend;
         auto data = backend->mask_dagger(m);
-        OptionalLabels dual_labs = dual_labels_reversed(m->labels());
+        LegLabelList dual_labs = dual_labels_reversed(m->labels.as_list());
         return make_mask_native(std::move(data),
                                 space_factor0(m->codomain),
                                 space_factor0(m->domain),
@@ -802,12 +803,12 @@ dagger(TensorCPtr tensor)
         return std::const_pointer_cast<Tensor>(tensor);
     }
     if (auto d = as_Diagonal(tensor)) {
-        OptionalLabels dual_labs = dual_labels_reversed(d->labels());
+        LegLabelList dual_labs = dual_labels_reversed(d->labels.as_list());
         if (d->dtype == Dtype::Bool) {
             return shallow_copy_labels(d, std::move(dual_labs));
         }
         DiagonalTensorPtr res = complex_conj(std::const_pointer_cast<DiagonalTensor>(d));
-        res->set_labels(std::move(dual_labs));
+        res->labels.set(std::move(dual_labs));
         return res;
     }
     if (auto h = as_Hidden(tensor)) {
@@ -816,14 +817,14 @@ dagger(TensorCPtr tensor)
     if (auto s = as_Symmetric(tensor)) {
         auto backend = s->backend;
         auto data = backend->dagger(s);
-        OptionalLabels dual_labs = dual_labels_reversed(s->labels());
+        LegLabelList dual_labs = dual_labels_reversed(s->labels.as_list());
         return make_symmetric_native(
           std::move(data), s->domain, s->codomain, backend, std::move(dual_labs));
     }
     if (auto c = as_Charged(tensor)) {
         SymmetricTensorPtr inv_part =
           std::dynamic_pointer_cast<SymmetricTensor>(dagger(c->invariant_part));
-        inv_part->set_label(0, charge_leg_label());
+        inv_part->labels[0] = charge_leg_label();
         inv_part = std::dynamic_pointer_cast<SymmetricTensor>(
           move_leg_wrap(inv_part, 0, std::nullopt, 0, BendRight{ true }));
         auto charged_state = c->backend->block_backend->conj(c->charged_state);
@@ -835,10 +836,10 @@ dagger(TensorCPtr tensor)
 TensorPtr
 transpose(TensorCPtr tensor)
 {
-    OptionalLabels labels;
+    LegLabelList labels;
     {
-        OptionalLabels domain_labels = tensor->domain_labels();
-        OptionalLabels codomain_labels = tensor->codomain_labels();
+        LegLabelList domain_labels = tensor->domain_labels();
+        LegLabelList codomain_labels = tensor->codomain_labels();
         for (auto it = domain_labels.rbegin(); it != domain_labels.rend(); ++it) {
             labels.push_back(*it);
         }
@@ -1067,7 +1068,8 @@ scalar_multiply(BlockBackend::Scalar const& a, TensorCPtr v)
         auto backend = h->backend;
         auto data = backend->mul(a, h);
         return maybe_wrap_hidden(
-          make_symmetric_native(std::move(data), h->codomain, h->domain, backend, h->labels()),
+          make_symmetric_native(
+            std::move(data), h->codomain, h->domain, backend, h->labels.as_list()),
           true);
     }
     auto s = as_Symmetric(v);
@@ -1076,7 +1078,8 @@ scalar_multiply(BlockBackend::Scalar const& a, TensorCPtr v)
     }
     auto backend = s->backend;
     auto data = backend->mul(a, s);
-    return make_symmetric_native(std::move(data), s->codomain, s->domain, backend, s->labels());
+    return make_symmetric_native(
+      std::move(data), s->codomain, s->domain, backend, s->labels.as_list());
 }
 
 TensorPtr
@@ -1132,7 +1135,7 @@ linear_combination(BlockBackend::Scalar const& a,
               std::static_pointer_cast<Tensor const>(hv_mut->as_SymmetricTensor()),
               b,
               std::static_pointer_cast<Tensor const>(hw_mut->as_SymmetricTensor())));
-            res->set_labels(hv->labels());
+            res->labels.set(hv->labels.as_list());
             return maybe_wrap_hidden(res, true);
         }
     }
@@ -1148,7 +1151,7 @@ linear_combination(BlockBackend::Scalar const& a,
     }
     auto backend = get_same_backend({ v, w });
     auto data = backend->linear_combination(a, vs, b, ws);
-    OptionalLabels labels = _get_matching_labels(vs->labels(), ws->labels());
+    LegLabelList labels = _get_matching_labels(vs->labels.as_list(), ws->labels.as_list());
     return make_symmetric_native(
       std::move(data), vs->codomain, vs->domain, backend, std::move(labels));
 }
@@ -1184,7 +1187,7 @@ scale_axis(TensorCPtr tensor, DiagonalTensorCPtr diag, LegRef leg)
                                   BlockBackend::BlockPtr const& y) { return (*x) * (*y); };
         auto prod = dt_mut->_binary_operand(
           std::const_pointer_cast<DiagonalTensor>(diag_use), std::move(mul_fn), "*");
-        prod->set_labels(tensor->labels());
+        prod->labels.set(tensor->labels.as_list());
         return prod;
     }
     if (auto m = as_Mask(tensor)) {
@@ -1194,7 +1197,7 @@ scale_axis(TensorCPtr tensor, DiagonalTensorCPtr diag, LegRef leg)
         } else {
             res = std::get<TensorPtr>(compose(m, diag_use));
         }
-        res->set_labels(tensor->labels());
+        res->labels.set(tensor->labels.as_list());
         return res;
     }
     if (auto c = as_Charged(tensor)) {
@@ -1206,7 +1209,7 @@ scale_axis(TensorCPtr tensor, DiagonalTensorCPtr diag, LegRef leg)
     auto data = backend->scale_axis(tensor, diag_use, leg_idx);
     // the labels of a HiddenLegTensor keep the hidden prefix -> wrap the result again
     return HiddenLegTensor::maybe_wrap(make_symmetric_native(
-      std::move(data), tensor->codomain, tensor->domain, backend, tensor->labels()));
+      std::move(data), tensor->codomain, tensor->domain, backend, tensor->labels.as_list()));
 }
 
 [[nodiscard]] TensorPtr
@@ -1227,18 +1230,18 @@ compose(TensorCPtr tensor1,
     (void)get_same_device({ tensor1, tensor2 });
     check_spaces_tp(tensor1->domain, tensor2->codomain);
 
-    OptionalLabels codomain_labels = apply_relabel(tensor1->codomain_labels(), relabel1);
-    OptionalLabels domain_labels = apply_relabel(tensor2->domain_labels(), relabel2);
-    OptionalLabels res_labels = nested_flat_labels(codomain_labels, domain_labels);
+    LegLabelList codomain_labels = apply_relabel(tensor1->codomain_labels(), relabel1);
+    LegLabelList domain_labels = apply_relabel(tensor2->domain_labels(), relabel2);
+    LegLabelList res_labels = nested_flat_labels(codomain_labels, domain_labels);
 
     if (auto m1 = as_Mask(tensor1)) {
         TensorPtr res = _compose_with_Mask(tensor2, std::const_pointer_cast<Mask>(m1), 0);
-        res->set_label(0, m1->labels().at(0));
+        res->labels[0] = m1->labels[0];
         return maybe_wrap_hidden(std::move(res), true);
     }
     if (auto m2 = as_Mask(tensor2)) {
         TensorPtr res = _compose_with_Mask(tensor1, std::const_pointer_cast<Mask>(m2), -1);
-        res->set_label(-1, m2->labels().at(1));
+        res->labels[-1] = m2->labels[1];
         return maybe_wrap_hidden(std::move(res), true);
     }
     if (as_Identity(tensor1)) {
@@ -1252,7 +1255,7 @@ compose(TensorCPtr tensor1,
           scale_axis(tensor2,
                      std::dynamic_pointer_cast<DiagonalTensor const>(as_Diagonal(tensor1)),
                      int64{ 0 });
-        res->set_labels(res_labels);
+        res->labels.set(res_labels);
         return maybe_wrap_hidden(std::move(res), true);
     }
     if (as_Diagonal(tensor2)) {
@@ -1260,7 +1263,7 @@ compose(TensorCPtr tensor1,
           scale_axis(tensor1,
                      std::dynamic_pointer_cast<DiagonalTensor const>(as_Diagonal(tensor2)),
                      int64{ -1 });
-        res->set_labels(res_labels);
+        res->labels.set(res_labels);
         return maybe_wrap_hidden(std::move(res), true);
     }
     if (as_Charged(tensor1)) {
@@ -1349,8 +1352,8 @@ partial_compose(TensorCPtr tensor1,
     (void)get_same_device({ tensor1, tensor2 });
     int64 t1_first = leg_ref_index(tensor1, tensor1_first_leg);
 
-    OptionalLabels codomain_labels = apply_relabel(tensor1->codomain_labels(), relabel1);
-    OptionalLabels domain_labels = apply_relabel(tensor1->domain_labels(), relabel1);
+    LegLabelList codomain_labels = apply_relabel(tensor1->codomain_labels(), relabel1);
+    LegLabelList domain_labels = apply_relabel(tensor1->domain_labels(), relabel1);
 
     char const* leg_msg = "Not all legs to be contracted are in the (co)domain";
     char const* compose_msg = "Use compose for contracting the full (co)domain";
@@ -1375,7 +1378,7 @@ partial_compose(TensorCPtr tensor1,
         std::vector<Leg::Ptr> factors1(tensor1->codomain->factors.begin() + t1_first,
                                        tensor1->codomain->factors.begin() + t1_last + 1);
         check_leg_vectors(factors1, tensor2->domain->factors);
-        OptionalLabels tensor2_labels = apply_relabel(tensor2->codomain_labels(), relabel2);
+        LegLabelList tensor2_labels = apply_relabel(tensor2->codomain_labels(), relabel2);
         codomain_labels.erase(codomain_labels.begin() + t1_first,
                               codomain_labels.begin() + t1_last + 1);
         codomain_labels.insert(
@@ -1407,7 +1410,7 @@ partial_compose(TensorCPtr tensor1,
         std::vector<Leg::Ptr> factors1(tensor1->domain->factors.begin() + domain_first_leg,
                                        tensor1->domain->factors.begin() + domain_last_leg + 1);
         check_leg_vectors(factors1, tensor2->codomain->factors);
-        OptionalLabels tensor2_labels = apply_relabel(tensor2->domain_labels(), relabel2);
+        LegLabelList tensor2_labels = apply_relabel(tensor2->domain_labels(), relabel2);
         domain_labels.erase(domain_labels.begin() + domain_first_leg,
                             domain_labels.begin() + domain_last_leg + 1);
         domain_labels.insert(
@@ -1424,15 +1427,15 @@ partial_compose(TensorCPtr tensor1,
           std::make_shared<TensorProduct>(std::move(new_dom_factors), tensor1->symmetry);
     }
 
-    OptionalLabels res_labels = codomain_labels;
+    LegLabelList res_labels = codomain_labels;
     for (auto it = domain_labels.rbegin(); it != domain_labels.rend(); ++it) {
         res_labels.push_back(*it);
     }
     {
         std::vector<std::string> named;
         for (auto const& lab : res_labels) {
-            if (lab.has_value()) {
-                named.push_back(*lab);
+            if (!lab.empty()) {
+                named.push_back(lab);
             }
         }
         if (!duplicate_entries(named).empty()) {
@@ -1448,12 +1451,12 @@ partial_compose(TensorCPtr tensor1,
     }
     if (auto m2 = as_Mask(tensor2)) {
         TensorPtr res = _compose_with_Mask(tensor1, std::const_pointer_cast<Mask>(m2), t1_first);
-        res->set_labels(res_labels);
+        res->labels.set(res_labels);
         return maybe_wrap_hidden(std::move(res), true);
     }
     if (auto d2 = as_Diagonal(tensor2)) {
         TensorPtr res = scale_axis(tensor1, d2, t1_first);
-        res->set_labels(res_labels);
+        res->labels.set(res_labels);
         return maybe_wrap_hidden(std::move(res), true);
     }
 
@@ -1543,15 +1546,15 @@ outer(TensorCPtr tensor1,
     auto codomain = TensorProduct::from_partial_products({ s1->codomain, s2->codomain });
     auto domain = TensorProduct::from_partial_products({ s1->domain, s2->domain });
 
-    OptionalLabels codomain_labels = apply_relabel(s1->codomain_labels(), relabel1);
-    OptionalLabels domain_labels = apply_relabel(s1->domain_labels(), relabel1);
+    LegLabelList codomain_labels = apply_relabel(s1->codomain_labels(), relabel1);
+    LegLabelList domain_labels = apply_relabel(s1->domain_labels(), relabel1);
     {
         auto c2 = apply_relabel(s2->codomain_labels(), relabel2);
         auto d2 = apply_relabel(s2->domain_labels(), relabel2);
         codomain_labels.insert(codomain_labels.end(), c2.begin(), c2.end());
         domain_labels.insert(domain_labels.end(), d2.begin(), d2.end());
     }
-    OptionalLabels flat = nested_flat_labels(codomain_labels, domain_labels);
+    LegLabelList flat = nested_flat_labels(codomain_labels, domain_labels);
     return maybe_wrap_hidden(
       make_symmetric_native(std::move(data), codomain, domain, backend, flat),
       as_Hidden(t1) || as_Hidden(t2));
@@ -1661,8 +1664,8 @@ partial_trace(TensorCPtr tensor,
         traced_set.insert(i1);
         traced_set.insert(i2);
     }
-    OptionalLabels labels;
-    OptionalLabels all_labels = s->labels();
+    LegLabelList labels;
+    LegLabelList all_labels = s->labels.as_list();
     for (std::size_t n = 0; n < all_labels.size(); ++n) {
         if (!traced_set.contains(static_cast<int64>(n))) {
             labels.push_back(all_labels[n]);
@@ -1683,8 +1686,8 @@ tdot(TensorCPtr tensor1,
 {
     (void)get_same_device({ tensor1, tensor2 });
 
-    std::vector<int64> legs1_v = tensor1->get_leg_idcs(legs1);
-    std::vector<int64> legs2_v = tensor2->get_leg_idcs(legs2);
+    std::vector<int64> legs1_v = tensor1->labels.indices(legs1);
+    std::vector<int64> legs2_v = tensor2->labels.indices(legs2);
     if (!duplicate_entries(legs1_v).empty() || !duplicate_entries(legs2_v).empty()) {
         throw std::invalid_argument("Duplicate leg entries.");
     }
@@ -1711,15 +1714,15 @@ tdot(TensorCPtr tensor1,
             skip1.insert(i1);
             skip2.insert(i2);
         }
-        OptionalLabels codomain_labels;
-        OptionalLabels all1 = tensor1->labels();
+        LegLabelList codomain_labels;
+        LegLabelList all1 = tensor1->labels.as_list();
         for (std::size_t n = 0; n < all1.size(); ++n) {
             if (!skip1.contains(static_cast<int64>(n))) {
                 codomain_labels.push_back(relabel_one(all1[n], relabel1));
             }
         }
-        OptionalLabels domain_labels;
-        OptionalLabels all2 = tensor2->labels();
+        LegLabelList domain_labels;
+        LegLabelList all2 = tensor2->labels.as_list();
         for (std::size_t n = 0; n < all2.size(); ++n) {
             if (!skip2.contains(static_cast<int64>(n))) {
                 domain_labels.push_back(relabel_one(all2[n], relabel2));
@@ -1729,9 +1732,9 @@ tdot(TensorCPtr tensor1,
         if (std::holds_alternative<BlockBackend::Scalar>(res)) {
             return res;
         }
-        OptionalLabels flat = codomain_labels;
+        LegLabelList flat = codomain_labels;
         flat.insert(flat.end(), domain_labels.begin(), domain_labels.end());
-        std::get<TensorPtr>(res)->set_labels(flat);
+        std::get<TensorPtr>(res)->labels.set(flat);
         return res;
     }
 
@@ -1760,7 +1763,7 @@ tdot(TensorCPtr tensor1,
                 mask_use = std::dynamic_pointer_cast<Mask const>(transpose(m1));
             }
             TensorPtr res = _compose_with_Mask(work2, mask_use, legs2_v[0]);
-            res->set_label(legs2_v[0], m1->labels()[static_cast<std::size_t>(1 - legs1_v[0])]);
+            res->labels[legs2_v[0]] = m1->labels[static_cast<int64>(1 - legs1_v[0])];
             try {
                 return permute_legs_wrap(res, leg_refs_from_ints(legs1_v));
             } catch (...) {
@@ -1795,7 +1798,7 @@ tdot(TensorCPtr tensor1,
                 mask_use = std::dynamic_pointer_cast<Mask const>(transpose(m2));
             }
             TensorPtr res = _compose_with_Mask(work1, mask_use, legs1_v[0]);
-            res->set_label(legs1_v[0], m2->labels()[static_cast<std::size_t>(1 - legs2_v[0])]);
+            res->labels[legs1_v[0]] = m2->labels[static_cast<int64>(1 - legs2_v[0])];
             try {
                 return permute_legs_wrap(res, std::nullopt, leg_refs_from_ints(legs2_v));
             } catch (...) {
@@ -1824,7 +1827,7 @@ tdot(TensorCPtr tensor1,
     if (auto id1 = as_Identity(work1)) {
         if (num_contr == 1) {
             TensorPtr res = permute_legs_wrap(work2, leg_refs_from_ints(legs2_v));
-            res->set_label(0, id1->labels()[static_cast<std::size_t>(1 - legs1_v[0])]);
+            res->labels[0] = id1->labels[static_cast<int64>(1 - legs1_v[0])];
             return res;
         }
         if (num_contr == 2) {
@@ -1839,7 +1842,7 @@ tdot(TensorCPtr tensor1,
             // Match Python (computes permute then ignores it):
             (void)permute_legs_wrap(work1, std::nullopt, leg_refs_from_ints(legs1_v));
             TensorPtr res = work1->copy(/*deep=*/false);
-            res->set_label(legs1_v[0], id2->labels()[static_cast<std::size_t>(1 - legs2_v[0])]);
+            res->labels[legs1_v[0]] = id2->labels[static_cast<int64>(1 - legs2_v[0])];
             return res;
         }
         if (num_contr == 2) {
@@ -1856,7 +1859,7 @@ tdot(TensorCPtr tensor1,
             work1 = std::const_pointer_cast<DiagonalTensor>(d1)->as_SymmetricTensor();
         } else if (num_contr == 1) {
             TensorPtr res = scale_axis(work2, d1, legs2_v[0]);
-            res->set_label(legs2_v[0], d1->labels()[static_cast<std::size_t>(1 - legs1_v[0])]);
+            res->labels[legs2_v[0]] = d1->labels[static_cast<int64>(1 - legs1_v[0])];
             try {
                 return permute_legs_wrap(res, leg_refs_from_ints(legs1_v));
             } catch (...) {
@@ -1876,7 +1879,7 @@ tdot(TensorCPtr tensor1,
             work2 = std::const_pointer_cast<DiagonalTensor>(d2)->as_SymmetricTensor();
         } else if (num_contr == 1) {
             TensorPtr res = scale_axis(work1, d2, legs1_v[0]);
-            res->set_label(legs1_v[0], d2->labels()[static_cast<std::size_t>(1 - legs2_v[0])]);
+            res->labels[legs1_v[0]] = d2->labels[static_cast<int64>(1 - legs2_v[0])];
             try {
                 return permute_legs_wrap(res, std::nullopt, leg_refs_from_ints(legs1_v));
             } catch (...) {

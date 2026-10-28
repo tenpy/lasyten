@@ -20,17 +20,17 @@ namespace {
 [[nodiscard]] bool
 is_dual_pair(std::string const& a, std::string const& b)
 {
-    auto dual_a = _dual_leg_label(OptionalLabel{ a });
-    return dual_a && *dual_a == b;
+    return _dual_leg_label(a) == b;
 }
 
 void
-check_public_labels_no_bang(OptionalLabels const& labs)
+check_public_labels_no_bang(LegLabelList const& labs)
 {
     for (auto const& lab : labs) {
-        if (lab && !HiddenLegTensor::is_hidden_leg_label(lab) && label_contains_exclamation(lab)) {
+        if (!lab.empty() && !HiddenLegTensor::is_hidden_leg_label(lab) &&
+            label_contains_exclamation(lab)) {
             throw std::invalid_argument(std::format(
-              "Public label '{}' must not contain '{}'", *lab, HiddenLegTensor::HIDDEN_PREFIX));
+              "Public label '{}' must not contain '{}'", lab, HiddenLegTensor::HIDDEN_PREFIX));
         }
     }
 }
@@ -38,13 +38,13 @@ check_public_labels_no_bang(OptionalLabels const& labs)
 } // namespace
 
 bool
-label_contains_exclamation(OptionalLabel const& label)
+label_contains_exclamation(std::string const& label)
 {
-    return label && label->find(HiddenLegTensor::HIDDEN_PREFIX) != std::string::npos;
+    return label.find(HiddenLegTensor::HIDDEN_PREFIX) != std::string::npos;
 }
 
 void
-reject_exclamation_in_labels(OptionalLabels const& labels, std::string const& context)
+reject_exclamation_in_labels(LegLabelList const& labels, std::string const& context)
 {
     for (auto const& lab : labels) {
         if (label_contains_exclamation(lab)) {
@@ -53,23 +53,23 @@ reject_exclamation_in_labels(OptionalLabels const& labels, std::string const& co
                           "Use HiddenLegTensor to hide legs, or ChargedTensor for a charge leg.",
                           context,
                           HiddenLegTensor::HIDDEN_PREFIX,
-                          *lab));
+                          lab));
         }
     }
 }
 
 bool
-HiddenLegTensor::is_charge_temp_label(OptionalLabel const& label)
+HiddenLegTensor::is_charge_temp_label(std::string const& label)
 {
     // ChargedTensor invariant-part markers and short-lived labels during compose/inner:
     // "!", "!1"/"!2", "!A"/"!B", and their duals "!A*"/"!B*".
-    if (!label || label->empty() || (*label)[0] != HIDDEN_PREFIX) {
+    if (label.empty() || label[0] != HIDDEN_PREFIX) {
         return false;
     }
-    if (label->size() == 1) {
+    if (label.size() == 1) {
         return true;
     }
-    std::string_view suffix(label->begin() + 1, label->end());
+    std::string_view suffix(label.begin() + 1, label.end());
     if (std::all_of(
           suffix.begin(), suffix.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
         return true;
@@ -85,28 +85,28 @@ HiddenLegTensor::is_charge_temp_label(OptionalLabel const& label)
 }
 
 bool
-HiddenLegTensor::is_hidden_leg_label(OptionalLabel const& label)
+HiddenLegTensor::is_hidden_leg_label(std::string const& label)
 {
     // Hidden labels are '!' plus a nonempty name (e.g. '!p', '!charge*', '!(p.q)').
-    if (!label || label->size() <= 1 || (*label)[0] != HIDDEN_PREFIX) {
+    if (label.size() <= 1 || label[0] != HIDDEN_PREFIX) {
         return false;
     }
     return !is_charge_temp_label(label);
 }
 
 bool
-HiddenLegTensor::has_hidden_leg_labels(OptionalLabels const& labels)
+HiddenLegTensor::has_hidden_leg_labels(LegLabelList const& labels)
 {
     return std::ranges::any_of(labels, [](auto const& l) { return is_hidden_leg_label(l); });
 }
 
-OptionalLabel
-HiddenLegTensor::strip_hidden_prefix(OptionalLabel const& label)
+std::string
+HiddenLegTensor::strip_hidden_prefix(std::string const& label)
 {
     if (!is_hidden_leg_label(label)) {
         return label;
     }
-    return label->substr(1);
+    return label.substr(1);
 }
 
 std::string
@@ -127,12 +127,12 @@ HiddenLegTensor::add_hidden_prefix(std::string const& label)
 }
 
 void
-HiddenLegTensor::validate_no_dual_hidden_pair(OptionalLabels const& labels)
+HiddenLegTensor::validate_no_dual_hidden_pair(LegLabelList const& labels)
 {
     std::vector<std::string> hidden;
     for (auto const& lab : labels) {
         if (is_hidden_leg_label(lab)) {
-            hidden.push_back(*lab);
+            hidden.push_back(lab);
         }
     }
     for (std::size_t i = 0; i < hidden.size(); ++i) {
@@ -158,15 +158,26 @@ HiddenLegTensor::HiddenLegTensor(SymmetricTensor::Ptr tensor)
                     tensor->domain,
                     tensor->backend,
                     tensor->symmetry,
-                    tensor->labels(),
+                    tensor->labels.as_list(),
                     /*check_complex_dtype=*/false)
 {
-    if (!has_hidden_leg_labels(labels())) {
+    if (!has_hidden_leg_labels(labels.as_list())) {
         throw std::invalid_argument(
           "HiddenLegTensor adopting constructor requires at least one '!'-prefixed label");
     }
-    validate_no_dual_hidden_pair(labels());
-    check_public_labels_no_bang(labels());
+    validate_no_dual_hidden_pair(labels.as_list());
+    check_public_labels_no_bang(labels.as_list());
+
+    labels.set_hooks(
+      [](LegLabels& /*self*/, LegLabelList const& proposed) {
+          if (!has_hidden_leg_labels(proposed)) {
+              throw std::invalid_argument(
+                "HiddenLegTensor must keep at least one '!'-prefixed hidden leg label");
+          }
+          validate_no_dual_hidden_pair(proposed);
+          check_public_labels_no_bang(proposed);
+      },
+      [](LegLabels& /*self*/) {});
 }
 
 HiddenLegTensor::Ptr
@@ -180,18 +191,18 @@ HiddenLegTensor::from_tensor(Tensor::Ptr tensor,
     if (auto existing = std::dynamic_pointer_cast<HiddenLegTensor>(sym)) {
         sym = existing->unhide_legs();
     }
-    auto idcs = sym->get_leg_idcs(which_legs);
+    auto idcs = sym->labels.indices(which_legs);
     std::unordered_set<int64> hide_set(idcs.begin(), idcs.end());
     if (hide_set.size() != idcs.size()) {
         throw std::invalid_argument("Duplicate legs in which_legs for HiddenLegTensor");
     }
-    auto labs = sym->labels();
+    auto labs = sym->labels.as_list();
     for (auto idx : idcs) {
         auto& lab = labs[static_cast<std::size_t>(idx)];
-        if (!lab) {
+        if (lab.empty()) {
             throw std::invalid_argument(std::format("Cannot hide unlabeled leg at index {}", idx));
         }
-        *lab = add_hidden_prefix(*lab);
+        lab = add_hidden_prefix(lab);
     }
     validate_no_dual_hidden_pair(labs);
     check_public_labels_no_bang(labs);
@@ -204,9 +215,9 @@ void
 HiddenLegTensor::test_sanity() const
 {
     SymmetricTensor::test_sanity();
-    assert(has_hidden_leg_labels(labels()));
-    validate_no_dual_hidden_pair(labels());
-    check_public_labels_no_bang(labels());
+    assert(has_hidden_leg_labels(labels.as_list()));
+    validate_no_dual_hidden_pair(labels.as_list());
+    check_public_labels_no_bang(labels.as_list());
 }
 
 std::string
@@ -225,7 +236,7 @@ std::vector<int64>
 HiddenLegTensor::hidden_leg_idcs() const
 {
     std::vector<int64> out;
-    auto labs = labels();
+    auto labs = labels.as_list();
     for (int64 i = 0; i < static_cast<int64>(labs.size()); ++i) {
         if (is_hidden_leg_label(labs[static_cast<std::size_t>(i)])) {
             out.push_back(i);
@@ -238,7 +249,7 @@ std::vector<int64>
 HiddenLegTensor::public_leg_idcs() const
 {
     std::vector<int64> out;
-    auto labs = labels();
+    auto labs = labels.as_list();
     for (int64 i = 0; i < static_cast<int64>(labs.size()); ++i) {
         if (!is_hidden_leg_label(labs[static_cast<std::size_t>(i)])) {
             out.push_back(i);
@@ -250,7 +261,7 @@ HiddenLegTensor::public_leg_idcs() const
 SymmetricTensorPtr
 HiddenLegTensor::unhide_legs() const
 {
-    auto labs = labels();
+    auto labs = labels.as_list();
     for (auto& lab : labs) {
         lab = strip_hidden_prefix(lab);
     }
@@ -299,8 +310,8 @@ HiddenLegTensor::dagger() const
 {
     auto self = std::dynamic_pointer_cast<Tensor const>(shared_from_this());
     auto new_data = backend->dagger(self);
-    OptionalLabels dual_labs;
-    auto labs = labels();
+    LegLabelList dual_labs;
+    auto labs = labels.as_list();
     dual_labs.reserve(labs.size());
     for (auto it = labs.rbegin(); it != labs.rend(); ++it) {
         dual_labs.push_back(_dual_leg_label(*it));
@@ -326,36 +337,6 @@ HiddenLegTensor::to_backend(TensorBackend::Ptr new_backend,
     return std::make_shared<HiddenLegTensor>(std::move(base));
 }
 
-LabelledLegs&
-HiddenLegTensor::set_label(int64 pos, OptionalLabel label)
-{
-    pos = to_valid_idx(pos, num_legs);
-    if (label && !is_hidden_leg_label(label) && label_contains_exclamation(label)) {
-        throw std::invalid_argument(
-          std::format("Public label '{}' must not contain '{}'", *label, HIDDEN_PREFIX));
-    }
-    LabelledLegs::set_label(pos, label);
-    validate_no_dual_hidden_pair(labels());
-    if (!has_hidden_leg_labels(labels())) {
-        throw std::invalid_argument(
-          "HiddenLegTensor must keep at least one '!'-prefixed hidden leg label");
-    }
-    return *this;
-}
-
-Tensor&
-HiddenLegTensor::set_labels(OptionalLabels labels_in)
-{
-    if (!has_hidden_leg_labels(labels_in)) {
-        throw std::invalid_argument(
-          "HiddenLegTensor.set_labels requires at least one '!'-prefixed label");
-    }
-    validate_no_dual_hidden_pair(labels_in);
-    check_public_labels_no_bang(labels_in);
-    Tensor::set_labels(std::move(labels_in));
-    return *this;
-}
-
 TensorPtr
 HiddenLegTensor::maybe_wrap(SymmetricTensor::Ptr tensor)
 {
@@ -365,7 +346,7 @@ HiddenLegTensor::maybe_wrap(SymmetricTensor::Ptr tensor)
     if (std::dynamic_pointer_cast<HiddenLegTensor>(tensor)) {
         return tensor;
     }
-    if (has_hidden_leg_labels(tensor->labels())) {
+    if (has_hidden_leg_labels(tensor->labels.as_list())) {
         return std::make_shared<HiddenLegTensor>(std::move(tensor));
     }
     return tensor;

@@ -270,12 +270,15 @@ Differences:
 - Dual labels use a trailing ``*``, same as TeNPy ``Array.conj()``. Combined
   pipes still use ``(a.b)``. Avoid ``( ) . ? ! *`` inside a *single* (not
   combined/dual) label; see :func:`~lasyten.tensors.is_valid_leg_label`.
-- Set labels with :meth:`~lasyten.tensors.LabelledLegs.set_labels` /
-  :meth:`~lasyten.tensors.LabelledLegs.set_label` /
-  :meth:`~lasyten.tensors.LabelledLegs.relabel` (in-place). There is no
-  ``iset_leg_labels``.
-- Read them from :attr:`~lasyten.tensors.LabelledLegs.labels`,
-  :attr:`~lasyten.tensors.Tensor.codomain_labels`,
+- Unset labels are empty strings (``""``), not ``None``.
+- Each tensor owns a :class:`~lasyten.tensors.LegLabels` member
+  ``t.labels``. Assign a full list with ``t.labels = [...]`` or
+  ``t.labels.set([...])``, rename with ``t.labels.update({...})``, and set
+  one entry with ``t.labels[i] = ...`` or ``t.labels['old'] = 'new'``. There
+  is no ``iset_leg_labels`` / ``set_labels`` / ``relabel``.
+- Compare or index via ``t.labels``; use ``t.labels.as_list()`` when a real
+  Python list is required (``LegLabels`` is not iterable). Read slices with
+  :attr:`~lasyten.tensors.Tensor.codomain_labels` /
   :attr:`~lasyten.tensors.Tensor.domain_labels`. There is no
   ``get_leg_labels()``.
 - Duplicate labels after a contraction are dropped (as in TeNPy). Optional
@@ -285,9 +288,9 @@ Differences:
 
 .. code-block:: python
 
-    A.set_labels(['p', 'vL', 'vR'])           # TeNPy: A.iset_leg_labels(...)
-    A.relabel({'vL': 'vR', 'vR': 'vL'})
-    A.set_label(0, 'p0')
+    A.labels = ['p', 'vL', 'vR']              # TeNPy: A.iset_leg_labels(...)
+    A.labels.update({'vL': 'vR', 'vR': 'vL'})
+    A.labels[0] = 'p0'
 
 
 Contractions

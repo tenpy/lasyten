@@ -245,6 +245,6 @@ def split_truncate_theta(theta, chi_max, eps):
     """
     A, S, B, _, _ = lasy.truncated_svd(theta, ['vR', 'vL'], chi_max=chi_max, svd_min=eps)
     B = lasy.permute_legs(B, codomain=['vL', 'p1'], bend_right=True)
-    A.relabel({'p0': 'p'})
-    B.relabel({'p1': 'p'})
+    A.labels.update({'p0': 'p'})
+    B.labels.update({'p1': 'p'})
     return A, S, B

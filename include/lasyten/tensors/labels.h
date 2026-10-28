@@ -2,20 +2,19 @@
 
 #include <lasyten/lasyten.h>
 #include <lasyten/tools.h>
+#include <lasyten/tools/hdf5.h>
 
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <variant>
 #include <vector>
 
 namespace lasyten {
 
-/// Optional string label for a tensor leg (`nullopt` when unlabeled).
-using OptionalLabel = std::optional<std::string>;
-/// Flat list of leg labels in `legs` order.
-using OptionalLabels = std::vector<OptionalLabel>;
+/// Flat list of leg labels in `legs` order. Empty string means unset.
+using LegLabelList = std::vector<std::string>;
 
 /// Reserved character to indicate contractions in `lasyten.planar` diagrams.
 inline constexpr char CONTRACT_SYMBOL = '@';
@@ -29,106 +28,153 @@ inline constexpr char const* FORBIDDEN_LEG_LABEL_CHARS[] = {
     " ", "\t", "\n", "@", ":", "-", ">",
 };
 
-/// If the given string is a valid leg label.
-[[nodiscard]] bool is_valid_leg_label(OptionalLabel const& label);
+/// If the given string is a valid leg label (`""` is always valid = unset).
+[[nodiscard]] bool is_valid_leg_label(std::string const& label);
 
 /// The label that a combined leg should have.
 ///
 /// @param labels Labels of the legs being combined.
 /// @param offset Added to the index used for anonymous `?n` placeholders.
 ///     Defaults to `0` (needed by `_dual_leg_label` for nested combined labels).
-[[nodiscard]] std::string _combine_leg_labels(OptionalLabels const& labels, int64 offset = 0);
+[[nodiscard]] std::string _combine_leg_labels(LegLabelList const& labels, int64 offset = 0);
 
 /// Undo `_combine_leg_labels`, i.e. recover the original labels.
 ///
-/// @param label Combined label, or `nullopt` for an anonymous group.
-/// @param num Required length when `label` is `nullopt`; otherwise optional.
-[[nodiscard]] OptionalLabels _split_leg_label(OptionalLabel const& label,
-                                              std::optional<int64> num = std::nullopt);
+/// @param label Combined label, or `""` for an anonymous group.
+/// @param num Required length when `label` is empty; otherwise optional.
+[[nodiscard]] LegLabelList _split_leg_label(std::string const& label,
+                                            std::optional<int64> num = std::nullopt);
 
 /// The label that a leg should have after conjugation.
-[[nodiscard]] OptionalLabel _dual_leg_label(OptionalLabel const& label);
+[[nodiscard]] std::string _dual_leg_label(std::string const& label);
 
 /// Dual labels in reversed order (helper for conjugated combined labels).
-[[nodiscard]] OptionalLabels _dual_label_list(OptionalLabels const& labels);
+[[nodiscard]] LegLabelList _dual_label_list(LegLabelList const& labels);
 
 /// Utility function to combine two lists of labels that should match.
 ///
 /// Per pair of labels:
-/// - If one is unset (`nullopt`), use the other.
+/// - If one is unset (`""`), use the other.
 /// - If they are equal, use that label.
-/// - If they are different, emit a DEBUG message to the logger and choose
-///   `nullopt`.
+/// - If they are different, emit a DEBUG message to the logger and choose `""`.
 ///
 /// @param labels1,labels2 Label lists that should match pairwise.
 /// @returns Combined labels (length of the shorter input).
-[[nodiscard]] OptionalLabels _get_matching_labels(OptionalLabels const& labels1,
-                                                  OptionalLabels const& labels2);
+[[nodiscard]] LegLabelList _get_matching_labels(LegLabelList const& labels1,
+                                                LegLabelList const& labels2);
 
-/// Base class that implements handling of labelled legs.
-class LabelledLegs
+/// Handles labelled legs for tensors (composition, not inheritance).
+///
+/// Unset labels are empty strings. Behaves list-like for equality, indexing, and
+/// assignment from `LegLabelList`, without full iterator support.
+class LegLabels
 {
   public:
-    using Ptr = std::shared_ptr<LabelledLegs>;
+    /// Called before a full or single-label assignment with the proposed full list.
+    /// May throw to reject the mutation. Does not own `this`.
+    using BeforeHook = std::function<void(LegLabels& self, LegLabelList const& proposed)>;
+    /// Called after a successful mutation. Does not own `this`.
+    using AfterHook = std::function<void(LegLabels& self)>;
 
-    /// Number of legs (== `labels().size()`).
-    int64 num_legs = 0;
+    LegLabels() = default;
+    explicit LegLabels(LegLabelList labels);
 
-    explicit LabelledLegs(OptionalLabels labels);
-    virtual ~LabelledLegs() = default;
+    LegLabels(LegLabels const& other);
+    LegLabels(LegLabels&& other) noexcept;
+    LegLabels& operator=(LegLabels const& other);
+    LegLabels& operator=(LegLabels&& other) noexcept;
 
-    LabelledLegs(LabelledLegs const&) = default;
-    LabelledLegs(LabelledLegs&&) = default;
-    LabelledLegs& operator=(LabelledLegs const&) = default;
-    LabelledLegs& operator=(LabelledLegs&&) = default;
+    /// Assign from a label list (same length required if already non-empty).
+    LegLabels& operator=(LegLabelList labels);
 
-    /// Perform sanity checks.
-    virtual void test_sanity() const;
+    [[nodiscard]] bool operator==(LegLabelList const& other) const;
+    [[nodiscard]] bool operator!=(LegLabelList const& other) const { return !(*this == other); }
+    [[nodiscard]] bool operator==(LegLabels const& other) const;
+    [[nodiscard]] bool operator!=(LegLabels const& other) const { return !(*this == other); }
 
-    /// Whether every leg has a non-`nullopt` label.
+    /// Install mutation hooks (non-owning). Cleared on copy/move of the LegLabels value;
+    /// owners must re-bind after copy.
+    void set_hooks(BeforeHook before, AfterHook after);
+    void clear_hooks();
+
+    void test_sanity() const;
+
     [[nodiscard]] bool is_fully_labelled() const;
 
-    /// The labels that refer to the legs.
-    ///
-    /// Thus, `labels[:K]` are the `codomain_labels` and `labels[K:][::-1]` are the
-    /// `domain_labels` where `K == num_codomain_legs`.
-    ///
-    /// @returns A copy of the internal label list.
-    [[nodiscard]] OptionalLabels labels() const;
+    [[nodiscard]] std::size_t size() const { return labels_.size(); }
+    [[nodiscard]] int64 num_legs() const { return static_cast<int64>(labels_.size()); }
+    [[nodiscard]] bool empty() const { return labels_.empty(); }
 
-    /// Parse leg indices or leg labels to leg indices (indices of the legs).
-    [[nodiscard]] std::vector<int64> get_leg_idcs(int64 idx) const;
-    [[nodiscard]] std::vector<int64> get_leg_idcs(std::string const& label) const;
-    [[nodiscard]] std::vector<int64> get_leg_idcs(
+    /// Copy of the internal label list.
+    [[nodiscard]] LegLabelList as_list() const { return labels_; }
+
+    [[nodiscard]] std::string const& operator[](int64 idx) const;
+    [[nodiscard]] std::string const& at(int64 idx) const { return (*this)[idx]; }
+
+    /// Proxy enabling `labels[i] = ...` and `labels["old"] = "new"`.
+    class Ref
+    {
+      public:
+        Ref(LegLabels& self, std::variant<int64, std::string> key)
+          : self_(self)
+          , key_(std::move(key))
+        {
+        }
+
+        Ref& operator=(std::string label);
+        Ref& operator=(char const* label) { return *this = std::string(label); }
+
+        [[nodiscard]] operator std::string const&() const;
+
+      private:
+        LegLabels& self_;
+        std::variant<int64, std::string> key_;
+    };
+
+    Ref operator[](int64 idx);
+    Ref operator[](std::string const& label);
+
+    /// Set all labels in-place (same length if already sized).
+    LegLabels& set(LegLabelList labels);
+
+    /// Apply mapping to labels in-place (keys are current labels).
+    LegLabels& update(std::map<std::string, std::string> const& mapping);
+
+    /// Normalize an int index or look up a label → single leg index.
+    [[nodiscard]] int64 index(int64 idx) const;
+    [[nodiscard]] int64 index(std::string const& label) const;
+
+    /// Parse a sequence of indices/labels to leg indices.
+    [[nodiscard]] std::vector<int64> indices(
       std::vector<std::variant<int64, std::string>> const& idcs) const;
 
-    /// True if all given labels are present.
-    [[nodiscard]] bool has_label(std::string const& label) const;
-    [[nodiscard]] bool has_label(std::vector<std::string> const& labels) const;
+    [[nodiscard]] bool has(std::string const& label) const;
+    [[nodiscard]] bool has(std::vector<std::string> const& labels) const;
+    [[nodiscard]] bool contains(std::string const& label) const { return has(label); }
 
-    /// If the given labels and `labels()` are the same, up to permutation.
+    /// If the given labels and this are the same, up to permutation.
     /// If `planar` is true, only cyclic permutations are accepted.
-    [[nodiscard]] bool labels_are(std::vector<std::string> const& labels,
-                                  bool planar = false) const;
+    [[nodiscard]] bool are(std::vector<std::string> const& labels, bool planar = false) const;
 
-    /// Apply mapping to labels. In-place. Returns `*this`.
-    LabelledLegs& relabel(std::map<std::string, std::string> const& mapping);
+    void save_hdf5(lasyten::hdf5::Saver& saver,
+                   HighFive::Group& h5gr,
+                   std::string const& subpath) const;
 
-    /// Set a single label at given position, in-place. Return the modified instance.
-    virtual LabelledLegs& set_label(int64 pos, OptionalLabel label);
+    [[nodiscard]] static LegLabels from_hdf5(lasyten::hdf5::Loader& loader,
+                                             HighFive::Group& h5gr,
+                                             std::string const& subpath);
 
-    /// Set the given labels, in-place. Return the modified instance.
-    virtual LabelledLegs& set_labels(OptionalLabels labels);
+  private:
+    friend class Ref;
 
-    /// Label → leg-index map (excludes `nullopt` labels).
-    [[nodiscard]] std::unordered_map<std::string, int64> const& labelmap() const
-    {
-        return _labelmap;
-    }
+    void assign_impl(LegLabelList labels, bool require_same_size);
+    void set_at(int64 pos, std::string label);
+    void rename(std::string const& old_label, std::string new_label);
+    [[nodiscard]] int64 find_label(std::string const& label) const;
 
-  protected:
-    OptionalLabels _labels;
-    std::unordered_map<std::string, int64> _labelmap;
+    LegLabelList labels_;
+    BeforeHook before_hook_;
+    AfterHook after_hook_;
 };
 
 } // namespace lasyten

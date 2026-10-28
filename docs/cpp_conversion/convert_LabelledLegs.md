@@ -1,5 +1,10 @@
 # Conversion of LabelledLegs (+ label helpers)
 
+> **Rename:** `LabelledLegs` was refactored into composed `LegLabels`
+> (`Tensor.labels`). For the mechanical call-site / type replacement summary used
+> by open PRs, see [convert_LegLabels.md](convert_LegLabels.md). This file keeps
+> the historical batch-1–2 conversion notes.
+
 ## metadata
 
 - original python name: `LabelledLegs` (+ helpers in same batch)

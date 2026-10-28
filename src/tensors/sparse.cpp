@@ -77,16 +77,8 @@ TensorLinearOperator::TensorLinearOperator(SymmetricTensorPtr tensor,
         throw std::invalid_argument("Expected a two-leg tensor");
     }
 
-    std::vector<int64> idcs;
-    if (std::holds_alternative<int64>(which_leg_ref)) {
-        idcs = this->tensor->get_leg_idcs(std::get<int64>(which_leg_ref));
-    } else {
-        idcs = this->tensor->get_leg_idcs(std::get<std::string>(which_leg_ref));
-    }
-    if (idcs.size() != 1) {
-        throw std::invalid_argument("which_leg must refer to a single leg");
-    }
-    this->which_leg = idcs[0];
+    this->which_leg =
+      std::visit([&](auto const& key) { return this->tensor->labels.index(key); }, which_leg_ref);
     this->other_leg = 1 - this->which_leg;
 
     auto legs = this->tensor->legs();
@@ -96,8 +88,8 @@ TensorLinearOperator::TensorLinearOperator(SymmetricTensorPtr tensor,
     }
 
     this->vector_legs = { legs[other_leg] };
-    auto labels = this->tensor->labels();
-    this->vector_labels = VectorLabels{ OptionalLabels{ labels[other_leg] } };
+    auto labels = this->tensor->labels.as_list();
+    this->vector_labels = VectorLabels{ LegLabelList{ labels[other_leg] } };
     this->dtype = this->tensor->dtype;
 }
 

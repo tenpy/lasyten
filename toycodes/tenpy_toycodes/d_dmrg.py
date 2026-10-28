@@ -60,11 +60,11 @@ class HEffective(lasy.sparse.LinearOperator):
         self.W1 = lasy.permute_legs(
             W1, ['p', 'wR'], ['wL', 'p*'], bend_right=[False, None, True, None]
         )  # wL i wC i* -> i wC i* wL
-        self.W1.relabel({'p': 'p0', 'p*': 'p0*', 'wR': 'wC'})
+        self.W1.labels.update({'p': 'p0', 'p*': 'p0*', 'wR': 'wC'})
         self.W2 = lasy.permute_legs(
             W2, ['p', 'wR'], ['wL', 'p*'], bend_right=[False, None, True, None]
         )  # wC j wR j* -> j wR j* wC
-        self.W2.relabel({'p': 'p1', 'p*': 'p1*', 'wL': 'wC'})
+        self.W2.labels.update({'p': 'p1', 'p*': 'p1*', 'wL': 'wC'})
 
     def matvec(self, theta: lasy.Tensor) -> lasy.Tensor:
         """Calculate |theta'> = H_eff |theta>"""

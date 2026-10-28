@@ -1976,7 +1976,7 @@ def cross_check_single_c_symbol_tree_blocks(
     # NOTE the case of braiding in domain and codomain are treated separately despite being similar
     # This way, it is easier to understand the more compact and more efficient function
     ftb = fusion_tree_backend
-    index = ten.get_leg_idcs(leg)[0]
+    index = ten.labels.index(leg)
     block_backend = ten.backend.block_backend
     symmetry = ten.symmetry
 
@@ -2150,7 +2150,7 @@ def cross_check_single_c_symbol_tree_cols(
     NOTE this function may be deleted at a later stage
     """
     ftb = fusion_tree_backend
-    index = ten.get_leg_idcs(leg)[0]
+    index = ten.labels.index(leg)
     block_backend = ten.backend.block_backend
     symmetry = ten.symmetry
 
