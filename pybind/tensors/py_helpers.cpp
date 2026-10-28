@@ -16,13 +16,13 @@ namespace lasyten {
 
 namespace {
 
-OptionalLabels
+LegLabelList
 py_leg_labels(py::object seq)
 {
-    OptionalLabels out;
+    LegLabelList out;
     for (auto item : py::reinterpret_borrow<py::iterable>(seq)) {
         if (item.is_none()) {
-            out.push_back(std::nullopt);
+            out.push_back("");
         } else {
             out.push_back(item.cast<std::string>());
         }

@@ -175,11 +175,11 @@ class NumpyArrayLinearOperator(ScipyLinearOperator):
             ``None`` stands for *all* sectors.
 
         """
-        idcs1 = tensor.get_leg_idcs(legs1)
+        idcs1 = tensor.labels.indices(legs1)
         tensor_contr_legs = [tensor.legs[idx] for idx in idcs1]
         res_legs = [tensor.legs[idx] for idx in range(tensor.num_legs) if idx not in idcs1]
         res_labels = [tensor.labels[idx] for idx in range(tensor.num_legs) if idx not in idcs1]
-        if None in res_labels:
+        if '' in res_labels:
             res_labels = None
         vec_contr_legs = []
         for l in legs2:
@@ -357,7 +357,7 @@ class NumpyArrayLinearOperator(ScipyLinearOperator):
             inv = SymmetricTensor.from_eye(
                 [self.pipe],
                 backend=self.backend,
-                labels=[None, ChargedTensor._CHARGE_LEG_LABEL],
+                labels=['', ChargedTensor._CHARGE_LEG_LABEL],
                 dtype=Dtype.from_numpy_dtype(self.dtype),
             )
             tens = ChargedTensor(inv, charged_state=block)
@@ -372,7 +372,7 @@ class NumpyArrayLinearOperator(ScipyLinearOperator):
             )
         res = self._split_vector_legs(tens)
         if self.labels is not None:
-            res.set_labels(self.labels)
+            res.labels.set(self.labels)
         return res
 
     def tensor_to_flat_array(self, tens: Tensor | DirectSum) -> np.ndarray:
@@ -384,12 +384,8 @@ class NumpyArrayLinearOperator(ScipyLinearOperator):
                 raise ValueError('DirectSum component count does not match operator')
             parts = [conv.tensor_to_flat_array(comp) for conv, comp in zip(self.component_converters, tens.components)]
             return np.concatenate(parts)
-        if (
-            self.labels is not None
-            and all(l is not None for l in self.labels)
-            and all(l in tens.labels for l in self.labels)
-        ):
-            tens = permute_legs(tens, tens.get_leg_idcs(self.labels))
+        if self.labels is not None and all(self.labels) and all(l in tens.labels for l in self.labels):
+            tens = permute_legs(tens, tens.labels.indices(self.labels))
         tens = self._combine_vector_legs(tens)
         if self._charge_sector is None:
             res = tens.to_dense_block(understood_braiding=True)

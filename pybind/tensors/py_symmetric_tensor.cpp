@@ -169,7 +169,7 @@ bind_tensors_symmetric_tensor(py::module_& m)
          Leg::Ptr space,
          TensorBackend::Ptr backend,
          std::optional<std::string> device,
-         OptionalLabel label) {
+         std::string label) {
           if (!backend) {
               backend = get_backend(space->symmetry);
           }
@@ -181,7 +181,7 @@ bind_tensors_symmetric_tensor(py::module_& m)
       py::arg("space"),
       py::arg("backend") = nullptr,
       py::arg("device") = py::none(),
-      py::arg("label") = py::none(),
+      py::arg("label") = "",
       DOC(lasyten, SymmetricTensor, from_dense_block_trivial_sector));
 
     cls.def_static(
@@ -219,7 +219,7 @@ bind_tensors_symmetric_tensor(py::module_& m)
           auto mean_t = py_optional_tensor(mean);
           TensorProduct::Ptr c;
           TensorProduct::Ptr d;
-          std::optional<OptionalLabels> labs;
+          std::optional<LegLabelList> labs;
           if (!codomain.is_none()) {
               auto init = parse_tensor_init(codomain, domain, std::move(backend), labels);
               c = init.codomain;

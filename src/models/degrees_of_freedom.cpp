@@ -87,14 +87,14 @@ product_of_legs(std::vector<Leg::Ptr> factors)
     return std::make_shared<TensorProduct>(std::move(factors));
 }
 
-OptionalLabels
+LegLabelList
 pp_labels()
 {
-    return OptionalLabels{ "p", "p*" };
+    return LegLabelList{ "p", "p*" };
 }
 
 bool
-leg_labels_are_p_pstar(OptionalLabels const& labels)
+leg_labels_are_p_pstar(LegLabelList const& labels)
 {
     return labels.size() == 2 && labels[0] == "p" && labels[1] == "p*";
 }
@@ -331,7 +331,7 @@ Site::test_sanity()
         if (!single_leg_matches(leg, op->codomain) || !single_leg_matches(leg, op->domain)) {
             throw std::invalid_argument("onsite operator legs must match the site leg");
         }
-        if (!leg_labels_are_p_pstar(op->labels())) {
+        if (!leg_labels_are_p_pstar(op->labels.as_list())) {
             throw std::invalid_argument("onsite operator labels must be ('p', 'p*')");
         }
         op->test_sanity();
@@ -373,10 +373,10 @@ Site::add_onsite_operator(std::string const& name,
             !single_leg_matches(leg, tensor_op->domain)) {
             throw std::invalid_argument("operator legs must match the site leg");
         }
-        if (!leg_labels_are_p_pstar(tensor_op->labels())) {
+        if (!leg_labels_are_p_pstar(tensor_op->labels.as_list())) {
             tensor_op =
               std::dynamic_pointer_cast<SymmetricTensor>(tensor_op->copy(/*deep=*/false));
-            tensor_op->set_labels(pp_labels());
+            tensor_op->labels.set(pp_labels());
         }
     } else if (is_diagonal.has_value() && *is_diagonal) {
         py::object block = op.attr("copy")();
@@ -486,13 +486,13 @@ SymmetricTensorPtr
 Site::identity_tensor(ElementarySpace::Ptr w, bool overbraid)
 {
     auto co_domain = product_of_legs(std::vector<Leg::Ptr>{ leg, std::move(w) });
-    auto tensor = SymmetricTensor::from_eye(co_domain, backend, OptionalLabels{ "p", "w" });
+    auto tensor = SymmetricTensor::from_eye(co_domain, backend, LegLabelList{ "p", "w" });
     auto permuted = permute_legs(tensor,
                                  std::vector<LegRef>{ "w", "p" },
                                  std::vector<LegRef>{ "p*", "w*" },
                                  std::nullopt,
                                  !overbraid);
-    permuted->relabel({ { "w", "wL" }, { "w*", "wR" } });
+    permuted->labels.update({ { "w", "wL" }, { "w*", "wR" } });
     return std::dynamic_pointer_cast<SymmetricTensor>(permuted);
 }
 
@@ -505,14 +505,14 @@ Site::get_onsite_W_block(std::string const& opname,
 {
     auto op = std::const_pointer_cast<Tensor>(TensorCPtr{ get_op(opname) })->as_SymmetricTensor();
     auto id_w = SymmetricTensor::from_eye(
-      product_of_legs(std::vector<Leg::Ptr>{ std::move(w) }), backend, OptionalLabels{ "w" });
+      product_of_legs(std::vector<Leg::Ptr>{ std::move(w) }), backend, LegLabelList{ "w" });
     auto tensor = outer(op, id_w);
     auto permuted = permute_legs(tensor,
                                  std::vector<LegRef>{ "w", "p" },
                                  std::vector<LegRef>{ "p*", "w*" },
                                  std::nullopt,
                                  !overbraid);
-    permuted->relabel({ { "w", wL_label }, { "w*", wR_label } });
+    permuted->labels.update({ { "w", wL_label }, { "w*", wR_label } });
     return std::dynamic_pointer_cast<SymmetricTensor>(permuted);
 }
 

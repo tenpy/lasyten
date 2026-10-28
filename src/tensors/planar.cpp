@@ -46,10 +46,14 @@ _assert_valid_planar_placeholder_labels(std::vector<std::string> const& labels,
     }
 }
 
+// Separator for globally unique planar labels ("tensor#leg").
+// Must not be in FORBIDDEN_LEG_LABEL_CHARS (unlike diagram LEG_SELECT_SYMBOL ':').
+inline constexpr char PLANAR_UNIQUE_LABEL_SEP = '#';
+
 [[nodiscard]] bool
-_is_hidden_planar_label(OptionalLabel const& label)
+_is_hidden_planar_label(std::string const& label)
 {
-    if (!label) {
+    if (label.empty()) {
         return false;
     }
     // HiddenLegTensor hidden legs and ChargedTensor charge-leg markers / temps.
@@ -57,29 +61,28 @@ _is_hidden_planar_label(OptionalLabel const& label)
         HiddenLegTensor::is_charge_temp_label(label)) {
         return true;
     }
-    auto const& s = *label;
-    auto pos = s.rfind(':');
+    auto pos = label.rfind(PLANAR_UNIQUE_LABEL_SEP);
     if (pos == std::string::npos) {
         return false;
     }
-    OptionalLabel tail{ s.substr(pos + 1) };
+    std::string tail{ label.substr(pos + 1) };
     return HiddenLegTensor::is_hidden_leg_label(tail) ||
            HiddenLegTensor::is_charge_temp_label(tail);
 }
 
-[[nodiscard]] bool
-_is_hidden_planar_label(std::string const& label)
+[[nodiscard]] std::string
+planar_unique_label(std::string const& tensor_name, std::string const& leg)
 {
-    return _is_hidden_planar_label(OptionalLabel{ label });
+    return std::format("{}{}{}", tensor_name, PLANAR_UNIQUE_LABEL_SEP, leg);
 }
 
 [[nodiscard]] std::vector<std::string>
-as_strings(OptionalLabels const& labels)
+as_strings(LegLabelList const& labels)
 {
     std::vector<std::string> out;
     out.reserve(labels.size());
     for (auto const& l : labels) {
-        out.push_back(l.value_or("None"));
+        out.push_back(l.empty() ? "None" : l);
     }
     return out;
 }
@@ -88,7 +91,7 @@ as_strings(OptionalLabels const& labels)
 _public_string_labels(TensorCPtr tensor)
 {
     std::vector<std::string> out;
-    auto labs = tensor->labels();
+    auto labs = tensor->labels.as_list();
     // ChargedTensor exposes public labels only (no charge leg).
     if (std::dynamic_pointer_cast<ChargedTensor const>(tensor)) {
         return as_strings(labs);
@@ -97,7 +100,7 @@ _public_string_labels(TensorCPtr tensor)
         if (HiddenLegTensor::is_hidden_leg_label(l) || HiddenLegTensor::is_charge_temp_label(l)) {
             continue;
         }
-        out.push_back(l.value_or("None"));
+        out.push_back(l.empty() ? "None" : l);
     }
     return out;
 }
@@ -263,10 +266,10 @@ strip_ws(std::string s)
     return s.substr(a, b - a + 1);
 }
 
-[[nodiscard]] OptionalLabels
+[[nodiscard]] LegLabelList
 labels_from_strings(std::vector<std::string> const& labels)
 {
-    OptionalLabels out;
+    LegLabelList out;
     out.reserve(labels.size());
     for (auto const& l : labels) {
         out.emplace_back(l);
@@ -326,7 +329,7 @@ planar_decomposition(TensorCPtr tensor,
                      int64 codomain_cut,
                      int64 domain_cut,
                      PlanarDecompWhich which,
-                     std::optional<OptionalLabels> new_labels,
+                     std::optional<LegLabelList> new_labels,
                      bool new_leg_dual,
                      std::optional<std::string> sort = std::nullopt,
                      std::optional<std::string> algorithm = std::nullopt,
@@ -374,16 +377,15 @@ planar_decomposition(TensorCPtr tensor,
         B = std::move(q);
     } else if (which == PlanarDecompWhich::eigh) {
         // eigh returns W, V, where V is the unitary -> permute legs as, e.g., Q in QR
-        auto [W, V] =
-          eigh(to_decompose, new_labels.value_or(OptionalLabels{}), new_leg_dual, sort);
+        auto [W, V] = eigh(to_decompose, new_labels.value_or(LegLabelList{}), new_leg_dual, sort);
         B = std::move(W);
         A = std::move(V);
     } else if (which == PlanarDecompWhich::eig) {
-        auto [W, V] = eig(to_decompose, new_labels.value_or(OptionalLabels{}), new_leg_dual, sort);
+        auto [W, V] = eig(to_decompose, new_labels.value_or(LegLabelList{}), new_leg_dual, sort);
         B = std::move(W);
         A = std::move(V);
     } else if (which == PlanarDecompWhich::eigvals) {
-        auto W = eigvals(to_decompose, new_labels.value_or(OptionalLabels{}), new_leg_dual, sort);
+        auto W = eigvals(to_decompose, new_labels.value_or(LegLabelList{}), new_leg_dual, sort);
         B = std::move(W);
     } else if (which == PlanarDecompWhich::svd) {
         auto [u, s, vh] = svd(to_decompose, new_labels, new_leg_dual, true, algorithm);
@@ -443,7 +445,7 @@ std::string
 _as_valid_name(std::string name)
 {
     name = strip_ws(std::move(name));
-    if (!is_valid_leg_label(OptionalLabel{ name })) {
+    if (!is_valid_leg_label(name)) {
         throw std::invalid_argument(std::format("Invalid name or leg label: {}", name));
     }
     return name;
@@ -528,7 +530,8 @@ _split_tensor_text(std::string const& text)
 TensorPlaceholder::TensorPlaceholder(std::vector<std::string> labels,
                                      std::vector<BigOPolynomial> dims,
                                      BigOPolynomial cost_to_make)
-  : LabelledLegs(labels_from_strings(labels))
+  : labels(labels_from_strings(labels))
+  , num_legs(static_cast<int64>(labels.size()))
   , cost_to_make(std::move(cost_to_make))
 {
     if (dims.empty()) {
@@ -551,7 +554,7 @@ TensorPlaceholder::copy(bool /*deep*/) const
 std::vector<std::string>
 TensorPlaceholder::string_labels() const
 {
-    return as_strings(labels());
+    return as_strings(labels.as_list());
 }
 
 std::string
@@ -998,39 +1001,39 @@ PlanarDiagram::evaluate(std::map<std::string, TensorPtr> tensors) const
     std::map<std::string, PlanarResult> working;
     for (auto const& [name, t] : prepared) {
         std::map<std::string, std::string> mapping;
-        for (auto const& l : t->labels()) {
-            if (!l || _is_hidden_planar_label(l)) {
+        for (auto const& l : t->labels.as_list()) {
+            if (l.empty() || _is_hidden_planar_label(l)) {
                 continue;
             }
-            mapping[*l] = std::format("{}:{}", name, *l);
+            mapping[l] = planar_unique_label(name, l);
         }
-        t->relabel(mapping);
+        t->labels.update(mapping);
         working.emplace(name, t);
     }
     std::vector<std::tuple<std::string, std::string, std::string>> traces;
     std::vector<std::tuple<std::string, std::string, std::string, std::string>> contractions;
     std::vector<std::pair<std::string, std::string>> open_legs;
     for (auto const& [t1, l1, t2, l2] : definition) {
-        auto rel_l1 = std::format("{}:{}", t1, l1);
+        auto rel_l1 = planar_unique_label(t1, l1);
         auto t1_tens = require_tensor(working.at(t1));
-        bool t1_has = t1_tens->has_label(rel_l1);
+        bool t1_has = t1_tens->labels.has(rel_l1);
         if (!t2) {
             if (!t1_has) {
                 throw std::invalid_argument(std::format("Missing open leg {}:{}", t1, l1));
             }
             open_legs.emplace_back(rel_l1, l2);
         } else if (t1 == *t2) {
-            auto rel_l2 = std::format("{}:{}", t1, l2);
-            bool t2_has = t1_tens->has_label(rel_l2);
+            auto rel_l2 = planar_unique_label(t1, l2);
+            bool t2_has = t1_tens->labels.has(rel_l2);
             if (!t1_has || !t2_has) {
                 throw std::invalid_argument(
                   std::format("Missing trace legs {}:{}, {}:{}", t1, l1, t1, l2));
             }
             traces.emplace_back(t1, rel_l1, rel_l2);
         } else {
-            auto rel_l2 = std::format("{}:{}", *t2, l2);
+            auto rel_l2 = planar_unique_label(*t2, l2);
             auto t2_tens = require_tensor(working.at(*t2));
-            bool t2_has = t2_tens->has_label(rel_l2);
+            bool t2_has = t2_tens->labels.has(rel_l2);
             if (!t1_has || !t2_has) {
                 throw std::invalid_argument(
                   std::format("Missing contraction legs {}:{}, {}:{}", t1, l1, *t2, l2));
@@ -1067,32 +1070,32 @@ PlanarDiagram::evaluate(std::map<std::string, TensorPlaceholder> tensors) const
     for (auto& [name, t] : prepared) {
         std::map<std::string, std::string> mapping;
         for (auto const& l : t.string_labels()) {
-            mapping[l] = std::format("{}:{}", name, l);
+            mapping[l] = planar_unique_label(name, l);
         }
-        t.relabel(mapping);
+        t.labels.update(mapping);
     }
     std::vector<std::tuple<std::string, std::string, std::string>> traces;
     std::vector<std::tuple<std::string, std::string, std::string, std::string>> contractions;
     std::vector<std::pair<std::string, std::string>> open_legs;
     for (auto const& [t1, l1, t2, l2] : definition) {
-        auto rel_l1 = std::format("{}:{}", t1, l1);
-        bool t1_has = prepared.at(t1).has_label(rel_l1);
+        auto rel_l1 = planar_unique_label(t1, l1);
+        bool t1_has = prepared.at(t1).labels.has(rel_l1);
         if (!t2) {
             if (!t1_has) {
                 throw std::invalid_argument(std::format("Missing open leg {}:{}", t1, l1));
             }
             open_legs.emplace_back(rel_l1, l2);
         } else if (t1 == *t2) {
-            auto rel_l2 = std::format("{}:{}", t1, l2);
-            bool t2_has = prepared.at(t1).has_label(rel_l2);
+            auto rel_l2 = planar_unique_label(t1, l2);
+            bool t2_has = prepared.at(t1).labels.has(rel_l2);
             if (!t1_has || !t2_has) {
                 throw std::invalid_argument(
                   std::format("Missing trace legs {}:{}, {}:{}", t1, l1, t1, l2));
             }
             traces.emplace_back(t1, rel_l1, rel_l2);
         } else {
-            auto rel_l2 = std::format("{}:{}", *t2, l2);
-            bool t2_has = prepared.at(*t2).has_label(rel_l2);
+            auto rel_l2 = planar_unique_label(*t2, l2);
+            bool t2_has = prepared.at(*t2).labels.has(rel_l2);
             if (!t1_has || !t2_has) {
                 throw std::invalid_argument(
                   std::format("Missing contraction legs {}:{}, {}:{}", t1, l1, *t2, l2));
@@ -1374,14 +1377,13 @@ PlanarDiagram::verify_diagram()
     int64 num_legs = 0;
     for (auto const& [t1, l1, t2, l2] : definition) {
         check(tensors.contains(t1), std::format("No tensor with name {}", t1));
-        check(tensors.at(t1).has_label(l1), std::format("Tensor {} has no leg {}", t1, l1));
+        check(tensors.at(t1).labels.has(l1), std::format("Tensor {} has no leg {}", t1, l1));
         num_legs += 1;
         if (!t2) {
-            check(is_valid_leg_label(OptionalLabel{ l2 }),
-                  std::format("Invalid leg label {}", l2));
+            check(is_valid_leg_label(l2), std::format("Invalid leg label {}", l2));
         } else {
             check(tensors.contains(*t2), std::format("No tensor with name {}", *t2));
-            check(tensors.at(*t2).has_label(l2), std::format("Tensor {} has no leg {}", *t2, l2));
+            check(tensors.at(*t2).labels.has(l2), std::format("Tensor {} has no leg {}", *t2, l2));
             num_legs += 1;
         }
     }
@@ -1405,9 +1407,9 @@ PlanarDiagram::verify_diagram()
     // - figures out the cost
     auto res = evaluate(tensors);
     std::vector<std::string> ol;
-    for (auto const& l : res.labels()) {
+    for (auto const& l : res.labels.as_list()) {
         if (!_is_hidden_planar_label(l)) {
-            ol.push_back(l.value_or("None"));
+            ol.push_back(l.empty() ? "None" : l);
         }
     }
     return { std::move(ol), res.cost_to_make };
@@ -1567,9 +1569,9 @@ PlanarDiagram::_extract_result(std::map<std::string, PlanarResult> const& tensor
     }
     auto t = std::get<TensorPtr>(tens);
     std::vector<std::string> visible_labels;
-    for (auto const& l : t->labels()) {
+    for (auto const& l : t->labels.as_list()) {
         if (!_is_hidden_planar_label(l)) {
-            visible_labels.push_back(l.value_or("None"));
+            visible_labels.push_back(l.empty() ? "None" : l);
         }
     }
     if (visible_open_legs.empty()) {
@@ -1595,7 +1597,7 @@ PlanarDiagram::_extract_result(std::map<std::string, PlanarResult> const& tensor
     for (auto const& [old, neu] : visible_open_legs) {
         mapping[old] = neu;
     }
-    t->relabel(mapping);
+    t->labels.update(mapping);
     return t;
 }
 
@@ -1614,9 +1616,9 @@ PlanarDiagram::_extract_result(std::map<std::string, TensorPlaceholder> const& t
         }
     }
     std::vector<std::string> visible_labels;
-    for (auto const& l : tens.labels()) {
+    for (auto const& l : tens.labels.as_list()) {
         if (!_is_hidden_planar_label(l)) {
-            visible_labels.push_back(l.value_or("None"));
+            visible_labels.push_back(l.empty() ? "None" : l);
         }
     }
     if (visible_open_legs.empty()) {
@@ -1642,7 +1644,7 @@ PlanarDiagram::_extract_result(std::map<std::string, TensorPlaceholder> const& t
     for (auto const& [old, neu] : visible_open_legs) {
         mapping[old] = neu;
     }
-    tens.relabel(mapping);
+    tens.labels.update(mapping);
     return tens;
 }
 
@@ -1757,7 +1759,7 @@ std::tuple<TensorPtr, TensorPtr>
 horizontal_factorization(TensorCPtr tensor,
                          int64 codomain_cut,
                          int64 domain_cut,
-                         std::optional<OptionalLabels> new_labels,
+                         std::optional<LegLabelList> new_labels,
                          std::optional<float64> cutoff_singular_values)
 {
     if (!cutoff_singular_values) {
@@ -1783,18 +1785,18 @@ horizontal_factorization(TensorCPtr tensor,
 bool
 planar_almost_equal(TensorCPtr tensor_1, TensorCPtr tensor_2, float64 rtol, float64 atol)
 {
-    auto labs1 = tensor_1->labels();
-    auto labs2 = tensor_2->labels();
-    if (contains(labs1, OptionalLabel{}) || contains(labs2, OptionalLabel{})) {
+    auto labs1 = tensor_1->labels.as_list();
+    auto labs2 = tensor_2->labels.as_list();
+    if (contains(labs1, "") || contains(labs2, "")) {
         throw std::invalid_argument("Can only compare tensors for which each leg has a label");
     }
     std::set<std::string> s1;
     std::set<std::string> s2;
     for (auto const& l : labs1) {
-        s1.insert(*l);
+        s1.insert(l);
     }
     for (auto const& l : labs2) {
-        s2.insert(*l);
+        s2.insert(l);
     }
     if (s1 != s2) {
         throw std::invalid_argument("Both tensors need to have the same leg labels");
@@ -1802,10 +1804,10 @@ planar_almost_equal(TensorCPtr tensor_1, TensorCPtr tensor_2, float64 rtol, floa
     std::vector<std::string> codomain;
     std::vector<std::string> domain;
     for (int64 i = 0; i < tensor_2->num_codomain_legs(); ++i) {
-        codomain.push_back(*labs2[static_cast<std::size_t>(i)]);
+        codomain.push_back(labs2[static_cast<std::size_t>(i)]);
     }
     for (int64 i = tensor_2->num_legs - 1; i >= tensor_2->num_codomain_legs(); --i) {
-        domain.push_back(*labs2[static_cast<std::size_t>(i)]);
+        domain.push_back(labs2[static_cast<std::size_t>(i)]);
     }
     auto t1 = planar_permute_legs(tensor_1, as_leg_refs(codomain), as_leg_refs(domain));
     return almost_equal(t1, tensor_2, rtol, atol, true);
@@ -1820,7 +1822,7 @@ planar_combine_legs(TensorCPtr T,
     std::vector<std::vector<int64>> which;
     which.reserve(which_legs.size());
     for (auto const& group : which_legs) {
-        which.push_back(T->get_leg_idcs(group));
+        which.push_back(T->labels.indices(group));
     }
     // identify if is there is a group on the left / right with legs that need
     // to be bent and where to combine them
@@ -1960,27 +1962,27 @@ _hidden_dual_label_pairs(TensorCPtr tensor1, TensorCPtr tensor2)
     if (!h1 || !h2) {
         return {};
     }
-    auto labs1 = tensor1->labels();
-    auto labs2 = tensor2->labels();
+    auto labs1 = tensor1->labels.as_list();
+    auto labs2 = tensor2->labels.as_list();
     std::vector<std::pair<int64, std::string>> hidden1;
     std::vector<std::pair<int64, std::string>> hidden2;
     for (int64 i = 0; i < tensor1->num_legs; ++i) {
         auto const& lab = labs1[static_cast<std::size_t>(i)];
         if (HiddenLegTensor::is_hidden_leg_label(lab)) {
-            hidden1.emplace_back(i, *lab);
+            hidden1.emplace_back(i, lab);
         }
     }
     for (int64 i = 0; i < tensor2->num_legs; ++i) {
         auto const& lab = labs2[static_cast<std::size_t>(i)];
         if (HiddenLegTensor::is_hidden_leg_label(lab)) {
-            hidden2.emplace_back(i, *lab);
+            hidden2.emplace_back(i, lab);
         }
     }
     std::vector<std::pair<std::string, std::string>> pairs;
     std::vector<bool> used2(hidden2.size(), false);
     for (auto const& [i1, lab1] : hidden1) {
         (void)i1;
-        auto dual1 = _dual_leg_label(OptionalLabel{ lab1 });
+        auto dual1 = _dual_leg_label(lab1);
         for (std::size_t j = 0; j < hidden2.size(); ++j) {
             if (used2[j]) {
                 continue;
@@ -1994,7 +1996,7 @@ _hidden_dual_label_pairs(TensorCPtr tensor1, TensorCPtr tensor2)
                   "implicitly.",
                   lab1));
             }
-            if (dual1 && *dual1 == lab2) {
+            if (dual1 == lab2) {
                 pairs.emplace_back(lab1, lab2);
                 used2[j] = true;
                 break;
@@ -2170,7 +2172,7 @@ _arrange_hidden_around_public_contr(TensorCPtr tensor,
     // Public cyclic order is unchanged, so public legs do not braid; hidden at
     // -1 may braid past public at 0.
     LevelsSpec levels(static_cast<std::size_t>(tensor->num_legs), std::optional<int64>{ 0 });
-    auto labs = tensor->labels();
+    auto labs = tensor->labels.as_list();
     for (int64 i = 0; i < tensor->num_legs; ++i) {
         if (HiddenLegTensor::is_hidden_leg_label(labs[static_cast<std::size_t>(i)])) {
             levels[static_cast<std::size_t>(i)] = -1;
@@ -2211,8 +2213,8 @@ planar_contraction(TensorCPtr tensor1,
                    std::map<std::string, std::string> relabel1,
                    std::map<std::string, std::string> relabel2)
 {
-    auto legs1_idcs = tensor1->get_leg_idcs(legs1);
-    auto legs2_idcs = tensor2->get_leg_idcs(legs2);
+    auto legs1_idcs = tensor1->labels.indices(legs1);
+    auto legs2_idcs = tensor2->labels.indices(legs2);
     auto num_contr = static_cast<int64>(legs1_idcs.size());
     if (static_cast<int64>(legs2_idcs.size()) != num_contr) {
         throw std::invalid_argument("legs1 and legs2 must have the same length");
@@ -2258,8 +2260,8 @@ planar_contraction(TensorCPtr tensor1,
         extra1.reserve(dual_labels.size());
         extra2.reserve(dual_labels.size());
         for (auto const& [l1, l2] : dual_labels) {
-            extra1.push_back(tensor1->get_leg_idcs(std::vector<LegRef>{ LegRef{ l1 } })[0]);
-            extra2.push_back(tensor2->get_leg_idcs(std::vector<LegRef>{ LegRef{ l2 } })[0]);
+            extra1.push_back(tensor1->labels.index(l1));
+            extra2.push_back(tensor2->labels.index(l2));
         }
         _check_hidden_circle_planar_contraction(tensor1, tensor2, extra1, extra2);
         auto [t1_arr, map1] = _arrange_hidden_around_public_contr(
@@ -2511,8 +2513,8 @@ planar_contraction(TensorPlaceholder const& tensor1,
                    std::vector<LegRef> legs1,
                    std::vector<LegRef> legs2)
 {
-    auto legs1_idcs = tensor1.get_leg_idcs(legs1);
-    auto legs2_idcs = tensor2.get_leg_idcs(legs2);
+    auto legs1_idcs = tensor1.labels.indices(legs1);
+    auto legs2_idcs = tensor2.labels.indices(legs2);
     auto num_contr = static_cast<int64>(legs1_idcs.size());
     if (static_cast<int64>(legs2_idcs.size()) != num_contr) {
         throw std::invalid_argument("legs1 and legs2 must have the same length");
@@ -2568,7 +2570,7 @@ std::tuple<DiagonalTensorPtr, TensorPtr>
 planar_eigh(TensorCPtr tensor,
             int64 codomain_cut,
             int64 domain_cut,
-            std::optional<OptionalLabels> new_labels,
+            std::optional<LegLabelList> new_labels,
             bool new_leg_dual,
             std::optional<std::string> sort)
 {
@@ -2590,7 +2592,7 @@ std::tuple<DiagonalTensorPtr, TensorPtr>
 planar_eig(TensorCPtr tensor,
            int64 codomain_cut,
            int64 domain_cut,
-           std::optional<OptionalLabels> new_labels,
+           std::optional<LegLabelList> new_labels,
            bool new_leg_dual,
            std::optional<std::string> sort)
 {
@@ -2612,7 +2614,7 @@ DiagonalTensorPtr
 planar_eigvals(TensorCPtr tensor,
                int64 codomain_cut,
                int64 domain_cut,
-               std::optional<OptionalLabels> new_labels,
+               std::optional<LegLabelList> new_labels,
                bool new_leg_dual,
                std::optional<std::string> sort)
 {
@@ -2634,7 +2636,7 @@ std::tuple<TensorPtr, TensorPtr>
 planar_lq(TensorCPtr tensor,
           int64 codomain_cut,
           int64 domain_cut,
-          std::optional<OptionalLabels> new_labels,
+          std::optional<LegLabelList> new_labels,
           bool new_leg_dual)
 {
     auto r = planar_decomposition(tensor,
@@ -2652,7 +2654,7 @@ planar_partial_trace(TensorCPtr tensor, std::vector<std::vector<LegRef>> pairs)
     std::vector<std::vector<int64>> pair_idcs;
     pair_idcs.reserve(pairs.size());
     for (auto const& p : pairs) {
-        pair_idcs.push_back(tensor->get_leg_idcs(p));
+        pair_idcs.push_back(tensor->labels.indices(p));
     }
     std::vector<int64> traced_legs;
     for (auto const& p : pair_idcs) {
@@ -2836,7 +2838,7 @@ planar_partial_trace(TensorPlaceholder const& tensor, std::vector<std::vector<Le
     std::vector<std::vector<int64>> pair_idcs;
     pair_idcs.reserve(pairs.size());
     for (auto const& p : pairs) {
-        pair_idcs.push_back(tensor.get_leg_idcs(p));
+        pair_idcs.push_back(tensor.labels.indices(p));
     }
     std::vector<int64> traced_legs;
     for (auto const& p : pair_idcs) {
@@ -3398,10 +3400,10 @@ planar_permute_legs(TensorCPtr T,
     std::optional<std::vector<int64>> domain_idcs;
     std::optional<std::vector<int64>> codomain_idcs;
     if (domain) {
-        domain_idcs = T->get_leg_idcs(*domain);
+        domain_idcs = T->labels.indices(*domain);
     }
     if (codomain) {
-        codomain_idcs = T->get_leg_idcs(*codomain);
+        codomain_idcs = T->labels.indices(*codomain);
     }
 
     // Hidden legs live on a second plane: if only public legs are specified, the permutation
@@ -3439,7 +3441,7 @@ std::tuple<TensorPtr, TensorPtr>
 planar_qr(TensorCPtr tensor,
           int64 codomain_cut,
           int64 domain_cut,
-          std::optional<OptionalLabels> new_labels,
+          std::optional<LegLabelList> new_labels,
           bool new_leg_dual)
 {
     auto r = planar_decomposition(tensor,
@@ -3455,7 +3457,7 @@ std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr>
 planar_svd(TensorCPtr tensor,
            int64 codomain_cut,
            int64 domain_cut,
-           std::optional<OptionalLabels> new_labels,
+           std::optional<LegLabelList> new_labels,
            bool new_leg_dual,
            std::optional<std::string> algorithm)
 {
@@ -3474,7 +3476,7 @@ std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr, float64, float64>
 planar_truncated_svd(TensorCPtr tensor,
                      int64 codomain_cut,
                      int64 domain_cut,
-                     std::optional<OptionalLabels> new_labels,
+                     std::optional<LegLabelList> new_labels,
                      bool new_leg_dual,
                      std::optional<std::string> algorithm,
                      std::optional<float64> normalize_to,

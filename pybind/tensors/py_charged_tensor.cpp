@@ -300,28 +300,6 @@ bind_tensors_charged_tensor(py::module_& m)
             py::arg("device"),
             DOC(lasyten, ChargedTensor, move_to_device));
 
-    cls.def(
-      "set_label",
-      [](ChargedTensor& self, int64 pos, py::object label) -> ChargedTensor& {
-          OptionalLabel lab = label.is_none()
-                                ? std::nullopt
-                                : std::optional<std::string>{ label.cast<std::string>() };
-          self.set_label(pos, lab);
-          return self;
-      },
-      py::arg("pos"),
-      py::arg("label"),
-      DOC(lasyten, ChargedTensor, set_label));
-
-    cls.def(
-      "set_labels",
-      [](ChargedTensor& self, py::object labels) -> ChargedTensor& {
-          self.set_labels(parse_tensor_init_labels(labels, self.codomain, self.domain));
-          return self;
-      },
-      py::arg("labels"),
-      DOC(lasyten, ChargedTensor, set_labels));
-
     cls.def("to_backend",
             &ChargedTensor::to_backend,
             py::arg("backend"),

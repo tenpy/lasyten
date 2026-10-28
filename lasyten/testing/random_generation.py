@@ -367,7 +367,7 @@ def random_tensor(
                     if len(dom_factors) > 1
                     else spaces.TensorProduct([], symmetry=symmetry)
                 )
-                pub_labels = like.labels[:-1]
+                pub_labels = like.labels.as_list()[:-1]
                 charged = random_tensor(
                     symmetry=symmetry,
                     backend=backend,

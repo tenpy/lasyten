@@ -400,9 +400,8 @@ class ElementarySpace
 
     /// Direct sum with `others`, always wrapped as a `DirectSumSpace` (even if `others`
     /// is empty and no `summand_labels` are given).
-    [[nodiscard]] Ptr direct_sum(
-      std::vector<Ptr> const& others,
-      std::optional<OptionalLabels> summand_labels = std::nullopt) const;
+    [[nodiscard]] Ptr direct_sum(std::vector<Ptr> const& others,
+                                 std::optional<LegLabelList> summand_labels = std::nullopt) const;
 
     Space::Ptr drop_symmetry(std::optional<std::vector<int64>> which = std::nullopt) override;
 
@@ -473,11 +472,11 @@ class DirectSumSpace : public ElementarySpace
     std::vector<ElementarySpace::Ptr> spaces;
 
     /// Optional label per summand (parallel to `spaces`; `nullopt` entries are unlabeled).
-    OptionalLabels summand_labels;
+    LegLabelList summand_labels;
 
     explicit DirectSumSpace(std::vector<ElementarySpace::Ptr> spaces,
                             bool is_dual = false,
-                            std::optional<OptionalLabels> summand_labels = std::nullopt);
+                            std::optional<LegLabelList> summand_labels = std::nullopt);
     ~DirectSumSpace() override = default;
 
     void test_sanity() const override;
@@ -491,7 +490,7 @@ class DirectSumSpace : public ElementarySpace
     [[nodiscard]] static Ptr from_spaces(
       std::vector<ElementarySpace::Ptr> spaces,
       bool is_dual = false,
-      std::optional<OptionalLabels> summand_labels = std::nullopt);
+      std::optional<LegLabelList> summand_labels = std::nullopt);
 
     /// Resolve a summand reference (index or label) to a normalized, non-negative index.
     [[nodiscard]] int64 get_summand_idx(SummandRef which) const;
@@ -558,7 +557,7 @@ class DirectSumSpace : public ElementarySpace
       std::optional<std::vector<SummandRef>> keep_indices = std::nullopt,
       std::optional<std::vector<SummandRef>> discard_indices = std::nullopt,
       std::shared_ptr<TensorBackend> backend = nullptr,
-      std::optional<OptionalLabels> labels = std::nullopt,
+      std::optional<LegLabelList> labels = std::nullopt,
       std::optional<std::string> device = std::nullopt) const;
 
     /// Inclusion Mask onto the union of selected summands (dagger of the projection).
@@ -573,7 +572,7 @@ class DirectSumSpace : public ElementarySpace
       std::optional<std::vector<SummandRef>> keep_indices = std::nullopt,
       std::optional<std::vector<SummandRef>> discard_indices = std::nullopt,
       std::shared_ptr<TensorBackend> backend = nullptr,
-      std::optional<OptionalLabels> labels = std::nullopt,
+      std::optional<LegLabelList> labels = std::nullopt,
       std::optional<std::string> device = std::nullopt) const;
 
     /// Projection Mask onto summand ``which`` (index or label).
@@ -586,7 +585,7 @@ class DirectSumSpace : public ElementarySpace
     [[nodiscard]] MaskPtr projection_onto_summand(
       SummandRef which,
       std::shared_ptr<TensorBackend> backend = nullptr,
-      std::optional<OptionalLabels> labels = std::nullopt,
+      std::optional<LegLabelList> labels = std::nullopt,
       std::optional<std::string> device = std::nullopt) const;
 
     /// Inclusion Mask of summand ``which`` (index or label; dagger of the projection).
@@ -596,7 +595,7 @@ class DirectSumSpace : public ElementarySpace
     [[nodiscard]] MaskPtr inclusion_of_summand(
       SummandRef which,
       std::shared_ptr<TensorBackend> backend = nullptr,
-      std::optional<OptionalLabels> labels = std::nullopt,
+      std::optional<LegLabelList> labels = std::nullopt,
       std::optional<std::string> device = std::nullopt) const;
 
     /// Unit vector selecting summand ``i``.
@@ -608,7 +607,7 @@ class DirectSumSpace : public ElementarySpace
     [[nodiscard]] SymmetricTensorPtr unit_vector_of_summand(
       int64 i,
       std::shared_ptr<TensorBackend> backend = nullptr,
-      std::optional<OptionalLabels> labels = std::nullopt,
+      std::optional<LegLabelList> labels = std::nullopt,
       std::optional<Dtype> dtype = std::nullopt,
       std::optional<std::string> device = std::nullopt) const;
 
@@ -644,12 +643,12 @@ class DirectSumSpace : public ElementarySpace
         SectorArray defining_sectors;
         std::vector<int64> multiplicities;
         std::optional<std::vector<int64>> basis_perm;
-        OptionalLabels summand_labels;
+        LegLabelList summand_labels;
     };
 
     static Prepared prepare(std::vector<ElementarySpace::Ptr> spaces,
                             bool is_dual,
-                            std::optional<OptionalLabels> summand_labels);
+                            std::optional<LegLabelList> summand_labels);
 
     DirectSumSpace(Prepared prepared, bool is_dual);
 

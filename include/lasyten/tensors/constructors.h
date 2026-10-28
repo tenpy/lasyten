@@ -26,7 +26,7 @@ namespace lasyten {
 /// @param diagonal If true, return a diagonal identity.
 [[nodiscard]] TensorPtr eye(Space::Ptr leg,
                             TensorBackend::Ptr backend = nullptr,
-                            std::optional<OptionalLabels> labels = std::nullopt,
+                            std::optional<LegLabelList> labels = std::nullopt,
                             Dtype dtype = Dtype::Float64,
                             std::optional<std::string> device = std::nullopt,
                             bool diagonal = true);
@@ -43,7 +43,7 @@ namespace lasyten {
                                TensorProduct::Ptr codomain,
                                TensorProduct::Ptr domain = nullptr,
                                TensorBackend::Ptr backend = nullptr,
-                               std::optional<OptionalLabels> labels = std::nullopt,
+                               std::optional<LegLabelList> labels = std::nullopt,
                                std::optional<Dtype> dtype = std::nullopt,
                                std::optional<std::string> device = std::nullopt);
 
@@ -60,7 +60,7 @@ namespace lasyten {
                                         TensorProduct::Ptr codomain,
                                         TensorProduct::Ptr domain = nullptr,
                                         TensorBackend::Ptr backend = nullptr,
-                                        std::optional<OptionalLabels> labels = std::nullopt,
+                                        std::optional<LegLabelList> labels = std::nullopt,
                                         std::optional<Dtype> dtype = std::nullopt,
                                         std::optional<std::string> device = std::nullopt,
                                         bool understood_braiding = false);
@@ -92,7 +92,7 @@ namespace lasyten {
                                         std::optional<int64> legs_pos = std::nullopt,
                                         std::optional<int64> codomain_pos = std::nullopt,
                                         std::optional<int64> domain_pos = std::nullopt,
-                                        OptionalLabel label = std::nullopt,
+                                        std::string label = "",
                                         bool is_dual = false);
 
 /// Return a zero tensor with the same type, dtype, legs, backend and labels.
@@ -142,10 +142,10 @@ namespace lasyten {
 ///     on the resulting domain leg; `nullopt` means unlabeled. If given, must have one entry
 ///     per column.
 [[nodiscard]] TensorPtr tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
-                                         std::optional<OptionalLabels> labels = std::nullopt,
+                                         std::optional<LegLabelList> labels = std::nullopt,
                                          std::optional<Dtype> dtype = std::nullopt,
-                                         std::optional<OptionalLabels> row_labels = std::nullopt,
-                                         std::optional<OptionalLabels> col_labels = std::nullopt);
+                                         std::optional<LegLabelList> row_labels = std::nullopt,
+                                         std::optional<LegLabelList> col_labels = std::nullopt);
 
 /// Extract cell ``(row, col)`` from a tensor stacked by `tensor_from_grid`.
 ///

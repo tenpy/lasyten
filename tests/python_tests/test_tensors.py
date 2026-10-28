@@ -29,8 +29,9 @@ from lasyten.symmetries import (
     SymmetryError,
     TensorProduct,
 )
-from lasyten.tensors import ChargedTensor, DiagonalTensor, HiddenLegTensor, Mask, SymmetricTensor, Tensor
+from lasyten.tensors import ChargedTensor, DiagonalTensor, HiddenLegTensor, LegLabels, Mask, SymmetricTensor, Tensor
 from lasyten.testing import assert_equivalent_legs, assert_tensors_almost_equal, random_tensor, swap_gate_numpy
+from lasyten.tools import hdf5_io
 from lasyten.tools.misc import duplicate_entries, inverse_permutation, iter_common_noncommon_sorted_arrays, to_valid_idx
 
 fermion_parity = FermionParity().as_Symmetry()
@@ -81,25 +82,25 @@ def test_base_Tensor(make_compatible_space, compatible_backend):
     print('checking different labels input formats')
     tens1 = DummyTensor([a, b, c], [d, e], backend=compatible_backend, labels=None, dtype=Dtype.float64)
     tens1.test_sanity()
-    assert tens1._labels == [None] * 5
+    assert tens1.labels == [''] * 5
 
     tens2 = DummyTensor(
         [a, b, c], [d, e], backend=compatible_backend, labels=['a', 'b', 'c', 'e*', 'd*'], dtype=Dtype.float64
     )
     tens2.test_sanity()
-    assert tens2._labels == ['a', 'b', 'c', 'e*', 'd*']
+    assert tens2.labels == ['a', 'b', 'c', 'e*', 'd*']
 
     tens3 = DummyTensor(
-        [a, b, c], [d, e], backend=compatible_backend, labels=[['a', None, None], ['d*', 'e*']], dtype=Dtype.float64
+        [a, b, c], [d, e], backend=compatible_backend, labels=[['a', '', ''], ['d*', 'e*']], dtype=Dtype.float64
     )
     tens3.test_sanity()
-    assert tens3._labels == ['a', None, None, 'e*', 'd*']
+    assert tens3.labels == ['a', '', '', 'e*', 'd*']
 
     tens4 = DummyTensor(
-        [a, b, c], [d, e], backend=compatible_backend, labels=[['a', None, None], None], dtype=Dtype.float64
+        [a, b, c], [d, e], backend=compatible_backend, labels=[['a', '', ''], None], dtype=Dtype.float64
     )
     tens4.test_sanity()
-    assert tens4._labels == ['a', None, None, None, None]
+    assert tens4.labels == ['a', '', '', '', '']
 
     print('checking .legs , .num_(co)domain_legs')
     for t in [tens1, tens2, tens3, tens4]:
@@ -118,28 +119,28 @@ def test_base_Tensor(make_compatible_space, compatible_backend):
         _ = tens1 == tens2
 
     print('checking .(co)domain_labels')
-    assert tens1.codomain_labels == [None] * 3
-    assert tens1.domain_labels == [None] * 2
+    assert tens1.codomain_labels == [''] * 3
+    assert tens1.domain_labels == [''] * 2
     assert tens2.codomain_labels == ['a', 'b', 'c']
     assert tens2.domain_labels == ['d*', 'e*']
-    assert tens3.codomain_labels == ['a', None, None]
+    assert tens3.codomain_labels == ['a', '', '']
     assert tens3.domain_labels == ['d*', 'e*']
-    assert tens4.codomain_labels == ['a', None, None]
-    assert tens4.domain_labels == [None, None]
+    assert tens4.codomain_labels == ['a', '', '']
+    assert tens4.domain_labels == ['', '']
 
     print('checking .is_fully_labelled')
-    assert not tens1.is_fully_labelled
-    assert tens2.is_fully_labelled
-    assert not tens3.is_fully_labelled
-    assert not tens4.is_fully_labelled
+    assert not tens1.labels.is_fully_labelled
+    assert tens2.labels.is_fully_labelled
+    assert not tens3.labels.is_fully_labelled
+    assert not tens4.labels.is_fully_labelled
 
     print('check setting labels')
     tens1.labels = ['e', 'b', 'f', 'c', 'x']
-    assert tens1._labels == ['e', 'b', 'f', 'c', 'x']
+    assert tens1.labels == ['e', 'b', 'f', 'c', 'x']
 
     print('check relabel')
-    tens1.relabel(dict(e='xx', x='e'))
-    assert tens1._labels == ['xx', 'b', 'f', 'c', 'e']
+    tens1.labels.update(dict(e='xx', x='e'))
+    assert tens1.labels == ['xx', 'b', 'f', 'c', 'e']
 
     print('check _parse_leg_idx')
     assert tens1._parse_leg_idx(1) == (False, 1, 1)
@@ -155,15 +156,62 @@ def test_base_Tensor(make_compatible_space, compatible_backend):
     assert tens2.get_leg('e*') == e.dual
 
     print('check has_label')
-    assert tens2.has_label('a')
-    assert tens2.has_label('a', 'b', 'e*')
-    assert not tens2.has_label('foo')
-    assert not tens2.has_label('a', 'b', '42')
+    assert tens2.labels.has('a')
+    assert tens2.labels.has('a', 'b', 'e*')
+    assert not tens2.labels.has('foo')
+    assert not tens2.labels.has('a', 'b', '42')
 
     print('check labels_are')
-    assert tens2.labels_are('a', 'c', 'b', 'e*', 'd*')
-    assert tens2.labels_are('c', 'e*', 'd*', 'a', 'b', planar=True)
-    assert not tens2.labels_are('a', 'c', 'b', 'e*', 'd*', planar=True)
+    assert tens2.labels.are('a', 'c', 'b', 'e*', 'd*')
+    assert tens2.labels.are('c', 'e*', 'd*', 'a', 'b', planar=True)
+    assert not tens2.labels.are('a', 'c', 'b', 'e*', 'd*', planar=True)
+
+
+def test_LegLabels_api(make_compatible_space, compatible_backend, tmp_path):
+    """Exercise the composed LegLabels API (list-like access, rename, HDF5)."""
+    ll = LegLabels(['a', '', 'c'])
+    assert isinstance(ll, LegLabels)
+    assert ll == ['a', '', 'c']
+    assert len(ll) == 3
+    assert ll[0] == 'a' and ll[1] == ''
+    assert ll.as_list() == ['a', '', 'c']
+
+    ll[1] = 'b'
+    ll['a'] = 'a0'
+    assert ll.as_list() == ['a0', 'b', 'c']
+    assert ll.index('b') == 1
+    assert ll.index(-1) == 2
+    assert ll.indices(['c', 0]) == [2, 0]
+    assert 'b' in ll
+    assert ll.has('b', 'c')
+    assert not ll.has('missing')
+
+    ll.update({'b': 'bb'})
+    assert ll[1] == 'bb'
+    ll.set(['x', 'y', 'z'])
+    assert ll == ['x', 'y', 'z']
+
+    a, b = make_compatible_space(), make_compatible_space()
+    t = DummyTensor([a], [b], backend=compatible_backend, labels=['p', 'p*'], dtype=Dtype.float64)
+    assert isinstance(t.labels, LegLabels)
+    assert t.labels == ['p', 'p*']
+    t.labels = ['x', 'x*']
+    assert t.labels.as_list() == ['x', 'x*']
+    t.labels[0] = 'y'
+    assert t.labels[0] == 'y'
+    t.labels['y'] = 'z'
+    assert t.labels.as_list() == ['z', 'x*']
+    t.labels.update({'z': 'p', 'x*': 'p*'})
+    assert t.labels == ['p', 'p*']
+
+    path = tmp_path / 'leg_labels.hdf5'
+    h5py = pytest.importorskip('h5py')
+    with h5py.File(path, 'w') as f:
+        hdf5_io.save_to_hdf5(f, ll)
+    with h5py.File(path, 'r') as f:
+        loaded = hdf5_io.load_from_hdf5(f)
+    assert isinstance(loaded, LegLabels)
+    assert loaded.as_list() == ll.as_list()
 
 
 @pytest.mark.parametrize('leg_nums', [(1, 1), (2, 1), (3, 0), (0, 3)], ids=['1->1', '1->2', '0->3', '3->0'])
@@ -909,7 +957,7 @@ def test_ChargedTensor_to_dense_block_single_sector(
 ):
     sector = make_compatible_sectors(1)[0]
     charge_leg = ElementarySpace(compatible_symmetry, SectorArray.from_sector(sector))
-    inv_part = make_compatible_tensor(codomain=1, domain=[charge_leg], labels=[None, '!'])
+    inv_part = make_compatible_tensor(codomain=1, domain=[charge_leg], labels=['', '!'])
     tens = ChargedTensor(inv_part, charged_state=[1])
     leg = tens.codomain[0]
 
@@ -1419,13 +1467,13 @@ def test_add_trivial_leg(cls, domain, codomain, is_dual, make_compatible_tensor,
 
 
 def test_add_trivial_leg_rejects_duplicate_label(make_compatible_tensor):
-    tens = make_compatible_tensor(codomain=1, domain=1, labels=['existing', None])
+    tens = make_compatible_tensor(codomain=1, domain=1, labels=['existing', ''])
 
     with pytest.raises(ValueError, match='already has label'):
         tensors.add_trivial_leg(tens, label='existing')
 
     res = tensors.add_trivial_leg(tens, label='new')
-    assert res.labels == ['new', 'existing', None]
+    assert res.labels == ['new', 'existing', '']
 
 
 def test_tensor_constructor_rejects_duplicate_labels(make_compatible_tensor):
@@ -2155,7 +2203,7 @@ def test_eigh(cls, dom, new_leg_dual, make_compatible_tensor):
     T: Tensor = make_compatible_tensor(dom, dom, cls=cls)
     T: Tensor = make_compatible_tensor(T.domain, T.domain, cls=cls)
     T = T + T.hc
-    T.set_labels(list('efghijk')[: 2 * dom])
+    T.labels.set(list('efghijk')[: 2 * dom])
     T.test_sanity()
 
     new_leg_dual_arg = {'new_leg_dual': True} if new_leg_dual else {}
@@ -2184,7 +2232,7 @@ def test_eigh(cls, dom, new_leg_dual, make_compatible_tensor):
 def test_eig(cls, dom, new_leg_dual, make_compatible_tensor):
     T: Tensor = make_compatible_tensor(dom, dom, cls=cls)
     T: Tensor = make_compatible_tensor(T.domain, T.domain, cls=cls)
-    T.set_labels(list('efghijk')[: 2 * dom])
+    T.labels.set(list('efghijk')[: 2 * dom])
     T.test_sanity()
 
     new_leg_dual_arg = {'new_leg_dual': True} if new_leg_dual else {}
@@ -2212,7 +2260,7 @@ def test_eigvalsh(cls, dom, new_leg_dual, make_compatible_tensor):
     T: Tensor = make_compatible_tensor(dom, dom, cls=cls)
     T: Tensor = make_compatible_tensor(T.domain, T.domain, cls=cls)
     T = T + T.hc
-    T.set_labels(list('efghijk')[: 2 * dom])
+    T.labels.set(list('efghijk')[: 2 * dom])
     T.test_sanity()
 
     new_leg_dual_arg = {'new_leg_dual': True} if new_leg_dual else {}
@@ -2236,7 +2284,7 @@ def test_eigvalsh(cls, dom, new_leg_dual, make_compatible_tensor):
 def test_eigvals(cls, dom, new_leg_dual, make_compatible_tensor):
     T: Tensor = make_compatible_tensor(dom, dom, cls=cls)
     T: Tensor = make_compatible_tensor(T.domain, T.domain, cls=cls)
-    T.set_labels(list('efghijk')[: 2 * dom])
+    T.labels.set(list('efghijk')[: 2 * dom])
     T.test_sanity()
 
     new_leg_dual_arg = {'new_leg_dual': True} if new_leg_dual else {}
@@ -2263,7 +2311,7 @@ def test_slice_leg(cls, dom, new_leg_dual, make_compatible_tensor, compatible_ba
     T: Tensor = make_compatible_tensor(dom, dom, cls=cls, **kwargs)
     T: Tensor = make_compatible_tensor(T.domain, T.domain, cls=cls, **kwargs)
     T = T + T.hc
-    T.set_labels(list('efghijk')[: 2 * dom])
+    T.labels.set(list('efghijk')[: 2 * dom])
 
     W, V = tensors.eigh(T, new_labels=['a', 'b', 'c'], new_leg_dual=new_leg_dual)
     eval_leg = V.domain_labels[0]
@@ -2494,10 +2542,10 @@ def test_horizontal_factorization(trunc, make_compatible_tensor, compatible_symm
     B.test_sanity()
     assert A.num_codomain_legs == cod_cut
     assert A.num_domain_legs == dom_cut + 1
-    assert A.labels == T.labels[:cod_cut] + ['a'] + T.labels[-dom_cut:]
+    assert A.labels == T.labels.as_list()[:cod_cut] + ['a'] + T.labels.as_list()[-dom_cut:]
     assert B.num_codomain_legs == 1 + (cod - cod_cut)
     assert B.num_domain_legs == dom - dom_cut
-    assert B.labels == ['b'] + T.labels[cod_cut:-dom_cut]
+    assert B.labels == ['b'] + T.labels.as_list()[cod_cut:-dom_cut]
 
     if T.symmetry.can_be_dropped:
         A_np = A.to_numpy(understood_braiding=True)  # [*J1, a, *K1_rev]
@@ -2966,14 +3014,14 @@ def test_partial_compose(cls_A, cls_B, legs_A, legs_B, A_contr_leg, make_compati
 
     if isinstance(B, Mask):
         expect = tensors.apply_mask(A, B, A_contr_leg)
-        expect.relabel({A.labels[A_contr_leg]: B.labels[int(A_contr_leg >= A.num_codomain_legs)]})
-        expect.relabel(relabel1)
-        expect.relabel(relabel2)
+        expect.labels.update({A.labels[A_contr_leg]: B.labels[int(A_contr_leg >= A.num_codomain_legs)]})
+        expect.labels.update(relabel1)
+        expect.labels.update(relabel2)
     elif isinstance(B, DiagonalTensor):
         expect = tensors.scale_axis(A, B, A_contr_leg)
-        expect.relabel({A.labels[A_contr_leg]: B.labels[int(A_contr_leg >= A.num_codomain_legs)]})
-        expect.relabel(relabel1)
-        expect.relabel(relabel2)
+        expect.labels.update({A.labels[A_contr_leg]: B.labels[int(A_contr_leg >= A.num_codomain_legs)]})
+        expect.labels.update(relabel1)
+        expect.labels.update(relabel2)
     else:
         # we can treat the invariant part of ChargedTensor in the same way, but need to take some extra care for the charge leg
         A_ = A.invariant_part if isinstance(A, ChargedTensor) else A
@@ -3028,7 +3076,8 @@ def test_partial_compose(cls_A, cls_B, legs_A, legs_B, A_contr_leg, make_compati
         elif isinstance(A, ChargedTensor):
             expect = ChargedTensor.from_invariant_part(expect, A.charged_state)
         elif isinstance(B, ChargedTensor):
-            expect = tensors.move_leg(expect, f'{c}B', domain_pos=0, bend_right=True).relabel({f'{c}B': c})
+            expect = tensors.move_leg(expect, f'{c}B', domain_pos=0, bend_right=True)
+            expect.labels.update({f'{c}B': c})
             expect = ChargedTensor.from_invariant_part(expect, B.charged_state)
 
     assert res.labels == expect.labels
@@ -3147,7 +3196,7 @@ def test_partial_trace(cls, codom, dom, make_compatible_space, make_compatible_t
         else:
             assert isinstance(res, cls)
             res.test_sanity()
-            assert res.labels == [l for l in T.labels if l[0] not in trace_legs]
+            assert res.labels == [l for l in T.labels.as_list() if l[0] not in trace_legs]
             assert res.codomain.factors == [
                 sp for sp, l in zip(T.codomain, T.codomain_labels) if l[0] not in trace_legs
             ]
@@ -3804,8 +3853,8 @@ def test_tdot(
 
     # create B such that legs with the same label can be contracted
     B: Tensor = make_compatible_tensor(
-        codomain=[A._as_domain_leg(l) if A.has_label(l) else None for l in labels_B[0]],
-        domain=[A._as_codomain_leg(l) if A.has_label(l) else None for l in labels_B[1]],
+        codomain=[A._as_domain_leg(l) if A.labels.has(l) else None for l in labels_B[0]],
+        domain=[A._as_codomain_leg(l) if A.labels.has(l) else None for l in labels_B[1]],
         labels=[*labels_B[0], *reversed(labels_B[1])],
         max_block_size=2,
         max_blocks=3,
@@ -3828,8 +3877,8 @@ def test_tdot(
     expect_legs = [A.get_leg(n) for n in range(A.num_legs) if n not in contr_A] + [
         B.get_leg(n) for n in range(B.num_legs) if n not in contr_B
     ]
-    expect_labels = [A._labels[n] for n in range(A.num_legs) if n not in contr_A] + [
-        B._labels[n] for n in range(B.num_legs) if n not in contr_B
+    expect_labels = [A.labels[n] for n in range(A.num_legs) if n not in contr_A] + [
+        B.labels[n] for n in range(B.num_legs) if n not in contr_B
     ]
 
     if (cls_A is Mask and cls_B is Mask) and num_contr > 0:
@@ -4026,7 +4075,7 @@ def test_tensor_grid_cell_roundtrip(make_compatible_tensor, make_compatible_spac
 
     # The operation only depends on the current legs, not tensor_from_grid provenance.
     direct = make_compatible_tensor([res.codomain[0]], [res.domain[-1]], cls=SymmetricTensor, use_pipes=False)
-    direct.set_labels(['wL', 'wR'])
+    direct.labels.set(['wL', 'wR'])
     expected = tensors.apply_mask(
         direct,
         direct.get_leg('wL').projection_onto_summand(1, backend=direct.backend),
@@ -4207,7 +4256,7 @@ def test_tensor_from_grid_hidden_labels(make_compatible_tensor, np_random):
     result = tensors.tensor_from_grid([[T]], labels=labels)
 
     assert isinstance(result, HiddenLegTensor)
-    assert all(result.labels == labels)
+    assert result.labels == labels
     assert result.hidden_leg_idcs() == [i for i, l in enumerate(labels) if l.startswith('!')]
 
 
@@ -4452,7 +4501,7 @@ def test_HiddenLegTensor_implicit_dual_contraction(make_compatible_tensor):
     res.test_sanity()
     # Hidden duals contract implicitly; only public open legs remain.
     assert '!h' not in (res.labels or []) and '!h*' not in (res.labels or [])
-    assert set(lab for lab in res.labels if lab) == {'a', 'c'}
+    assert set(lab for lab in res.labels.as_list() if lab) == {'a', 'c'}
     if isinstance(res, HiddenLegTensor):
         assert not res.hidden_leg_idcs()
 
@@ -4494,7 +4543,7 @@ def test_HiddenLegTensor_add_squeeze_trivial_leg_keeps_hidden(pos, make_compatib
     res = tensors.add_trivial_leg(H, label='t', **pos)
     res.test_sanity()
     assert isinstance(res, HiddenLegTensor)
-    assert [l for l in res.labels if l != 't'] == H.labels
+    assert [l for l in res.labels.as_list() if l != 't'] == H.labels
     assert [res.labels[i] for i in res.hidden_leg_idcs()] == ['!h']
     assert tensors.almost_equal(res.unhide_legs(), tensors.add_trivial_leg(T, label='t', **pos))
 
@@ -4842,7 +4891,8 @@ def test_flatten_pipe_leg(dual_pipes, make_compatible_tensor, make_compatible_sp
     def combine(T):
         dualities = [True, False] if dual_pipes else [False, True]
         T = tensors.combine_legs(T, ['vL0', 'vL1'], ['vR1', 'vR0'], pipe_dualities=dualities)
-        return T.relabel({'(vL0.vL1)': 'vL', '(vR1.vR0)': 'vR'})
+        T.labels.update({'(vL0.vL1)': 'vL', '(vR1.vR0)': 'vR'})
+        return T
 
     A, B = [combine(T) for T in [A0, B0]]
     assert A.codomain == A.domain

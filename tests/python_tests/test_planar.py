@@ -141,8 +141,8 @@ def test_planar_combine_legs(
     num_domain_legs = T.num_domain_legs
     num_domain_flat_legs = T.num_domain_flat_legs
     for group in which_legs:
-        leg0 = T.get_leg_idcs(group[0])[0]
-        for i, leg in enumerate(T.get_leg_idcs(group)):
+        leg0 = T.labels.index(group[0])
+        for i, leg in enumerate(T.labels.indices(group)):
             if i == 0:
                 continue
             if leg < T.num_codomain_legs:
@@ -168,7 +168,7 @@ def test_planar_combine_legs(
     # compare to nonplanar function
     T_combined2 = lasy.permute_legs(T, codomain=new_codomain, domain=new_domain, bend_right=bend_right)
     # make sure which_legs is sorted to avoid braids
-    which_legs = [sorted(T_combined2.get_leg_idcs(group)) for group in which_legs]
+    which_legs = [sorted(T_combined2.labels.indices(group)) for group in which_legs]
     T_combined2 = lasy.combine_legs(T_combined2, *which_legs, pipe_dualities=pipe_dualities)
     assert lasy.almost_equal(T_combined, T_combined2)
 
@@ -248,8 +248,8 @@ def test_planar_contraction(
 
     B: lasy.SymmetricTensor = lasy.testing.random_tensor(
         symmetry,
-        codomain=[A._as_domain_leg(l) if A.has_label(l) else None for l in labels_B[0]],
-        domain=[A._as_codomain_leg(l) if A.has_label(l) else None for l in labels_B[1]],
+        codomain=[A._as_domain_leg(l) if A.labels.has(l) else None for l in labels_B[0]],
+        domain=[A._as_codomain_leg(l) if A.labels.has(l) else None for l in labels_B[1]],
         labels=[*labels_B[0], *reversed(labels_B[1])],
         backend=backend,
         np_random=np_random,
@@ -298,7 +298,7 @@ def test_planar_eigh(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_compati
     T2 = T2 + T2.hc
     T2_labels = list('efghijk')[:num_dom_legs]
     T2_labels.extend(reversed([f'{l}*' for l in T2_labels]))
-    T2.set_labels(T2_labels)
+    T2.labels.set(T2_labels)
     T2.test_sanity()
 
     left_bends = dom_cut
@@ -318,14 +318,14 @@ def test_planar_eigh(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_compati
     assert W.labels == ['b', 'c']
     assert V.num_codomain_legs == cod_cut
     assert V.num_domain_legs == dom_cut + 1
-    assert V.labels == [*T.labels[:cod_cut], 'a', *T.labels[T.num_legs - dom_cut :]]
+    assert V.labels == [*T.labels.as_list()[:cod_cut], 'a', *T.labels.as_list()[T.num_legs - dom_cut :]]
 
     assert lasy.planar.planar_almost_equal(
         lasy.planar_contraction(lasy.planar_contraction(V, W, 'a', 'b'), V.hc, 'c', 'a*'), T
     )
     eye1 = lasy.SymmetricTensor.from_eye(T2.domain, T.backend, labels=T2_labels[: T2.num_domain_legs])
     eye2 = lasy.SymmetricTensor.from_eye([V.get_leg('a')], T.backend, labels=['a'])
-    eye2_contr = [l for l in V.labels if l != 'a']
+    eye2_contr = [l for l in V.labels.as_list() if l != 'a']
     assert lasy.planar.planar_almost_equal(lasy.planar_contraction(V, V.hc, 'a', 'a*'), eye1)
     assert lasy.planar.planar_almost_equal(
         lasy.planar_contraction(V, V.hc, eye2_contr, [f'{l}*' for l in eye2_contr]), eye2
@@ -358,7 +358,7 @@ def test_planar_eig(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_compatib
     T2: lasy.Tensor = make_compatible_tensor(T2.domain, T2.domain, cls=cls)
     T2_labels = list('efghijk')[:num_dom_legs]
     T2_labels.extend(reversed([f'{l}*' for l in T2_labels]))
-    T2.set_labels(T2_labels)
+    T2.labels.set(T2_labels)
     T2.test_sanity()
 
     left_bends = dom_cut
@@ -378,7 +378,7 @@ def test_planar_eig(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_compatib
     assert W.labels == ['b', 'c']
     assert V.num_codomain_legs == cod_cut
     assert V.num_domain_legs == dom_cut + 1
-    assert V.labels == [*T.labels[:cod_cut], 'a', *T.labels[T.num_legs - dom_cut :]]
+    assert V.labels == [*T.labels.as_list()[:cod_cut], 'a', *T.labels.as_list()[T.num_legs - dom_cut :]]
 
     W2, V2 = lasy.eig(T2, new_labels=['a', 'b', 'c'], new_leg_dual=new_leg_dual, sort=sort)
     W2.test_sanity()
@@ -406,7 +406,7 @@ def test_planar_eigvals(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_comp
     T2: lasy.Tensor = make_compatible_tensor(T2.domain, T2.domain, cls=cls)
     T2_labels = list('efghijk')[:num_dom_legs]
     T2_labels.extend(reversed([f'{l}*' for l in T2_labels]))
-    T2.set_labels(T2_labels)
+    T2.labels.set(T2_labels)
 
     left_bends = dom_cut
     right_bends = cod - cod_cut
@@ -524,8 +524,8 @@ def test_planar_partial_trace(codomain, domain, symmetry, backend, np_random):
     pairs = [(T.labels.index(l), T.labels.index(f'{l}*')) for l in trace_legs]
     res = lasy.planar.planar_partial_trace(T, *pairs)
     res.test_sanity()
-    assert res.labels == [l for l in T.labels if l[0] not in trace_legs]
-    assert res.legs == [T.get_leg(l) for l in T.labels if l[0] not in trace_legs]
+    assert res.labels == [l for l in T.labels.as_list() if l[0] not in trace_legs]
+    assert res.legs == [T.get_leg(l) for l in T.labels.as_list() if l[0] not in trace_legs]
 
     if T.symmetry.has_trivial_braid:
         T_np = T.to_numpy()
@@ -594,12 +594,12 @@ def test_planar_permute_legs(J, K, codomain, domain, symmetry, backend, np_rando
     assert lasy.planar.planar_almost_equal(T, res)
 
     if codomain is None or len(codomain) == 0:
-        domain = T.get_leg_idcs(domain)
+        domain = T.labels.indices(domain)
         num_codom_legs = T.num_legs - len(domain)
         codomain = [i % T.num_legs for i in range(domain[0] + 1, domain[0] + 1 + num_codom_legs)]
         rev_domain = domain[::-1]
     else:
-        codomain = T.get_leg_idcs(codomain)
+        codomain = T.labels.indices(codomain)
         num_dom_legs = T.num_legs - len(codomain)
         rev_domain = [i % T.num_legs for i in range(codomain[-1] + 1, codomain[-1] + 1 + num_dom_legs)]
     leg_perm = [*codomain, *rev_domain]
@@ -709,13 +709,13 @@ def test_planar_qr_lq(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_compat
     R.test_sanity()
     assert Q.num_codomain_legs == cod_cut
     assert Q.num_domain_legs == dom_cut + 1
-    assert Q.labels == [*T.labels[:cod_cut], 'v', *T.labels[T.num_legs - dom_cut :]]
+    assert Q.labels == [*T.labels.as_list()[:cod_cut], 'v', *T.labels.as_list()[T.num_legs - dom_cut :]]
     assert R.num_codomain_legs == 1 + (cod - cod_cut)
     assert R.num_domain_legs == dom - dom_cut
-    assert R.labels == ['v*', *T.labels[cod_cut : T.num_legs - dom_cut]]
+    assert R.labels == ['v*', *T.labels.as_list()[cod_cut : T.num_legs - dom_cut]]
     assert lasy.planar.planar_almost_equal(lasy.planar_contraction(Q, R, 'v', 'v*'), T)
     eye = lasy.SymmetricTensor.from_eye([Q.get_leg('v')], T.backend, labels=['v'])
-    contr = [l for l in Q.labels if l != 'v']
+    contr = [l for l in Q.labels.as_list() if l != 'v']
     assert lasy.planar.planar_almost_equal(lasy.planar_contraction(Q, Q.hc, contr, [f'{l}*' for l in contr]), eye)
     # compare to non-planar result
     idcs = [*range(T.num_legs - dom_cut, T.num_legs), *range(cod_cut)]
@@ -733,13 +733,13 @@ def test_planar_qr_lq(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_compat
     Q.test_sanity()
     assert L.num_codomain_legs == cod_cut
     assert L.num_domain_legs == dom_cut + 1
-    assert L.labels == [*T.labels[:cod_cut], 'v*', *T.labels[T.num_legs - dom_cut :]]
+    assert L.labels == [*T.labels.as_list()[:cod_cut], 'v*', *T.labels.as_list()[T.num_legs - dom_cut :]]
     assert Q.num_codomain_legs == 1 + (cod - cod_cut)
     assert Q.num_domain_legs == dom - dom_cut
-    assert Q.labels == ['v', *T.labels[cod_cut : T.num_legs - dom_cut]]
+    assert Q.labels == ['v', *T.labels.as_list()[cod_cut : T.num_legs - dom_cut]]
     assert lasy.planar.planar_almost_equal(lasy.planar_contraction(L, Q, 'v*', 'v'), T)
     eye = lasy.SymmetricTensor.from_eye([Q.get_leg('v')], T.backend, labels='v')
-    contr = [l for l in Q.labels if l != 'v']
+    contr = [l for l in Q.labels.as_list() if l != 'v']
     assert lasy.planar.planar_almost_equal(lasy.planar_contraction(Q, Q.hc, contr, [f'{l}*' for l in contr]), eye)
     # compare to non-planar result
     L2, Q2 = lasy.lq(T2, new_labels=['v*', 'v'], new_leg_dual=new_leg_dual)
@@ -776,11 +776,11 @@ def test_planar_svd(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_compatib
     Vh.test_sanity()
     assert U.num_codomain_legs == cod_cut
     assert U.num_domain_legs == dom_cut + 1
-    assert U.labels == [*T.labels[:cod_cut], 'a', *T.labels[T.num_legs - dom_cut :]]
+    assert U.labels == [*T.labels.as_list()[:cod_cut], 'a', *T.labels.as_list()[T.num_legs - dom_cut :]]
     assert S.labels == ['b', 'c']
     assert Vh.num_codomain_legs == 1 + (cod - cod_cut)
     assert Vh.num_domain_legs == dom - dom_cut
-    assert Vh.labels == ['d', *T.labels[cod_cut : T.num_legs - dom_cut]]
+    assert Vh.labels == ['d', *T.labels.as_list()[cod_cut : T.num_legs - dom_cut]]
 
     assert isinstance(S, lasy.DiagonalTensor)
     assert (S >= 0).all()
@@ -790,10 +790,10 @@ def test_planar_svd(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_compatib
         lasy.planar_contraction(lasy.planar_contraction(U, S, 'a', 'b'), Vh, 'c', 'd'), T
     )
     eye = lasy.SymmetricTensor.from_eye(S.domain, backend=T.backend, labels=['a*', 'a'])
-    contr_U = [l for l in U.labels if l != 'a']
-    contr_Vh = [l for l in Vh.labels if l != 'd']
+    contr_U = [l for l in U.labels.as_list() if l != 'a']
+    contr_Vh = [l for l in Vh.labels.as_list() if l != 'd']
     assert lasy.planar.planar_almost_equal(lasy.planar_contraction(U, U.hc, contr_U, [f'{l}*' for l in contr_U]), eye)
-    eye.set_labels(['d', 'd*'])
+    eye.labels.set(['d', 'd*'])
     assert lasy.planar.planar_almost_equal(
         lasy.planar_contraction(Vh, Vh.hc, contr_Vh, [f'{l}*' for l in contr_Vh]), eye
     )
@@ -834,11 +834,11 @@ def test_planar_svd(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_compatib
         Vh.test_sanity()
         assert U.num_codomain_legs == cod_cut
         assert U.num_domain_legs == dom_cut + 1
-        assert U.labels == [*T.labels[:cod_cut], 'a', *T.labels[T.num_legs - dom_cut :]]
+        assert U.labels == [*T.labels.as_list()[:cod_cut], 'a', *T.labels.as_list()[T.num_legs - dom_cut :]]
         assert S.labels == ['b', 'c']
         assert Vh.num_codomain_legs == 1 + (cod - cod_cut)
         assert Vh.num_domain_legs == dom - dom_cut
-        assert Vh.labels == ['d', *T.labels[cod_cut : T.num_legs - dom_cut]]
+        assert Vh.labels == ['d', *T.labels.as_list()[cod_cut : T.num_legs - dom_cut]]
 
         norm_T = lasy.norm(T).to_numpy()
         lambda_kept = S / norm_T if normalize_to is None else (renormalize / norm_T) * S
@@ -853,7 +853,7 @@ def test_planar_svd(cls, dom, cod, dom_cut, cod_cut, new_leg_dual, make_compatib
         assert lasy.planar.planar_almost_equal(
             lasy.planar_contraction(U, U.hc, contr_U, [f'{l}*' for l in contr_U]), eye
         )
-        eye.set_labels(['d', 'd*'])
+        eye.labels.set(['d', 'd*'])
         assert lasy.planar.planar_almost_equal(
             lasy.planar_contraction(Vh, Vh.hc, contr_Vh, [f'{l}*' for l in contr_Vh]), eye
         )
@@ -935,7 +935,7 @@ def test_PlanarDiagram(symmetry, np_random):
     expect1 = lasy.planar.planar_contraction(expect1, mixL, 'wR', 'wL')
     expect1 = lasy.planar.planar_contraction(expect1, W.hc, ['p0*', 'wL*'], ['p', 'wR*'])
     expect1 = lasy.planar.planar_contraction(expect1, Lp.hc, ['vL*', 'wL*'], ['vR*', 'wR*'])
-    expect1 = expect1.relabel({'vR*': 'vL', 'vR': 'vL*'})
+    expect1.labels.update({'vR*': 'vL', 'vR': 'vL*'})
     expect1 = lasy.planar.planar_permute_legs(expect1, codomain=['p*', 'vL*'])
     assert expect1.labels == ['p*', 'vL*', 'vL', 'p']
     expect1.test_sanity()
@@ -968,7 +968,7 @@ def test_PlanarDiagram(symmetry, np_random):
         lasy.permute_legs(expect2, ['vR*', 'p', 'p*'], ['vL*', 'wL*'], bend_right=[False, None, None, True, None]),
         Lp.hc,
     )
-    expect2 = expect2.relabel({'vR*': 'vL', 'vR': 'vL*'})
+    expect2.labels.update({'vR*': 'vL', 'vR': 'vL*'})
     expect2 = lasy.permute_legs(expect2, ['p*', 'vL*'], ['p', 'vL'], bend_right=[False, False, None, True])
     expect2.test_sanity()
     assert lasy.planar.planar_almost_equal(res, expect2)
