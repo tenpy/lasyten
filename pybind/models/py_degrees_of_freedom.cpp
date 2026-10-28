@@ -78,6 +78,7 @@ bind_models_degrees_of_freedom(py::module_& m)
       .def_readwrite("backend", &Site::backend)
       .def_readwrite("default_device", &Site::default_device)
       .def_readwrite("onsite_operators", &Site::onsite_operators)
+      .def_readwrite("hc_ops", &Site::hc_ops)
       .def("test_sanity", &Site::test_sanity, DOC(lasyten, Site, test_sanity))
       .def_property_readonly("symmetry", &Site::symmetry)
       .def_property_readonly("dim", [](Site const& self) { return dim_to_python(self.dim()); })
@@ -87,9 +88,23 @@ bind_models_degrees_of_freedom(py::module_& m)
            py::arg("op"),
            py::arg("is_diagonal") = py::none(),
            py::arg("understood_braiding") = false,
+           py::arg("hc") = py::none(),
            DOC(lasyten, Site, add_onsite_operator))
       .def("valid_opname", &Site::valid_opname, py::arg("name"), DOC(lasyten, Site, valid_opname))
+      .def("test_op",
+           &Site::test_op,
+           py::arg("opname"),
+           "Check that an onsite operator name is known and available under this site's symmetry.")
+      .def("rename_op",
+           &Site::rename_op,
+           py::arg("old_name"),
+           py::arg("new_name"),
+           "Rename an onsite operator while preserving its hermitian-conjugate mapping.")
       .def("get_op", &Site::get_op, py::arg("name"), DOC(lasyten, Site, get_op))
+      .def("get_hc_op_name",
+           &Site::get_hc_op_name,
+           py::arg("name"),
+           "Return the name of the hermitian conjugate of an operator or operator product.")
       .def("multiply_op_names",
            &Site::multiply_op_names,
            py::arg("names"),

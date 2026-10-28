@@ -141,11 +141,23 @@ namespace lasyten {
 /// @param col_labels Optional label per grid column, stored as `DirectSumSpace::summand_labels`
 ///     on the resulting domain leg; `nullopt` means unlabeled. If given, must have one entry
 ///     per column.
+/// @param row_summands Optional space for each grid row, used to determine the summands of the
+///     resulting codomain leg. If omitted, each row must contain a tensor from which its space
+///     can be inferred. If given, must have one entry per row and agree with any tensors in that
+///     row.
+/// @param col_summands Optional space for each grid column, used to determine the summands of the
+///     resulting domain leg. If omitted, each column must contain a tensor from which its space
+///     can be inferred. If given, must have one entry per column and agree with any tensors in
+///     that column.
 [[nodiscard]] TensorPtr tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
                                          std::optional<OptionalLabels> labels = std::nullopt,
                                          std::optional<Dtype> dtype = std::nullopt,
                                          std::optional<OptionalLabels> row_labels = std::nullopt,
-                                         std::optional<OptionalLabels> col_labels = std::nullopt);
+                                         std::optional<OptionalLabels> col_labels = std::nullopt,
+                                         std::optional<std::vector<ElementarySpace::Ptr>> row_summands =
+                                           std::nullopt,
+                                         std::optional<std::vector<ElementarySpace::Ptr>> col_summands =
+                                           std::nullopt);
 
 /// Extract cell ``(row, col)`` from a tensor stacked by `tensor_from_grid`.
 ///

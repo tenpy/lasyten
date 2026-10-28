@@ -66,6 +66,12 @@ bind_models_couplings(py::module_& m)
                   py::arg("cutoff") = py::none(),
                   DOC(lasyten, Coupling, from_tensor))
       .def("to_tensor", &Coupling::to_tensor, DOC(lasyten, Coupling, to_tensor))
+      .def("dagger",
+           &Coupling::dagger,
+           py::arg("new_name") = py::none(),
+           "The hermitian conjugate of this coupling. Keeps the name unless `new_name` is given.")
+      .def_property_readonly(
+        "hc", [](Coupling const& self) { return self.dagger(); }, "Synonym for ``dagger()``.")
       .def("to_numpy",
            &Coupling::to_numpy,
            py::arg("leg_order") = py::none(),
@@ -128,6 +134,10 @@ bind_models_couplings(py::module_& m)
           py::arg("backend") = py::none(),
           py::arg("device") = py::none(),
           py::arg("name") = py::none(),
+          py::arg("Jpp") = complex128{},
+          py::arg("Jmp") = complex128{},
+          py::arg("Jpm") = complex128{},
+          py::arg("Jmm") = complex128{},
           DOC(lasyten, spin_spin_coupling));
 
     m.def("spin_field_coupling",

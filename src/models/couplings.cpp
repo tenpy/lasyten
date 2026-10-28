@@ -641,6 +641,16 @@ Coupling::to_tensor() const
     return as_symmetric(permute_legs(res, codom_labels, dom_labels, std::nullopt, false));
 }
 
+Coupling
+Coupling::dagger(std::optional<std::string> new_name) const
+{
+    // TODO: optimize. This is essentially `MPO.dagger()`: dagger each factorization tensor,
+    //  permute its legs and flip the arrows of the virtual legs. Flipping arrows is not well
+    //  supported yet, so we go via the full tensor for now.
+    SymmetricTensorPtr res = as_symmetric(lasyten::dagger(TensorCPtr{ to_tensor() }));
+    return from_tensor(res, sites, new_name ? new_name : name);
+}
+
 py::array
 Coupling::to_numpy(std::optional<std::vector<std::variant<int64, std::string>>> leg_order,
                    py::object dtype,
@@ -926,7 +936,11 @@ spin_spin_coupling(std::vector<Site::Ptr> sites,
                    float64 Jz,
                    py::object /*backend*/,
                    py::object /*device*/,
-                   py::object name)
+                   py::object name,
+                   complex128 Jpp,
+                   complex128 Jmp,
+                   complex128 Jpm,
+                   complex128 Jmm)
 {
     check_site_count(sites, 2);
     auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
@@ -947,6 +961,30 @@ spin_spin_coupling(std::vector<Site::Ptr> sites,
         py::object s2 =
           spin1->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), axis));
         h = np_add(h, np_multiply(py::float_(pref), np.attr("tensordot")(s1, s2, 0)));
+    }
+    if (Jpp != complex128{} || Jmp != complex128{} || Jpm != complex128{} || Jmm != complex128{}) {
+        auto spin_component = [](SpinDOF::Ptr const& spin, int axis) {
+            return spin->spin_vector.attr("__getitem__")(
+              py::make_tuple(py::slice(), py::slice(), axis));
+        };
+        auto imag = py::cast(complex128{ 0., 1. });
+        py::object sp0 =
+          np_add(spin_component(spin0, 0), np_multiply(imag, spin_component(spin0, 1)));
+        py::object sm0 =
+          np_add(spin_component(spin0, 0), np_multiply(-imag, spin_component(spin0, 1)));
+        py::object sp1 =
+          np_add(spin_component(spin1, 0), np_multiply(imag, spin_component(spin1, 1)));
+        py::object sm1 =
+          np_add(spin_component(spin1, 0), np_multiply(-imag, spin_component(spin1, 1)));
+        auto add_ladder_term = [&](complex128 pref, py::object op0, py::object op1) {
+            if (pref != complex128{}) {
+                h = np_add(h, np_multiply(py::cast(pref), np.attr("tensordot")(op0, op1, 0)));
+            }
+        };
+        add_ladder_term(Jpp, sp0, sp1);
+        add_ladder_term(Jmp, sm0, sp1);
+        add_ladder_term(Jpm, sp0, sm1);
+        add_ladder_term(Jmm, sm0, sm1);
     }
     h = np.attr("transpose")(h, py::make_tuple(0, 2, 3, 1));
     return coupling_from_dense_block(h.cast<py::array>(), sites, parse_name(name, "spin-spin"));
