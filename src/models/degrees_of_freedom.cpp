@@ -718,63 +718,19 @@ SpinDOF::spin_vector_from_Sp(py::array Sz, py::array Sp)
 
 namespace {
 
-/// Largest ``H <= limit`` for which ``<base>_N<N>_<kind>_hweight<H>.hdf5`` exists in `dir`.
-std::optional<int64>
-largest_su_n_weight(std::string const& dir,
-                    std::string const& base,
-                    int N,
-                    std::string const& kind,
-                    int64 limit)
-{
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    if (!fs::is_directory(dir, ec)) {
-        return std::nullopt;
-    }
-    std::string const prefix = std::format("{}_N{}_{}_hweight", base, N, kind);
-    std::string const suffix = ".hdf5";
-    std::optional<int64> best;
-    for (auto const& entry : fs::directory_iterator(dir, ec)) {
-        auto const name = entry.path().filename().string();
-        if (name.size() <= prefix.size() + suffix.size() || !name.starts_with(prefix) ||
-            !name.ends_with(suffix)) {
-            continue;
-        }
-        auto const digits =
-          name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
-        if (digits.size() > 9 ||
-            !std::ranges::all_of(digits, [](unsigned char c) { return std::isdigit(c) != 0; })) {
-            continue;
-        }
-        auto const h = static_cast<int64>(std::stoll(digits));
-        if (h <= limit && (!best || h > *best)) {
-            best = h;
-        }
-    }
-    return best;
-}
-
 /// Weights (CG, F, R) of the data files of the production SU(2) symmetry: the config options
-/// ``su2_{cg,f,r}_hweight`` if positive, otherwise the largest weights found in ``su_n_data_path``
-/// (F and R not above the CG weight), otherwise the historic defaults 20 / 6 / 6.
+/// ``su2_{cg,f,r}_hweight`` or ``su_n_hweights`` if set, otherwise the largest weights found in
+/// ``su_n_data_path`` (F and R not above the CG weight), otherwise the historic defaults 20 / 6 / 6.
 std::array<int64, 3>
 su2_data_hweights()
 {
-    auto const& config = get_config();
-    auto const dir = expand_user(config.su_n_data_path);
-    auto const& base = config.su_n_data_filename_base;
     constexpr int64 default_cg = 20;
     constexpr int64 default_f = 6;
     constexpr int64 default_r = 6;
-    auto const cg = config.su2_cg_hweight > 0
-                      ? std::optional<int64>(config.su2_cg_hweight)
-                      : largest_su_n_weight(dir, base, 2, "CG", std::numeric_limits<int64>::max());
-    int64 const h_cg = cg.value_or(default_cg);
-    auto const f = config.su2_f_hweight > 0 ? std::optional<int64>(config.su2_f_hweight)
-                                            : largest_su_n_weight(dir, base, 2, "F", h_cg);
-    auto const r = config.su2_r_hweight > 0 ? std::optional<int64>(config.su2_r_hweight)
-                                            : largest_su_n_weight(dir, base, 2, "R", h_cg);
-    return { h_cg, f.value_or(default_f), r.value_or(default_r) };
+    auto const detected = su_n_detect_hweights(2);
+    return { detected[0].value_or(default_cg),
+             detected[1].value_or(default_f),
+             detected[2].value_or(default_r) };
 }
 
 } // namespace

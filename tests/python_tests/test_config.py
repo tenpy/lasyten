@@ -207,3 +207,24 @@ def test_cache_option_temporary():
     with temporary_options(su_n_symbol_cache_mb=3):
         assert get_option('su_n_symbol_cache_mb') == 3
     assert get_option('su_n_symbol_cache_mb') == 256
+
+
+def test_su_n_hweights_option():
+    config = LasytenConfig()
+    assert config.get_option('su_n_hweights') == ''
+    for spec in ('3:5', '3:5,4,4', '3:5;4:3,3,3', ' 3 : 5 , 4 ; 4:3 ', '3:0,0,0', ''):
+        config.set_option('su_n_hweights', spec)
+        assert config.get_option('su_n_hweights') == spec
+    for bad in ('3', '3:', '3:a', '1:5', '3:5;3:4', '3:1,2,3,4', ':5', '3:-1', 'x:5'):
+        with pytest.raises(ValueError, match='su_n_hweights'):
+            config.set_option('su_n_hweights', bad)
+    assert config.get_option('su_n_hweights') == ''  # a rejected value does not change the option
+
+
+def test_su_n_hweights_env_override(monkeypatch):
+    with monkeypatch.context() as m:
+        m.setenv('LASYTEN_SU_N_HWEIGHTS', '3:5;4:3')
+        restore_defaults()
+        assert get_option('su_n_hweights') == '3:5;4:3'
+    restore_defaults()
+    assert get_option('su_n_hweights') == ''

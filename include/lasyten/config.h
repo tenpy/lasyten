@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,11 @@ std::string default_su_n_data_path();
 /// Expand a leading ``~`` (or ``~/...``) to the user's home directory. ``~user`` forms and paths
 /// without a resolvable home directory are returned unchanged.
 std::string expand_user(std::string path);
+
+/// The weights ``{cg, f, r}`` pinned by the config for the symmetry SU(N); an entry is 0 if it is
+/// not pinned. Sources: the option ``su_n_hweights`` and, for N = 2, ``su2_{cg,f,r}_hweight``
+/// (which take precedence).
+std::array<int64, 3> su_n_pinned_hweights(int N);
 
 // NOLINTBEGIN(readability-magic-numbers)
 
@@ -60,6 +66,11 @@ class LasytenConfig
     /// Highest weight of the Clebsch-Gordan / F / R files of the production SU(2) symmetry
     /// (``conserve='SU2'``). ``0`` (default) auto-detects the largest weight available in
     /// ``su_n_data_path``; a positive value pins it.
+    /// Pins the data weights of SU(N) symmetries that are created without explicit weights
+    /// (``SUN(N)``): a ``;``-separated list of ``N:cg[,f[,r]]`` entries, e.g. ``"3:5;4:3,3,3"``.
+    /// ``f`` and ``r`` default to ``cg``; ``0`` or a missing entry means "largest weight found in
+    /// ``su_n_data_path``". For N = 2 the options ``su2_{cg,f,r}_hweight`` take precedence.
+    std::string su_n_hweights = "";
     int64 su2_cg_hweight = 0;
     int64 su2_f_hweight = 0;
     int64 su2_r_hweight = 0;

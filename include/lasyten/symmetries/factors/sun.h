@@ -4,6 +4,7 @@
 
 #include <highfive/highfive.hpp>
 #include <lasyten/tools/hdf5.h>
+#include <array>
 #include <map>
 #include <memory>
 #include <optional>
@@ -90,9 +91,12 @@ class SUN : public Group
     ///
     /// ``hweight`` sets the highest weight for all three files; ``cg_hweight`` / ``f_hweight`` /
     /// ``r_hweight`` override it individually. The CG highest weight must be >= the F and R
-    /// highest weights.
+    /// highest weights. Without ``hweight`` every weight that is not given is taken from the
+    /// config option ``su_n_hweights`` or else is the largest
+    /// weight for which a data file exists (F and R not above the CG weight); a missing file
+    /// raises ``FileNotFoundError``.
     static Ptr from_config(int N,
-                           int64 hweight,
+                           std::optional<int64> hweight,
                            std::optional<int64> cg_hweight = std::nullopt,
                            std::optional<int64> f_hweight = std::nullopt,
                            std::optional<int64> r_hweight = std::nullopt,
@@ -179,5 +183,15 @@ class SUN : public Group
     HighFive::Group f_root() const;
     HighFive::Group r_root() const;
 };
+
+/// Weights ``{cg, f, r}`` of the data files that ``SUN::from_config`` would use for N without
+/// explicit weights; entries that cannot be determined (nothing pinned, no file found) are empty.
+std::array<std::optional<int64>, 3> su_n_detect_hweights(
+  int N,
+  std::optional<std::string> path = std::nullopt,
+  std::optional<std::string> filename_base = std::nullopt,
+  std::optional<int64> cg_hweight = std::nullopt,
+  std::optional<int64> f_hweight = std::nullopt,
+  std::optional<int64> r_hweight = std::nullopt);
 
 } // namespace lasyten

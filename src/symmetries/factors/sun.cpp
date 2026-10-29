@@ -1270,9 +1270,75 @@ SUN::from_hdf5(lasyten::hdf5::Loader& loader, HighFive::Group& h5gr, std::string
     return obj;
 }
 
+namespace {
+
+/// Largest ``H <= limit`` for which ``<base>_N<N>_<kind>_hweight<H>.hdf5`` exists in `dir`.
+std::optional<int64>
+largest_su_n_weight(std::string const& dir,
+                    std::string const& base,
+                    int N,
+                    std::string const& kind,
+                    int64 limit)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) {
+        return std::nullopt;
+    }
+    std::string const prefix = std::format("{}_N{}_{}_hweight", base, N, kind);
+    std::string const suffix = ".hdf5";
+    std::optional<int64> best;
+    for (auto const& entry : fs::directory_iterator(dir, ec)) {
+        auto const name = entry.path().filename().string();
+        if (name.size() <= prefix.size() + suffix.size() || !name.starts_with(prefix) ||
+            !name.ends_with(suffix)) {
+            continue;
+        }
+        auto const digits =
+          name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+        if (digits.size() > 9 ||
+            !std::ranges::all_of(digits, [](unsigned char c) { return std::isdigit(c) != 0; })) {
+            continue;
+        }
+        auto const h = static_cast<int64>(std::stoll(digits));
+        if (h <= limit && (!best || h > *best)) {
+            best = h;
+        }
+    }
+    return best;
+}
+
+} // namespace
+
+std::array<std::optional<int64>, 3>
+su_n_detect_hweights(int N,
+                     std::optional<std::string> path,
+                     std::optional<std::string> filename_base,
+                     std::optional<int64> cg_hweight,
+                     std::optional<int64> f_hweight,
+                     std::optional<int64> r_hweight)
+{
+    auto const& config = get_config();
+    auto const dir = expand_user(path.value_or(config.su_n_data_path));
+    auto const& base = filename_base.value_or(config.su_n_data_filename_base);
+    auto const pinned = su_n_pinned_hweights(N);
+    auto pick = [&](std::optional<int64> given, int64 pin, std::string const& kind, int64 limit) {
+        if (given.has_value()) {
+            return given;
+        }
+        if (pin > 0) {
+            return std::optional<int64>(pin);
+        }
+        return largest_su_n_weight(dir, base, N, kind, limit);
+    };
+    auto const cg = pick(cg_hweight, pinned[0], "CG", std::numeric_limits<int64>::max());
+    int64 const limit = cg.value_or(std::numeric_limits<int64>::max());
+    return { cg, pick(f_hweight, pinned[1], "F", limit), pick(r_hweight, pinned[2], "R", limit) };
+}
+
 SUN::Ptr
 SUN::from_config(int N,
-                 int64 hweight,
+                 std::optional<int64> hweight,
                  std::optional<int64> cg_hweight,
                  std::optional<int64> f_hweight,
                  std::optional<int64> r_hweight,
@@ -1280,9 +1346,36 @@ SUN::from_config(int N,
                  std::optional<std::string> filename_base,
                  std::optional<std::string> descriptive_name)
 {
-    const int64 h_cg = cg_hweight.value_or(hweight);
-    const int64 h_f = f_hweight.value_or(hweight);
-    const int64 h_r = r_hweight.value_or(hweight);
+    int64 h_cg = 0;
+    int64 h_f = 0;
+    int64 h_r = 0;
+    if (hweight.has_value()) {
+        h_cg = cg_hweight.value_or(*hweight);
+        h_f = f_hweight.value_or(*hweight);
+        h_r = r_hweight.value_or(*hweight);
+    } else {
+        auto const detected =
+          su_n_detect_hweights(N, path, filename_base, cg_hweight, f_hweight, r_hweight);
+        for (std::size_t i = 0; i < 3; ++i) {
+            if (!detected[i].has_value()) {
+                constexpr std::array<char const*, 3> kinds{ "CG", "F", "R" };
+                std::string const msg = std::format(
+                  "No SU({}) {} data file found in '{}' (name pattern '{}_N{}_{}_hweight<H>.hdf5'); pass the "
+                  "weights explicitly, set the config option 'su_n_hweights', or generate the data.",
+                  N,
+                  kinds[i],
+                  expand_user(path.value_or(get_config().su_n_data_path)),
+                  filename_base.value_or(get_config().su_n_data_filename_base),
+                  N,
+                  kinds[i]);
+                PyErr_SetString(PyExc_FileNotFoundError, msg.c_str());
+                throw py::error_already_set();
+            }
+        }
+        h_cg = *detected[0];
+        h_f = *detected[1];
+        h_r = *detected[2];
+    }
     for (auto [h, what] : { std::pair{ h_cg, "cg_hweight" },
                             std::pair{ h_f, "f_hweight" },
                             std::pair{ h_r, "r_hweight" } }) {
