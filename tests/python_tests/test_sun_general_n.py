@@ -104,26 +104,30 @@ def test_auto_weights_general_n(N, folder_dir):
 
 
 def test_auto_weights_pinned_by_option(tmp_path):
-    """CG weight 5 but F / R weight 4: the largest F / R file not above the CG weight, or pinned by the option."""
+    """Two complete data sets (weights 4 and 5, different generator runs) in one directory."""
     d = tmp_path / 'data'
     d.mkdir()
     base = _base_dir()
-    for kind, src, h in (('CG', 'N3_H5', 5), ('F', 'N3_H4', 4), ('R', 'N3_H4', 4)):
-        name = os.path.basename(symmetries.su_n_data_file_path(3, kind, h, path='.'))
-        if not (base / src / name).exists():
-            pytest.skip(f'missing {src}/{name}')
-        os.symlink(base / src / name, d / name)
-    sym = symmetries.SUN(3, path=str(d))
-    assert (sym.hweight_from_CG_hdf5(), sym.hweight_from_F_hdf5(), sym.hweight_from_R_hdf5()) == (5, 4, 4)
-    with temporary_options(su_n_hweights='3:5,4,4'):
-        sym = symmetries.SUN(3, path=str(d))
-        assert (sym.hweight_from_CG_hdf5(), sym.hweight_from_F_hdf5(), sym.hweight_from_R_hdf5()) == (5, 4, 4)
+    for src, h in (('N3_H4', 4), ('N3_H5', 5)):
+        for kind in ('CG', 'F', 'R'):
+            name = os.path.basename(symmetries.su_n_data_file_path(3, kind, h, path='.'))
+            if not (base / src / name).exists():
+                pytest.skip(f'missing {src}/{name}')
+            os.symlink(base / src / name, d / name)
+
+    def weights(sym):
+        return (sym.hweight_from_CG_hdf5(), sym.hweight_from_F_hdf5(), sym.hweight_from_R_hdf5())
+
+    assert weights(symmetries.SUN(3, path=str(d))) == (5, 5, 5)  # the largest data set
+    with temporary_options(su_n_hweights='3:4'):  # f and r default to cg
+        assert weights(symmetries.SUN(3, path=str(d))) == (4, 4, 4)
+    with temporary_options(su_n_hweights='3:5;4:2'):  # entries of other N are ignored
+        assert weights(symmetries.SUN(3, path=str(d))) == (5, 5, 5)
     with temporary_options(su_n_hweights='3:9'):  # pinned to a file that does not exist
         with pytest.raises(FileNotFoundError, match='hweight9'):
             symmetries.SUN(3, path=str(d))
-    # explicit arguments win over everything
-    sym = symmetries.SUN(3, cg_hweight=5, f_hweight=4, r_hweight=4, path=str(d))
-    assert sym.hweight_from_F_hdf5() == 4
+    with temporary_options(su_n_hweights='3:4'):  # explicit arguments win over the option
+        assert weights(symmetries.SUN(3, 5, path=str(d))) == (5, 5, 5)
 
 
 def test_auto_weights_missing_data(tmp_path):
@@ -184,12 +188,12 @@ def _copy_n3(tmp_path: Path, drop_gauge_version: bool) -> Path:
 
 
 def _drop_f_key(dst: Path, shape: tuple) -> list[np.ndarray]:
-    """Remove one F key with the given block shape; returns its sectors."""
+    """Remove one F key with the given block shape (not the all-trivial key, which every file must have)."""
     with h5py.File(dst / os.path.basename(symmetries.su_n_data_file_path(3, 'F', 4, path='.')), 'r+') as f:
         group = f['F_sym']
         for name in group.keys():
-            if group[name].shape == shape:
-                sectors = [np.array([int(x) for x in grp.split(',')]) for grp in name[2:-1].split('][')]
+            sectors = [np.array([int(x) for x in grp.split(',')]) for grp in name[2:-1].split('][')]
+            if group[name].shape == shape and any(sec.any() for sec in sectors):
                 del group[name]
                 return sectors
     raise AssertionError(f'no F key with block shape {shape}')
@@ -209,7 +213,7 @@ def test_new_gauge_file_missing_keys_are_errors(tmp_path):
     sectors = _drop_f_key(dst, (2, 1, 1, 2))
     r_name = None
     with h5py.File(dst / os.path.basename(symmetries.su_n_data_file_path(3, 'R', 4, path='.')), 'r+') as f:
-        r_name = next(iter(f['R_sym'].keys()))
+        r_name = [n for n in f['R_sym'].keys() if any(int(x) for x in n.replace('][', ',').strip('R[]').split(','))][0]
         r_sectors = [np.array([int(x) for x in grp.split(',')]) for grp in r_name[2:-1].split('][')]
         del f['R_sym'][r_name]
     sym = symmetries.SUN(3, 4, path=str(dst))
