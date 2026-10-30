@@ -15,7 +15,7 @@ import numpy as np
 import numpy.testing as npt
 import pytest
 
-from lasyten import _core, cache, symmetries, temporary_options
+from lasyten import cache, symmetries, temporary_options
 from lasyten.symmetries import SymmetryError
 
 _SUN_SYMBOLS_SUBMODULE_DIR = Path(__file__).resolve().parents[2] / 'external' / 'SUN_symbols'
@@ -148,16 +148,13 @@ def test_data_read_per_lookup_equals_data_in_ram(su2_dir, tmp_path):
     """Blocks larger than the RAM limit are read one hyperslab at a time; the result does not change."""
     folders = _sun(_make_dir(su2_dir, tmp_path / 'folders'))
     d = _make_dir(su2_dir, tmp_path / 'packed', 'packed', 'packed')
-    old = _core._set_packed_data_in_ram_max_bytes(0)
-    try:
+    with temporary_options(su_n_packed_ram_mb=0):
         before = cache.cache_info()['packed_files']
         packed = _sun(d)
         after = cache.cache_info()['packed_files']
         assert after['index_bytes'] > before['index_bytes']
         assert after['data_bytes_in_ram'] == before['data_bytes_in_ram']  # nothing was loaded
         _assert_same_symbols(folders, packed)
-    finally:
-        _core._set_packed_data_in_ram_max_bytes(old)
 
 
 def test_legacy_zero_block_is_zero_in_packed_files(su2_dir, tmp_path):

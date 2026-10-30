@@ -12,6 +12,7 @@ Tests that need data which is not available are skipped.
 """
 
 # Copyright (C) TeNPy Developers, Apache license
+import gc
 import os
 import shutil
 from pathlib import Path
@@ -181,19 +182,22 @@ def test_cache_does_not_change_symbols(N, folder_dir):
 
 
 def _copy_n3(tmp_path: Path, drop_gauge_version: bool) -> Path:
+    """Copy of the N3_H4 set; with ``drop_gauge_version`` a fully legacy set (no gauge record in any file)."""
     src = Path(_data_dir('N3_H4'))
     dst = tmp_path / 'data'
     dst.mkdir()
     for kind in ('CG', 'F', 'R'):
         name = os.path.basename(symmetries.su_n_data_file_path(3, kind, 4, path='.'))
-        if kind == 'CG':
+        if kind == 'CG' and not drop_gauge_version:
             os.symlink(src / name, dst / name)
         else:
             shutil.copy(src / name, dst / name)
     if drop_gauge_version:
-        for kind in ('F', 'R'):
+        for kind in ('CG', 'F', 'R'):
             with h5py.File(dst / os.path.basename(symmetries.su_n_data_file_path(3, kind, 4, path='.')), 'r+') as f:
                 del f.attrs['Gauge_Version']
+                if kind == 'CG':
+                    del f.attrs['CG_Run_Id']
     return dst
 
 
@@ -209,7 +213,11 @@ def _drop_f_key(dst: Path, shape: tuple) -> list[np.ndarray]:
     raise AssertionError(f'no F key with block shape {shape}')
 
 
-@pytest.mark.parametrize('shape', [(1, 1, 1, 1), (2, 1, 1, 2)])
+# the shape is (N(bce), N(aed), N(abf), N(fcd)); non-palindromic shapes catch a wrong axis order
+@pytest.mark.parametrize(
+    'shape',
+    [(1, 1, 1, 1), (2, 1, 1, 2), (1, 1, 1, 2), (2, 1, 1, 1), (1, 2, 1, 1), (1, 1, 2, 1), (2, 2, 2, 3)],
+)
 def test_legacy_file_missing_f_key_is_a_zero_block_of_true_shape(tmp_path, shape):
     dst = _copy_n3(tmp_path, drop_gauge_version=True)
     sectors = _drop_f_key(dst, shape)
@@ -265,6 +273,10 @@ def test_cg_run_id_mismatch_is_refused(tmp_path):
         (4, [1, 1, 0, 0], 6),
         (4, [2, 0, 0, 0], 10),
         (4, [2, 1, 1, 0], 15),
+        # from weight 4 on, a float computation of the Weyl dimension formula is off by one (34, 83, 69)
+        (4, [4, 0, 0, 0], 35),
+        (4, [4, 1, 0, 0], 84),
+        (4, [4, 1, 1, 0], 70),
     ],
 )
 def test_sector_dim_is_the_exact_integer(N, label, dim):
@@ -326,19 +338,185 @@ def test_dmrg_update_is_independent_of_the_caches(N, bond_weight):
 
     def run(symbol_mb, plan_mb):
         cache.clear_caches()
+        before = cache.cache_info()
         with temporary_options(su_n_symbol_cache_mb=symbol_mb, tree_plan_cache_mb=plan_mb):
             cur, outs = theta, []
             for _ in range(3):
                 cur = apply(cur)
                 outs.append(np.asarray(cur.to_dense_block()))
-            return outs, cache.cache_info()
+            info = cache.cache_info()
+        for name in ('symbols', 'tree_plans'):  # counters since the start of this run
+            for counter in ('hits', 'rejected'):
+                info[name][counter] -= before[name][counter]
+        return outs, info
 
     cached, info = run(256, 256)
     assert info['symbols']['hits'] > 0 and info['tree_plans']['entries'] > 0
     uncached, info = run(0, 0)
-    assert info['symbols']['entries'] == 0
+    # reading the statistics trims a cache to its capacity, so `entries == 0` alone proves nothing:
+    # the insertions must have been refused
+    assert info['symbols']['entries'] == 0 and info['symbols']['rejected'] > 0
+    assert info['tree_plans']['entries'] == 0 and info['tree_plans']['rejected'] > 0
+    assert info['symbols']['hits'] == 0 and info['tree_plans']['hits'] == 0
     small, info = run(1, 1)
     for a, b, c in zip(cached, uncached, small):
         assert a.shape == b.shape == c.shape
         npt.assert_array_equal(a, b)  # bit-identical, not just close
         npt.assert_array_equal(a, c)
+
+
+# --------------------------------------------------------------------------------------------
+# audit fixes: finished files only, gauge / run-id consistency, shared state, plan cache ownership
+
+
+def _weights(sym) -> tuple[int, int, int]:
+    return (sym.hweight_from_CG_hdf5(), sym.hweight_from_F_hdf5(), sym.hweight_from_R_hdf5())
+
+
+def _complete_n3_dir(tmp_path: Path) -> Path:
+    """A directory with the complete N3_H4 set (symbolic links, so the files are never modified)."""
+    d = tmp_path / 'data'
+    d.mkdir()
+    src = Path(_data_dir('N3_H4'))
+    for kind in ('CG', 'F', 'R'):
+        name = os.path.basename(symmetries.su_n_data_file_path(3, kind, 4, path='.'))
+        os.symlink(src / name, d / name)
+    return d
+
+
+def test_auto_detection_ignores_unfinished_unreadable_and_mislabelled_files(tmp_path):
+    """The generator writes Highest_Weight last: a file with a standard name that is not finished (or not
+    readable, or named for another weight) must neither be picked nor break the default symmetry."""
+    d = _complete_n3_dir(tmp_path)
+    cg4 = d / os.path.basename(symmetries.su_n_data_file_path(3, 'CG', 4, path='.'))
+    unfinished = d / os.path.basename(symmetries.su_n_data_file_path(3, 'CG', 9, path='.'))
+    shutil.copy(cg4.resolve(), unfinished)
+    with h5py.File(unfinished, 'r+') as f:
+        del f.attrs['Highest_Weight']
+    unreadable = d / os.path.basename(symmetries.su_n_data_file_path(3, 'CG', 8, path='.'))
+    unreadable.write_bytes(b'not an hdf5 file ' * 100)
+    mislabelled = d / os.path.basename(symmetries.su_n_data_file_path(3, 'CG', 7, path='.'))
+    shutil.copy(cg4.resolve(), mislabelled)  # says Highest_Weight 4 but is named for weight 7
+
+    with pytest.warns(UserWarning) as record:
+        sym = symmetries.SUN(3, path=str(d))
+    assert _weights(sym) == (4, 4, 4)
+    messages = ' '.join(str(w.message) for w in record)
+    assert 'CG_hweight9' in messages and "no attribute 'Highest_Weight'" in messages
+    assert 'CG_hweight8' in messages and 'cannot be opened' in messages
+    assert 'CG_hweight7' in messages and 'is 4, not 7' in messages
+
+
+def test_missing_highest_weight_error_names_the_file(tmp_path):
+    d = _complete_n3_dir(tmp_path)
+    f_name = os.path.basename(symmetries.su_n_data_file_path(3, 'F', 4, path='.'))
+    (d / f_name).unlink()
+    shutil.copy(Path(_data_dir('N3_H4')) / f_name, d / f_name)
+    with h5py.File(d / f_name, 'r+') as f:
+        del f.attrs['Highest_Weight']
+    with pytest.raises(RuntimeError, match=f_name):
+        symmetries.SUN(3, 4, path=str(d))
+
+
+def _set_attrs(dst: Path, kind: str, **attrs) -> None:
+    name = os.path.basename(symmetries.su_n_data_file_path(3, kind, 4, path='.'))
+    path = dst / name
+    if path.is_symlink():  # never modify the shared data
+        target = path.resolve()
+        path.unlink()
+        shutil.copy(target, path)
+    with h5py.File(path, 'r+') as f:
+        for key, value in attrs.items():
+            if value is None:
+                del f.attrs[key]
+            else:
+                f.attrs[key] = value
+
+
+def test_unrecorded_run_id_is_not_a_mismatch(tmp_path):
+    """The generator writes 'unknown' for what a legacy CG file did not record: that must not be refused."""
+    dst = _copy_n3(tmp_path, drop_gauge_version=False)
+    _set_attrs(dst, 'F', CG_Run_Id='unknown')
+    _set_attrs(dst, 'R', CG_Run_Id='')
+    assert _weights(symmetries.SUN(3, 4, path=str(dst))) == (4, 4, 4)
+
+
+def test_gauge_mix_is_refused_and_names_the_files(tmp_path):
+    dst = _copy_n3(tmp_path, drop_gauge_version=False)
+    _set_attrs(dst, 'F', Gauge_Version=None)  # legacy F file next to a CG file that records its gauge
+    with pytest.raises(ValueError, match='not in the same gauge') as exc:
+        symmetries.SUN(3, 4, path=str(dst))
+    assert 'F_hweight4' in str(exc.value) and 'CG_hweight4' in str(exc.value)
+    assert 'not recorded' in str(exc.value)
+    (tmp_path / 'other').mkdir()
+    dst = _copy_n3(tmp_path / 'other', drop_gauge_version=False)
+    _set_attrs(dst, 'R', Gauge_Version='some_other_gauge')
+    with pytest.raises(ValueError, match="'some_other_gauge'"):
+        symmetries.SUN(3, 4, path=str(dst))
+
+
+def test_fully_legacy_set_is_accepted(tmp_path):
+    dst = _copy_n3(tmp_path, drop_gauge_version=True)  # no file records a gauge or a run
+    assert _weights(symmetries.SUN(3, 4, path=str(dst))) == (4, 4, 4)
+
+
+def test_symbol_files_with_a_gauge_next_to_a_legacy_cg_file_are_accepted(tmp_path):
+    """Only a CG file that records its gauge makes the F / R files' gauge matter."""
+    dst = _copy_n3(tmp_path, drop_gauge_version=False)
+    _set_attrs(dst, 'CG', Gauge_Version=None, CG_Run_Id=None)
+    assert _weights(symmetries.SUN(3, 4, path=str(dst))) == (4, 4, 4)
+
+
+def test_sun_objects_on_the_same_files_share_their_state(N, packed_dir):
+    cache.clear_caches()
+    gc.collect()
+    base = cache.cache_info()['packed_files']['files']
+    first = _sun(N, packed_dir)
+    one = cache.cache_info()['packed_files']['files']
+    second = _sun(N, packed_dir)
+    two = cache.cache_info()['packed_files']['files']
+    assert one - base == 2  # the packed indices of the F and R file
+    assert two == one  # the second object reuses them
+    rows = _sample_f_keys(N, packed_dir, n=20)
+    for row in rows:
+        first.f_symbol(*_sectors(row))
+    before = cache.cache_info()['symbols']
+    for row in rows:
+        second.f_symbol(*_sectors(row))
+    after = cache.cache_info()['symbols']
+    assert after['misses'] == before['misses'] and after['hits'] > before['hits']  # shared cache entries
+    del first, second
+    gc.collect()
+    assert cache.cache_info()['packed_files']['files'] == base  # released with the last object
+
+
+def test_dropped_symmetry_is_released_from_the_plan_cache(N, packed_dir):
+    """Cached tree plans own their symmetry; once nothing else does, the plans (and with them the open
+    files and the packed index) must not outlive it."""
+    cache.clear_caches()
+    gc.collect()
+    base = cache.cache_info()['packed_files']['files']
+    sym = _sun(N, packed_dir)
+    theta, apply = _update_workload(sym, N, bond_weight=1, mult=1)
+    apply(theta)
+    info = cache.cache_info()
+    assert info['tree_plans']['entries'] > 0
+    assert info['packed_files']['files'] == base + 2
+    del sym, theta, apply
+    gc.collect()
+    info = cache.cache_info()  # reading the statistics purges the plans of unused symmetries
+    assert info['tree_plans']['entries'] == 0
+    assert info['packed_files']['files'] == base
+
+
+def test_plans_of_a_symmetry_in_use_are_kept(N, packed_dir):
+    cache.clear_caches()
+    sym = _sun(N, packed_dir)
+    theta, apply = _update_workload(sym, N, bond_weight=1, mult=1)
+    apply(theta)
+    entries = cache.cache_info()['tree_plans']['entries']
+    assert entries > 0
+    assert cache.cache_info()['tree_plans']['entries'] == entries  # the symmetry is still used
+    before = cache.cache_info()['tree_plans']['hits']
+    apply(theta)
+    assert cache.cache_info()['tree_plans']['hits'] > before

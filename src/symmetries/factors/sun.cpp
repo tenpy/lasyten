@@ -5,6 +5,7 @@
 #include <lasyten/symmetries/exceptions.h>
 #include <lasyten/symmetries/fusion_symbol.h>
 #include <lasyten/tools/lru_cache.h>
+#include <lasyten/tools/warn.h>
 
 #include "sun_packed.h"
 
@@ -16,17 +17,21 @@
 #include <cassert>
 #include <cctype>
 #include <cmath>
+#include <compare>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <lasyten/tools/hdf5.h>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -104,7 +109,8 @@ file_attr_int64(HighFive::File& file, char const* name)
 {
     auto v = hdf5_io::h5_get_attr_int64(file.getId(), name);
     if (!v) {
-        throw std::runtime_error(std::string("SUN HDF5 file missing attribute '") + name + "'");
+        throw std::runtime_error(
+          std::format("SUN HDF5 file '{}' is missing attribute '{}'", file.getName(), name));
     }
     return *v;
 }
@@ -424,29 +430,27 @@ using SymbolCache = ByteLRU<std::string, SymbolValue>;
 std::size_t
 symbol_value_bytes(SymbolValue const& value)
 {
+    constexpr std::size_t block_overhead = 16; // allocator header and rounding of one heap block
     if (auto const* f = std::get_if<FusionSymbol>(&value)) {
-        return sizeof(FusionSymbol) +
+        return sizeof(FusionSymbol) + block_overhead +
                f->size() * (f->is_real() ? sizeof(float64) : sizeof(complex128));
     }
     constexpr std::size_t map_node_bytes = sizeof(Sector) + sizeof(int64) + 48;
     auto const& o = std::get<SunOutcomes>(value);
-    return sizeof(SunOutcomes) + o.labels.capacity() * sizeof(Sector) +
+    return sizeof(SunOutcomes) + block_overhead + o.labels.capacity() * sizeof(Sector) +
            o.multiplicity.size() * map_node_bytes;
 }
 
 SymbolCache&
 symbol_cache()
 {
-    static SymbolCache cache(
-      [] {
-          return static_cast<std::size_t>(get_config().su_n_symbol_cache_mb) *
-                 (std::size_t{ 1 } << 20);
-      },
-      [](std::string const& key, SymbolValue const& value) {
-          constexpr std::size_t node_overhead = 112; // list node + hash node + control block
-          return 2 * (sizeof(std::string) + key.capacity()) + node_overhead +
-                 symbol_value_bytes(value);
-      });
+    static SymbolCache cache([] { return megabytes_to_bytes(get_config().su_n_symbol_cache_mb); },
+                             [](std::string const& key, SymbolValue const& value) {
+                                 constexpr std::size_t node_overhead =
+                                   112; // list node + hash node + control block
+                                 return 2 * (sizeof(std::string) + key.capacity()) +
+                                        node_overhead + symbol_value_bytes(value);
+                             });
     return cache;
 }
 
@@ -464,6 +468,74 @@ struct SunState
     std::shared_ptr<sun_packed::PackedIndex const> f_packed;
     std::shared_ptr<sun_packed::PackedIndex const> r_packed;
 };
+
+/// Identity of a data file: canonical path (so a symlink or another spelling of the path gives the
+/// same identity), size and modification time (so a file that was replaced is a different one).
+struct FileIdentity
+{
+    std::string path;
+    std::uintmax_t size = 0;
+    std::int64_t mtime = 0;
+    auto operator<=>(FileIdentity const&) const = default;
+};
+
+FileIdentity
+file_identity(std::string const& path)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    auto const canonical = fs::weakly_canonical(path, ec);
+    FileIdentity id;
+    id.path = ec ? path : canonical.string();
+    ec.clear();
+    id.size = fs::file_size(path, ec);
+    ec.clear();
+    id.mtime = static_cast<std::int64_t>(fs::last_write_time(path, ec).time_since_epoch().count());
+    return id;
+}
+
+using SharedStateKey = std::array<FileIdentity, 3>; // CG, F, R
+
+/// The `SunState` of every set of files that is currently in use. `SUN` objects on the same,
+/// unchanged files share it: the validated packed indices (no second index in RAM, no second scan
+/// of a folder file), the weights, and the id under which the symbols are cached. The registry
+/// holds weak pointers only, so a state ends with the last `SUN` that uses it.
+std::mutex&
+shared_state_mutex()
+{
+    static std::mutex m;
+    return m;
+}
+
+std::map<SharedStateKey, std::weak_ptr<SunState>>&
+shared_states()
+{
+    static std::map<SharedStateKey, std::weak_ptr<SunState>> states;
+    return states;
+}
+
+std::shared_ptr<SunState>
+find_shared_state(SharedStateKey const& key)
+{
+    std::lock_guard<std::mutex> lock(shared_state_mutex());
+    auto& states = shared_states();
+    if (auto const it = states.find(key); it != states.end()) {
+        if (auto state = it->second.lock()) {
+            return state;
+        }
+        states.erase(it);
+    }
+    return nullptr;
+}
+
+void
+register_shared_state(SharedStateKey const& key, std::shared_ptr<SunState> const& state)
+{
+    std::lock_guard<std::mutex> lock(shared_state_mutex());
+    auto& states = shared_states();
+    std::erase_if(states, [](auto const& item) { return item.second.expired(); });
+    states[key] = state;
+}
 
 /// Check the group ``F_sym`` / ``R_sym`` of a symbol file in a single pass over its keys: there is
 /// a key for the all-trivial sectors and a key containing the highest weight twice. The number of
@@ -650,6 +722,61 @@ SUN::SUN(int N_,
     if (N != n_cg || N != n_f || N != n_r) {
         throw std::invalid_argument("Files must contain data for same N!");
     }
+    // Files written by the same generator run carry the same 'CG_Run_Id' and 'Gauge_Version'; F
+    // and R symbols only fit to the CG coefficients they were computed from, and their values
+    // depend on the gauge. The generator writes "unknown" for what a legacy CG file did not
+    // record; "unknown", empty and missing all mean "not recorded". If the CG file records a
+    // gauge, an F or R file that records none or another one is refused; a set without any record
+    // (e.g. the files of
+    // ``external/SUN_symbols``) is accepted. Run ids are compared when both files record one.
+    {
+        auto const recorded = [](std::optional<std::string> const& v) {
+            return v.has_value() && !v->empty() && *v != "unknown";
+        };
+        auto const id_cg = hdf5_io::h5_get_attr_string(CGfile_->getId(), "CG_Run_Id");
+        auto const gauge_cg = hdf5_io::h5_get_attr_string(CGfile_->getId(), "Gauge_Version");
+        auto const show = [&](std::optional<std::string> const& v) {
+            return recorded(v) ? "'" + *v + "'" : std::string("not recorded");
+        };
+        for (auto const& [file, what, path] : { std::tuple{ Ffile_.get(), "F", &Fpath },
+                                                std::tuple{ Rfile_.get(), "R", &Rpath } }) {
+            auto const gauge = hdf5_io::h5_get_attr_string(file->getId(), "Gauge_Version");
+            if (recorded(gauge_cg) && (!recorded(gauge) || *gauge_cg != *gauge)) {
+                throw std::invalid_argument(std::format(
+                  "SUN: the {} file '{}' (Gauge_Version {}) and the CG file '{}' (Gauge_Version "
+                  "{}) "
+                  "are not in the same gauge, so the symbols do not fit the coefficients; "
+                  "regenerate the F and R files from this CG file.",
+                  what,
+                  *path,
+                  show(gauge),
+                  CGpath,
+                  show(gauge_cg)));
+            }
+            auto const id = hdf5_io::h5_get_attr_string(file->getId(), "CG_Run_Id");
+            if (recorded(id_cg) && recorded(id) && *id_cg != *id) {
+                throw std::invalid_argument(std::format(
+                  "SUN: the {} file '{}' and the CG file '{}' come from different generator runs "
+                  "(CG_Run_Id {} vs {}); regenerate them together.",
+                  what,
+                  *path,
+                  CGpath,
+                  *id,
+                  *id_cg));
+            }
+        }
+    }
+    fusion_tensor_dtype = Dtype::Float64;
+
+    // The remaining checks and the packed indices are shared by all `SUN` objects on the same
+    // files.
+    SharedStateKey const identity{ file_identity(CGpath),
+                                   file_identity(Fpath),
+                                   file_identity(Rpath) };
+    if (auto shared = find_shared_state(identity)) {
+        state_ = std::move(shared);
+        return;
+    }
     sanity_check_hdf5(*CGfile_);
     // F and R files are in the folder layout (one dataset per key) or in the packed layout
     std::shared_ptr<sun_packed::PackedIndex const> f_packed;
@@ -666,31 +793,13 @@ SUN::SUN(int N_,
     } else {
         sanity_check_hdf5(*Rfile_);
     }
-    // Files written by the same generator run carry the same 'CG_Run_Id'; F and R symbols only
-    // fit to the CG coefficients they were computed from.
-    {
-        auto const id_cg = hdf5_io::h5_get_attr_string(CGfile_->getId(), "CG_Run_Id");
-        for (auto const& [file, what] :
-             { std::pair{ Ffile_.get(), "F" }, std::pair{ Rfile_.get(), "R" } }) {
-            auto const id = hdf5_io::h5_get_attr_string(file->getId(), "CG_Run_Id");
-            if (id_cg && id && *id_cg != *id) {
-                throw std::invalid_argument(std::format(
-                  "SUN: the {} file and the CG file come from different generator runs "
-                  "(CG_Run_Id {} vs {}); regenerate them together.",
-                  what,
-                  *id,
-                  *id_cg));
-            }
-        }
-    }
-    fusion_tensor_dtype = Dtype::Float64;
-
     static std::atomic<std::uint64_t> next_id{ 1 };
     auto state = std::make_shared<SunState>();
     state->id = next_id.fetch_add(1);
     state->legacy_f_file = H5Aexists(Ffile_->getId(), "Gauge_Version") <= 0;
     state->f_packed = std::move(f_packed);
     state->r_packed = std::move(r_packed);
+    register_shared_state(identity, state);
     state_ = state;
 }
 
@@ -1272,7 +1381,40 @@ SUN::from_hdf5(lasyten::hdf5::Loader& loader, HighFive::Group& h5gr, std::string
 
 namespace {
 
-/// Largest ``H <= limit`` for which ``<base>_N<N>_<kind>_hweight<H>.hdf5`` exists in `dir`.
+/// Why `path` cannot be used as the data file of weight `h` for SU(N), or nothing if it is a
+/// finished file of that weight. The generator creates its files under a temporary name, but data
+/// from other sources (or an older generator that wrote F/R files under their final name and
+/// ``Highest_Weight`` last) can leave unfinished files with a standard name.
+std::optional<std::string>
+unusable_data_file_reason(std::string const& path, int N, int64 h)
+{
+    try {
+        HighFive::File file(path, HighFive::File::ReadOnly);
+        auto const n = hdf5_io::h5_get_attr_int64(file.getId(), "N");
+        auto const stored = hdf5_io::h5_get_attr_int64(file.getId(), "Highest_Weight");
+        if (!stored) {
+            return "it has no attribute 'Highest_Weight' (a generator run that has not finished "
+                   "or "
+                   "was interrupted)";
+        }
+        if (!n) {
+            return "it has no attribute 'N'";
+        }
+        if (*n != N) {
+            return std::format("it contains data for N={}", *n);
+        }
+        if (*stored != h) {
+            return std::format("its attribute 'Highest_Weight' is {}, not {}", *stored, h);
+        }
+        return std::nullopt;
+    } catch (std::exception const& e) {
+        return std::format("it cannot be opened as an HDF5 file ({})", e.what());
+    }
+}
+
+/// Largest ``H <= limit`` for which a finished ``<base>_N<N>_<kind>_hweight<H>.hdf5`` exists in
+/// `dir`. Candidates are tried from the largest weight down; one that is not a finished file of
+/// its weight (see ``unusable_data_file_reason``) is skipped with a warning that names it.
 std::optional<int64>
 largest_su_n_weight(std::string const& dir,
                     std::string const& base,
@@ -1287,7 +1429,7 @@ largest_su_n_weight(std::string const& dir,
     }
     std::string const prefix = std::format("{}_N{}_{}_hweight", base, N, kind);
     std::string const suffix = ".hdf5";
-    std::optional<int64> best;
+    std::vector<std::pair<int64, std::string>> candidates;
     for (auto const& entry : fs::directory_iterator(dir, ec)) {
         auto const name = entry.path().filename().string();
         if (name.size() <= prefix.size() + suffix.size() || !name.starts_with(prefix) ||
@@ -1301,11 +1443,23 @@ largest_su_n_weight(std::string const& dir,
             continue;
         }
         auto const h = static_cast<int64>(std::stoll(digits));
-        if (h <= limit && (!best || h > *best)) {
-            best = h;
+        if (h <= limit) {
+            candidates.emplace_back(h, entry.path().string());
         }
     }
-    return best;
+    std::ranges::sort(candidates, std::ranges::greater{});
+    for (auto const& [h, path] : candidates) {
+        auto const reason = unusable_data_file_reason(path, N, h);
+        if (!reason) {
+            return h;
+        }
+        warn(std::format("SU({}) data file '{}' is ignored by the automatic detection of the data "
+                         "weights: {}.",
+                         N,
+                         path,
+                         *reason));
+    }
+    return std::nullopt;
 }
 
 } // namespace

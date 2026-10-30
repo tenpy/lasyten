@@ -18,19 +18,15 @@
 #include <lasyten/tensors/symmetric_tensor.h>
 #include <lasyten/tools.h>
 
-#include <algorithm>
 #include <array>
 #include <cassert>
-#include <cctype>
 #include <cmath>
-#include <filesystem>
 #include <format>
 #include <functional>
 #include <hdf5_io/constants.h>
 #include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
-#include <limits>
 #include <numeric>
 #include <optional>
 #include <stdexcept>

@@ -1,5 +1,7 @@
 #include "sun_packed.h"
 
+#include <lasyten/config.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -14,8 +16,6 @@ namespace {
 std::atomic<std::uint64_t> g_open_files{ 0 };
 std::atomic<std::uint64_t> g_index_bytes{ 0 };
 std::atomic<std::uint64_t> g_data_bytes_in_ram{ 0 };
-// the block data is held in RAM if it is not larger than this (checked when a file is opened)
-std::atomic<std::size_t> g_data_in_ram_max_bytes{ std::size_t{ 256 } << 20 };
 
 } // namespace
 
@@ -25,12 +25,6 @@ packed_file_stats()
     return PackedFileStats{ g_open_files.load(),
                             g_index_bytes.load(),
                             g_data_bytes_in_ram.load() };
-}
-
-std::size_t
-set_packed_data_in_ram_max_bytes(std::size_t max_bytes)
-{
-    return g_data_in_ram_max_bytes.exchange(max_bytes);
 }
 
 namespace sun_packed {
@@ -199,11 +193,18 @@ PackedIndex::load(std::shared_ptr<HighFive::File> file,
     }
     for (std::size_t i = 0; i < n; ++i) {
         std::int64_t const count = idx->offsets_[i + 1] - idx->offsets_[i];
+        // the shapes come from the file: the product must not overflow (signed overflow is UB)
         std::int64_t product = 1;
+        bool overflow = false;
         for (std::size_t j = 0; j < rank; ++j) {
-            product *= static_cast<std::int64_t>(idx->shapes_[i * rank + j]);
+            auto const dim = static_cast<std::int64_t>(idx->shapes_[i * rank + j]);
+            if (dim != 0 && product > std::numeric_limits<std::int64_t>::max() / dim) {
+                overflow = true;
+                break;
+            }
+            product *= dim;
         }
-        if (count < 0 || count != product) {
+        if (overflow || count < 0 || count != product) {
             throw std::runtime_error(std::format("SUN: block {} of the packed symbol file '{}' "
                                                  "has offsets that do not match its shape.",
                                                  i,
@@ -223,7 +224,9 @@ PackedIndex::load(std::shared_ptr<HighFive::File> file,
               "SUN: the 'data' of the packed symbol file '{}' does not have offsets[n] entries.",
               path));
         }
-        if (read_data && n_data * sizeof(complex128) <= g_data_in_ram_max_bytes.load()) {
+        // the block data is held in RAM if it is small enough (config option su_n_packed_ram_mb)
+        auto const ram_max_bytes = megabytes_to_bytes(get_config().su_n_packed_ram_mb);
+        if (read_data && n_data * sizeof(complex128) <= ram_max_bytes) {
             idx->data_buffer_ = hdf5_io::h5_read_buffer(dataset.id);
             expect_buffer(idx->data_buffer_, 'c', 16, { n_data }, "data", path);
             idx->data_ptr_ = static_cast<complex128 const*>(idx->data_buffer_.data());
@@ -231,7 +234,13 @@ PackedIndex::load(std::shared_ptr<HighFive::File> file,
         } else if (read_data) {
             // keep the dataset open and read one block at a time
             ScopedId type(H5Dget_type(dataset.id));
-            if (H5Tget_class(type.id) != H5T_COMPOUND || H5Tget_size(type.id) != 16) {
+            // complex128: a compound of exactly two float64 members (real, imaginary part)
+            auto const is_float64_member = [&](unsigned i) {
+                ScopedId member(H5Tget_member_type(type.id, i));
+                return H5Tget_class(member.id) == H5T_FLOAT && H5Tget_size(member.id) == 8;
+            };
+            if (H5Tget_class(type.id) != H5T_COMPOUND || H5Tget_size(type.id) != 16 ||
+                H5Tget_nmembers(type.id) != 2 || !is_float64_member(0) || !is_float64_member(1)) {
                 throw std::runtime_error(std::format(
                   "SUN: the 'data' of the packed symbol file '{}' is not complex128.", path));
             }

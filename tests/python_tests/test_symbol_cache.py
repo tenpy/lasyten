@@ -248,8 +248,47 @@ def test_su2_weights_are_autodetected(su2_dir, tmp_path):
             SpinSite(S=0.5, conserve='SU2')
 
 
+def test_su2_autodetection_ignores_unfinished_files(su2_dir, tmp_path):
+    """A generator run that has not finished (no Highest_Weight yet) is not picked and does not break the default."""
+    from lasyten.models.sites import SpinSite
+
+    d = tmp_path / 'data'
+    d.mkdir()
+    for kind, h in (('CG', 20), ('F', 6), ('R', 6)):
+        src = symmetries.su_n_data_file_path(2, kind, h, path=su2_dir)
+        os.symlink(src, d / os.path.basename(src))
+    unfinished = d / 'su_n_clebsch_gordan_data_N2_F_hweight8.hdf5'  # <= the CG weight, larger than 6
+    shutil.copy(symmetries.su_n_data_file_path(2, 'F', 6, path=su2_dir), unfinished)
+    with h5py.File(unfinished, 'r+') as f:
+        del f.attrs['Highest_Weight']
+    (d / 'su_n_clebsch_gordan_data_N2_R_hweight7.hdf5').write_bytes(b'not an hdf5 file ' * 100)
+
+    with temporary_options(su_n_data_path=str(d)):
+        with pytest.warns(UserWarning) as record:
+            factor = SpinSite(S=0.5, conserve='SU2').symmetry.factors[0]
+        assert (factor.hweight_from_CG_hdf5(), factor.hweight_from_F_hdf5(), factor.hweight_from_R_hdf5()) == (20, 6, 6)
+    messages = ' '.join(str(w.message) for w in record)
+    assert 'F_hweight8' in messages and "no attribute 'Highest_Weight'" in messages
+    assert 'R_hweight7' in messages and 'cannot be opened' in messages
+
+
 # --------------------------------------------------------------------------------------------
 # tree caches
+
+
+def test_size_memo_budget_is_independent_of_the_plan_cache(any_symmetry, make_any_sectors):
+    sectors = make_any_sectors(4)
+    if len(sectors) < 3:
+        pytest.skip('symmetry has too few sectors')
+    cache.clear_caches()
+    with temporary_options(tree_plan_cache_mb=0, tree_size_memo_mb=8):
+        assert len(trees.fusion_trees(any_symmetry, sectors[:3], sectors[0])) >= 0
+        info = cache.cache_info()
+        assert info['tree_plans']['capacity_bytes'] == 0
+        assert info['tree_sizes']['capacity_bytes'] == 8 * 2**20  # capping the plans does not switch the memo off
+    with temporary_options(tree_size_memo_mb=0):
+        assert cache.cache_info()['tree_sizes']['capacity_bytes'] == 0
+    assert cache.cache_info()['tree_sizes']['capacity_bytes'] == 32 * 2**20  # the default
 
 
 def test_tree_size_memo_matches_enumeration(any_symmetry, make_any_sectors):
@@ -270,9 +309,15 @@ def test_plan_cache_does_not_change_results(make_compatible_tensor, compatible_s
     T = make_compatible_tensor(2, 2, max_block_size=3)
     args = ([0, 3], [1, 2], [0, 1, 2, 3])
     cache.clear_caches()
+    before = cache.cache_info()['tree_plans']
     with temporary_options(tree_plan_cache_mb=0):
         ref = tensors.permute_legs(T, *args, bend_right=True)
-        assert cache.cache_info()['tree_plans']['entries'] == 0
+        disabled = cache.cache_info()['tree_plans']
+    # reading the statistics trims to the capacity, so only the refused insertions show that the
+    # cache was really asked to store a plan
+    assert disabled['entries'] == 0 and disabled['capacity_bytes'] == 0
+    if disabled['rejected'] == before['rejected']:
+        pytest.skip('this permutation needs no tree plan for the symmetry')
     cache.clear_caches()
     first = tensors.permute_legs(T, *args, bend_right=True)
     info1 = cache.cache_info()['tree_plans']
@@ -280,9 +325,9 @@ def test_plan_cache_does_not_change_results(make_compatible_tensor, compatible_s
     info2 = cache.cache_info()['tree_plans']
     assert tensors.almost_equal(first, ref)
     assert tensors.almost_equal(second, ref)
-    if info1['entries'] > 0:
-        assert info2['hits'] > info1['hits']  # the second call reuses the cached mapping
-        assert info2['bytes'] <= info2['capacity_bytes']
+    assert info1['entries'] > 0  # the plan was cached
+    assert info2['hits'] > info1['hits']  # the second call reuses the cached mapping
+    assert info2['bytes'] <= info2['capacity_bytes']
 
 
 def test_plan_cache_byte_cap(make_compatible_tensor, compatible_symmetry, compatible_symmetry_backend):
