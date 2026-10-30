@@ -1359,15 +1359,17 @@ SUN::from_config(int N,
         for (std::size_t i = 0; i < 3; ++i) {
             if (!detected[i].has_value()) {
                 constexpr std::array<char const*, 3> kinds{ "CG", "F", "R" };
-                std::string const msg = std::format(
-                  "No SU({}) {} data file found in '{}' (name pattern '{}_N{}_{}_hweight<H>.hdf5'); pass the "
-                  "weights explicitly, set the config option 'su_n_hweights', or generate the data.",
-                  N,
-                  kinds[i],
-                  expand_user(path.value_or(get_config().su_n_data_path)),
-                  filename_base.value_or(get_config().su_n_data_filename_base),
-                  N,
-                  kinds[i]);
+                std::string const msg =
+                  std::format("No SU({}) {} data file found in '{}' (name pattern "
+                              "'{}_N{}_{}_hweight<H>.hdf5'); pass the "
+                              "weights explicitly, set the config option 'su_n_hweights', or "
+                              "generate the data.",
+                              N,
+                              kinds[i],
+                              expand_user(path.value_or(get_config().su_n_data_path)),
+                              filename_base.value_or(get_config().su_n_data_filename_base),
+                              N,
+                              kinds[i]);
                 PyErr_SetString(PyExc_FileNotFoundError, msg.c_str());
                 throw py::error_already_set();
             }

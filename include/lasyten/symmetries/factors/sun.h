@@ -2,9 +2,9 @@
 
 #include "../group.h"
 
+#include <array>
 #include <highfive/highfive.hpp>
 #include <lasyten/tools/hdf5.h>
-#include <array>
 #include <map>
 #include <memory>
 #include <optional>

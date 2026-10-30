@@ -72,9 +72,10 @@ The following options are available::
     su2_r_hweight                   0            Same for the R-symbol file.
     ------------------------------  -----------  ----------------------------------------------------------------------
     su_n_hweights                   ``''``       Pins the data weights of any ``SUN(N)`` created without explicit
-                                                 weights, as ``'N:cg[,f[,r]];...'``, e.g. ``'3:5;4:3,3,3'`` (``f``, ``r``
-                                                 default to ``cg``; 0 or a missing entry means the largest weight found
-                                                 in ``su_n_data_path``). For N = 2 the ``su2_*_hweight`` options win.
+                                                 weights, as ``'N:cg[,f[,r]];...'``, e.g. ``'3:5;4:3,3,3'``
+                                                 (``f``, ``r`` default to ``cg``; 0 or a missing entry means the
+                                                 largest weight found in ``su_n_data_path``). For N = 2 the
+                                                 ``su2_*_hweight`` options win.
     ------------------------------  -----------  ----------------------------------------------------------------------
     coupling_cutoff                 1e-13        Default singular-value cutoff when factorizing a Coupling
                                                  (``from_dense_block`` / ``from_tensor``).

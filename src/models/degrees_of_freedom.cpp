@@ -720,7 +720,8 @@ namespace {
 
 /// Weights (CG, F, R) of the data files of the production SU(2) symmetry: the config options
 /// ``su2_{cg,f,r}_hweight`` or ``su_n_hweights`` if set, otherwise the largest weights found in
-/// ``su_n_data_path`` (F and R not above the CG weight), otherwise the historic defaults 20 / 6 / 6.
+/// ``su_n_data_path`` (F and R not above the CG weight), otherwise the historic defaults 20 / 6
+/// / 6.
 std::array<int64, 3>
 su2_data_hweights()
 {

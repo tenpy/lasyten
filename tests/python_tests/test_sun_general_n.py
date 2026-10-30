@@ -21,7 +21,7 @@ import numpy as np
 import numpy.testing as npt
 import pytest
 
-from lasyten import cache, set_options, symmetries, temporary_options
+from lasyten import cache, symmetries, temporary_options
 from lasyten.symmetries import SymmetryError
 
 _SUN_SYMBOLS_SUBMODULE_DIR = Path(__file__).resolve().parents[2] / 'external' / 'SUN_symbols'
@@ -31,7 +31,9 @@ _CASES = {3: ('N3_H4', 4), 4: ('N4_H3', 3)}  # N -> (directory, highest weight)
 def _base_dir() -> Path:
     base = os.environ.get('LASYTEN_TEST_SUN_DIR')
     if not base or not Path(base).is_dir():
-        pytest.skip('Set LASYTEN_TEST_SUN_DIR to a directory with generated SU(3) / SU(4) data (see the module docstring).')
+        pytest.skip(
+            'Set LASYTEN_TEST_SUN_DIR to a directory with generated SU(3) / SU(4) data (see the module docstring).'
+        )
     return Path(base)
 
 
@@ -80,7 +82,12 @@ def _sample_f_keys(N: int, path: str, n: int = 2000) -> np.ndarray:
         if labels is None:
             names = list(f['F_sym'].keys())
             idx = np.random.default_rng(1).choice(len(names), min(n, len(names)), replace=False)
-            return np.array([[[int(x) for x in grp.split(',')] for grp in name[2:-1].split('][')] for name in (names[i] for i in idx)])
+            return np.array(
+                [
+                    [[int(x) for x in grp.split(',')] for grp in name[2:-1].split('][')]
+                    for name in (names[i] for i in idx)
+                ]
+            )
         idx = np.sort(np.random.default_rng(1).choice(labels.shape[0], min(n, labels.shape[0]), replace=False))
         return labels[idx.tolist()]
 
@@ -90,7 +97,10 @@ def _sample_f_keys(N: int, path: str, n: int = 2000) -> np.ndarray:
 
 
 def test_auto_weights_su2_submodule():
-    files = [symmetries.su_n_data_file_path(2, k, h, path=str(_SUN_SYMBOLS_SUBMODULE_DIR)) for k, h in (('CG', 20), ('F', 6), ('R', 6))]
+    files = [
+        symmetries.su_n_data_file_path(2, k, h, path=str(_SUN_SYMBOLS_SUBMODULE_DIR))
+        for k, h in (('CG', 20), ('F', 6), ('R', 6))
+    ]
     if not all(os.path.exists(f) for f in files):
         pytest.skip('Need the SU(2) data files of the external/SUN_symbols submodule.')
     sym = symmetries.SUN(2, path=str(_SUN_SYMBOLS_SUBMODULE_DIR))

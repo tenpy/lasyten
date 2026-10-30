@@ -7,9 +7,9 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <map>
 #include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
+#include <map>
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
@@ -249,7 +249,8 @@ parse_su_n_hweights(std::string const& spec)
     };
     auto to_int = [&](std::string const& text) -> int64 {
         if (text.empty() || text.size() > 9 ||
-            !std::all_of(text.begin(), text.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+            !std::all_of(
+              text.begin(), text.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
             throw bad("'" + text + "' is not a non-negative integer");
         }
         return std::stoll(text);
@@ -265,7 +266,8 @@ parse_su_n_hweights(std::string const& spec)
         std::size_t start = 0;
         for (;;) {
             auto pos = text.find(sep, start);
-            parts.push_back(strip(text.substr(start, pos == std::string::npos ? pos : pos - start)));
+            parts.push_back(
+              strip(text.substr(start, pos == std::string::npos ? pos : pos - start)));
             if (pos == std::string::npos) {
                 break;
             }
