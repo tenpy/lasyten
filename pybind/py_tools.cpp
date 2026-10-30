@@ -62,6 +62,9 @@ bind_tools(py::module_& m)
       [stats_dict] { return stats_dict(tree_plan_cache_stats()); },
       "Statistics of the RAM cache for fusion-tree mappings ('tree plans').");
     m.def("clear_tree_plan_cache", &clear_tree_plan_cache, "Remove all tree-plan cache entries.");
+    m.def("_tree_plan_cache_debug",
+          &tree_plan_cache_debug,
+          "Diagnostics: per plan and symmetry, (strong count, references held by the plan).");
     m.def(
       "tree_size_cache_info",
       [stats_dict] { return stats_dict(tree_size_cache_stats()); },
@@ -80,12 +83,6 @@ bind_tools(py::module_& m)
       },
       "Memory held by open SU(N) symbol files in the packed layout (files, index_bytes, "
       "data_bytes_in_ram); not part of the symbol cache budget.");
-    m.def("_set_packed_data_in_ram_max_bytes",
-          &set_packed_data_in_ram_max_bytes,
-          py::arg("max_bytes"),
-          "Test hook: block data of packed files up to this size is held in RAM; returns the old "
-          "value.");
-
     m.def("permutation_as_swaps",
           &lasyten::permutation_as_swaps,
           py::arg("permutation"),

@@ -29,6 +29,7 @@
 #include <string>
 #include <type_traits>
 #include <typeinfo>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -735,6 +736,8 @@ plan_key(std::vector<Instruction> const& instructions,
     auto const* symmetry_address = codomain->symmetry.get();
     k.append(reinterpret_cast<char const*>(&symmetry_address), sizeof(symmetry_address));
     plan_key_put(k, mixes_codomain_domain ? 1 : 2);
+    plan_key_put(k,
+                 static_cast<std::int64_t>(instructions.size())); // makes the key self-delimiting
     for (Instruction const& inst : instructions) {
         std::visit(
           [&](auto const& i) {
@@ -769,9 +772,19 @@ plan_key(std::vector<Instruction> const& instructions,
     return k;
 }
 
-struct PlanEntry
+/// A symmetry that a cached plan refers to, and how many strong references to it the plan itself
+/// holds (its fusion trees own their symmetry), measured when the plan was built.
+struct HeldSymmetry
 {
     std::weak_ptr<Symmetry> symmetry;
+    long refs = 0;
+};
+
+struct PlanEntry
+{
+    /// The symmetries of the codomain and of the domain the plan was built for (one entry if they
+    /// are the same object); the first one is the one whose address is part of the cache key.
+    std::vector<HeldSymmetry> held;
     std::shared_ptr<void const> mapping;
     std::size_t bytes = 0;
 };
@@ -780,31 +793,95 @@ using PlanCache = ByteLRU<std::string, PlanEntry>;
 PlanCache&
 plan_cache()
 {
-    static PlanCache cache(
-      [] {
-          return static_cast<std::size_t>(get_config().tree_plan_cache_mb) *
-                 (std::size_t{ 1 } << 20);
-      },
-      [](std::string const& key, PlanEntry const& entry) {
-          constexpr std::size_t node_overhead = 112; // list node + hash node + control block
-          return 2 * (sizeof(std::string) + key.capacity()) + sizeof(PlanEntry) + node_overhead +
-                 entry.bytes;
-      });
+    static PlanCache cache([] { return megabytes_to_bytes(get_config().tree_plan_cache_mb); },
+                           [](std::string const& key, PlanEntry const& entry) {
+                               constexpr std::size_t node_overhead =
+                                 112; // list node + hash node + control block
+                               return 2 * (sizeof(std::string) + key.capacity()) +
+                                      sizeof(PlanEntry) + node_overhead + entry.bytes;
+                           });
     return cache;
 }
 
-/// The mapping for `key`: from the cache, or built by `make()` (returning a unique_ptr) and
-/// cached.
-template<class Mapping, class Make>
-std::shared_ptr<Mapping const>
-cached_plan(std::string const& key, Symmetry::Ptr const& symmetry, Make&& make)
+/// Remove the plans of symmetries that nothing but cached plans refer to any more.
+///
+/// The fusion trees of a cached mapping own their symmetry, so without this a symmetry that the
+/// user has dropped (together with its open data files and packed index) would stay alive until
+/// the plan is evicted or the cache is cleared. A symmetry is free when its strong count is
+/// exactly the number of references that cached plans hold to it (``HeldSymmetry::refs``, summed
+/// over all plans: the plans of the codomain's symmetry also refer to the domain's one and vice
+/// versa); any other holder (a tensor, a space, a Python object) makes the count larger. A plan is
+/// removed when all symmetries it refers to are free.
+std::size_t
+purge_orphaned_plans()
 {
     auto& cache = plan_cache();
-    if (auto const hit = cache.find(key); hit && hit->symmetry.lock() == symmetry) {
+    std::unordered_map<Symmetry const*, long> internal;
+    cache.for_each([&](std::string const&, PlanEntry const& entry) {
+        for (auto const& held : entry.held) {
+            if (auto const symmetry = held.symmetry.lock()) {
+                internal[symmetry.get()] += held.refs;
+            }
+        }
+    });
+    return cache.erase_if([&](std::string const&, PlanEntry const& entry) {
+        return std::ranges::all_of(entry.held, [&](HeldSymmetry const& held) {
+            auto const symmetry = held.symmetry.lock();
+            if (!symmetry) {
+                return true;
+            }
+            long const external =
+              symmetry.use_count() - 1 - internal[symmetry.get()]; // -1: `symmetry`
+            return external <= 0;
+        });
+    });
+}
+
+/// Run `purge_orphaned_plans` now and then (after as many insertions as there are entries, at
+/// least 256), so that the cost per insertion stays constant on average.
+void
+purge_orphaned_plans_now_and_then()
+{
+    static std::size_t inserts_since_purge = 0;
+    static std::size_t threshold = 256;
+    if (++inserts_since_purge < threshold) {
+        return;
+    }
+    inserts_since_purge = 0;
+    purge_orphaned_plans();
+    threshold = std::max<std::size_t>(256, plan_cache().stats().entries);
+}
+
+/// The mapping for `key`: from the cache, or built by `make()` (returning a unique_ptr) and
+/// cached. `symmetry` is the symmetry of the codomain (part of the key), `domain_symmetry` the one
+/// of the domain; they may be different objects, and the mapping refers to both.
+template<class Mapping, class Make>
+std::shared_ptr<Mapping const>
+cached_plan(std::string const& key,
+            Symmetry::Ptr const& symmetry,
+            Symmetry::Ptr const& domain_symmetry,
+            Make&& make)
+{
+    auto& cache = plan_cache();
+    if (auto const hit = cache.find(key);
+        hit && !hit->held.empty() && hit->held.front().symmetry.lock() == symmetry) {
         return std::static_pointer_cast<Mapping const>(hit->mapping);
     }
+    bool const same = symmetry.get() == domain_symmetry.get();
+    long const refs_before = symmetry.use_count();
+    long const domain_refs_before = same ? 0 : domain_symmetry.use_count();
     std::shared_ptr<Mapping const> mapping(make());
-    cache.insert(key, PlanEntry{ symmetry, mapping, mapping->approx_bytes() });
+    PlanEntry entry;
+    entry.held.push_back(
+      { symmetry, symmetry.use_count() - refs_before }); // held by the new mapping
+    if (!same) {
+        entry.held.push_back(
+          { domain_symmetry, domain_symmetry.use_count() - domain_refs_before });
+    }
+    entry.mapping = mapping;
+    entry.bytes = mapping->approx_bytes();
+    cache.insert(key, std::move(entry));
+    purge_orphaned_plans_now_and_then();
     return mapping;
 }
 
@@ -813,7 +890,22 @@ cached_plan(std::string const& key, Symmetry::Ptr const& symmetry, Make&& make)
 CacheStats
 tree_plan_cache_stats()
 {
+    purge_orphaned_plans();
     return plan_cache().stats();
+}
+
+std::vector<std::vector<std::pair<long, long>>>
+tree_plan_cache_debug()
+{
+    std::vector<std::vector<std::pair<long, long>>> out;
+    plan_cache().for_each([&](std::string const&, PlanEntry const& entry) {
+        auto& row = out.emplace_back();
+        for (auto const& held : entry.held) {
+            auto const symmetry = held.symmetry.lock();
+            row.emplace_back(symmetry ? symmetry.use_count() - 1 : 0, held.refs);
+        }
+    });
+    return out;
 }
 
 void
@@ -840,10 +932,11 @@ FusionTreeBackend::apply_instructions(TensorCPtr tensor,
       plan_key(instructions_vec, codomain, domain, t_data->block_inds, mixes_codomain_domain);
     FusionTreeData::Ptr res;
     if (mixes_codomain_domain) {
-        auto mapping = cached_plan<TreePairMapping>(key, codomain->symmetry, [&] {
-            return TreePairMapping::from_instructions(
-              instructions_vec, codomain, domain, py::cast(t_data->block_inds));
-        });
+        auto mapping =
+          cached_plan<TreePairMapping>(key, codomain->symmetry, domain->symmetry, [&] {
+              return TreePairMapping::from_instructions(
+                instructions_vec, codomain, domain, py::cast(t_data->block_inds));
+          });
         res = mapping->transform_tensor(*t_data,
                                         codomain,
                                         domain,
@@ -853,10 +946,11 @@ FusionTreeBackend::apply_instructions(TensorCPtr tensor,
                                         domain_idcs,
                                         block_backend);
     } else {
-        auto mapping = cached_plan<FactorizedTreeMapping>(key, codomain->symmetry, [&] {
-            return FactorizedTreeMapping::from_instructions(
-              instructions_vec, codomain, domain, py::cast(t_data->block_inds));
-        });
+        auto mapping =
+          cached_plan<FactorizedTreeMapping>(key, codomain->symmetry, domain->symmetry, [&] {
+              return FactorizedTreeMapping::from_instructions(
+                instructions_vec, codomain, domain, py::cast(t_data->block_inds));
+          });
         res = mapping->transform_tensor(*t_data,
                                         codomain,
                                         domain,

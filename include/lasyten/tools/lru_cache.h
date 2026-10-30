@@ -8,6 +8,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace lasyten {
 
@@ -59,7 +60,13 @@ class ByteLRU
     /// Look up `key`; a hit moves the entry to the front. Returns null on a miss.
     ValuePtr find(Key const& key)
     {
+        std::size_t const capacity = capacity_fn_();
+        std::vector<ValuePtr> dropped; // declared before the lock: destroyed after it is released
         std::lock_guard<std::mutex> lock(mutex_);
+        if (capacity < capacity_) { // the budget was lowered since the last insertion
+            capacity_ = capacity;
+            evict_to_capacity(dropped);
+        }
         auto it = map_.find(key);
         if (it == map_.end()) {
             ++misses_;
@@ -77,23 +84,30 @@ class ByteLRU
         auto ptr = std::make_shared<Value const>(std::move(value));
         std::size_t const capacity = capacity_fn_();
         std::size_t const size = size_fn_(key, *ptr);
+        std::vector<ValuePtr> dropped; // declared before the lock: destroyed after it is released
         std::lock_guard<std::mutex> lock(mutex_);
         capacity_ = capacity;
         if (capacity == 0 || size > capacity) {
             ++rejected_;
-            evict_to_capacity();
+            evict_to_capacity(dropped);
             return ptr;
         }
         auto existing = map_.find(key);
         if (existing != map_.end()) {
             bytes_ -= existing->second.bytes;
             order_.erase(existing->second.position);
+            dropped.push_back(std::move(existing->second.value));
             map_.erase(existing);
         }
         order_.push_front(key);
-        map_.emplace(order_.front(), Entry{ ptr, size, order_.begin() });
+        try {
+            map_.emplace(order_.front(), Entry{ ptr, size, order_.begin() });
+        } catch (...) {
+            order_.pop_front(); // keep list and map consistent if the node cannot be created
+            throw;
+        }
         bytes_ += size;
-        evict_to_capacity();
+        evict_to_capacity(dropped);
         return ptr;
     }
 
@@ -111,17 +125,55 @@ class ByteLRU
     void trim()
     {
         std::size_t const capacity = capacity_fn_();
+        std::vector<ValuePtr> dropped; // declared before the lock: destroyed after it is released
         std::lock_guard<std::mutex> lock(mutex_);
         capacity_ = capacity;
-        evict_to_capacity();
+        evict_to_capacity(dropped);
+    }
+
+    /// Call ``visit(key, value)`` for every stored entry (most recently used first), without
+    /// changing the order. The lock is held, so `visit` must not use this cache.
+    template<class Visit>
+    void for_each(Visit&& visit) const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto const& key : order_) {
+            visit(key, *map_.at(key).value);
+        }
+    }
+
+    /// Remove every entry for which ``pred(key, value)`` is true; returns how many were removed.
+    /// The removed values are destroyed after the lock has been released, because destroying a
+    /// value may run arbitrary code (e.g. close files).
+    template<class Pred>
+    std::size_t erase_if(Pred&& pred)
+    {
+        std::vector<ValuePtr> removed; // declared before the lock: destroyed after it is released
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto it = map_.begin(); it != map_.end();) {
+            if (pred(it->first, *it->second.value)) {
+                bytes_ -= it->second.bytes;
+                order_.erase(it->second.position);
+                removed.push_back(std::move(it->second.value));
+                it = map_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        evictions_ += removed.size();
+        return removed.size();
     }
 
     /// Remove all entries; the counters are kept (see `reset_counters`).
     void clear()
     {
+        // the values are destroyed after the lock is released (destroying one may run arbitrary
+        // code)
+        decltype(map_) old_map;
+        decltype(order_) old_order;
         std::lock_guard<std::mutex> lock(mutex_);
-        map_.clear();
-        order_.clear();
+        old_map.swap(map_);
+        old_order.swap(order_);
         bytes_ = 0;
     }
 
@@ -146,12 +198,14 @@ class ByteLRU
         typename std::list<Key>::iterator position;
     };
 
-    // caller holds the lock
-    void evict_to_capacity()
+    // caller holds the lock; the evicted values are handed to `dropped`, which the caller destroys
+    // after releasing the lock
+    void evict_to_capacity(std::vector<ValuePtr>& dropped)
     {
         while (bytes_ > capacity_ && !order_.empty()) {
             auto it = map_.find(order_.back());
             bytes_ -= it->second.bytes;
+            dropped.push_back(std::move(it->second.value));
             map_.erase(it);
             order_.pop_back();
             ++evictions_;
@@ -160,7 +214,7 @@ class ByteLRU
 
     CapacityFn capacity_fn_;
     SizeFn size_fn_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::list<Key> order_; // most recently used first
     std::unordered_map<Key, Entry, Hash> map_;
     std::size_t bytes_ = 0;
@@ -192,17 +246,16 @@ struct PackedFileStats
 
 PackedFileStats packed_file_stats();
 
-/// Test hook: the block data of a packed file is held in RAM if it is not larger than this many
-/// bytes (default 256 MB; checked when the file is opened). Returns the previous value.
-std::size_t set_packed_data_in_ram_max_bytes(std::size_t max_bytes);
-
 /// Statistics of the cache for fusion-tree mappings ("tree plans"). Budget:
 /// ``tree_plan_cache_mb``.
 CacheStats tree_plan_cache_stats();
 /// Remove all entries of the tree-plan cache.
 void clear_tree_plan_cache();
+/// Diagnostics: for every cached plan and every symmetry it refers to, the strong count of that
+/// symmetry and the number of those references that the cached plan itself holds.
+std::vector<std::vector<std::pair<long, long>>> tree_plan_cache_debug();
 
-/// Statistics of the ``fusion_trees::size`` memo (one eighth of ``tree_plan_cache_mb``).
+/// Statistics of the ``fusion_trees::size`` memo. Budget: ``tree_size_memo_mb``.
 CacheStats tree_size_cache_stats();
 /// Remove all entries of the ``fusion_trees::size`` memo.
 void clear_tree_size_cache();
