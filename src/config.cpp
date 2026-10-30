@@ -222,6 +222,8 @@ LasytenConfig::all_option_keys()
         "su_n_data_filename_base",
         "su_n_symbol_cache_mb",
         "tree_plan_cache_mb",
+        "tree_size_memo_mb",
+        "su_n_packed_ram_mb",
         "su2_cg_hweight",
         "su2_f_hweight",
         "su2_r_hweight",
@@ -347,6 +349,12 @@ LasytenConfig::set_option(const std::string& key, int64 value)
     } else if (key == "tree_plan_cache_mb") {
         check_min(value, 0, key);
         tree_plan_cache_mb = value;
+    } else if (key == "tree_size_memo_mb") {
+        check_min(value, 0, key);
+        tree_size_memo_mb = value;
+    } else if (key == "su_n_packed_ram_mb") {
+        check_min(value, 0, key);
+        su_n_packed_ram_mb = value;
     } else if (key == "su2_cg_hweight") {
         check_min(value, 0, key);
         su2_cg_hweight = value;
@@ -358,6 +366,11 @@ LasytenConfig::set_option(const std::string& key, int64 value)
         su2_r_hweight = value;
     } else if (key == "fusion_tree_eps" || key == "coupling_cutoff") {
         set_option(key, static_cast<float64>(value));
+    } else if (key == "su_n_hweights") {
+        throw py::type_error(
+          "Config option 'su_n_hweights' is a string like '3:5;4:3,3', not the integer " +
+          std::to_string(value) +
+          ". In YAML quote the value: an unquoted 2:24 is read as the base-60 number 144.");
     } else if (std::ranges::contains(all_option_keys(), key)) {
         throw py::type_error("Config option '" + key + "' is not an int");
     } else {
@@ -400,8 +413,8 @@ LasytenConfig::set_option(const std::string& key, const std::string& value)
 {
     if (key == "print_linewidth" || key == "print_indent" || key == "maxlines_spaces" ||
         key == "maxlines_tensors" || key == "su_n_symbol_cache_mb" ||
-        key == "tree_plan_cache_mb" || key == "su2_cg_hweight" || key == "su2_f_hweight" ||
-        key == "su2_r_hweight") {
+        key == "tree_plan_cache_mb" || key == "tree_size_memo_mb" || key == "su_n_packed_ram_mb" ||
+        key == "su2_cg_hweight" || key == "su2_f_hweight" || key == "su2_r_hweight") {
         set_option(key, parse_int64(value));
     } else if (key == "check_fusion" || key == "implicit_scalar_conversion") {
         set_option(key, coerce_bool(value));
@@ -591,6 +604,10 @@ LasytenConfig::get_option(const std::string& key) const
         return py::cast(su_n_symbol_cache_mb);
     if (key == "tree_plan_cache_mb")
         return py::cast(tree_plan_cache_mb);
+    if (key == "tree_size_memo_mb")
+        return py::cast(tree_size_memo_mb);
+    if (key == "su_n_packed_ram_mb")
+        return py::cast(su_n_packed_ram_mb);
     if (key == "su_n_hweights")
         return py::cast(su_n_hweights);
     if (key == "su2_cg_hweight")
@@ -643,6 +660,8 @@ LasytenConfig::save_hdf5(lasyten::hdf5::Saver& saver,
     saver.save_string(subpath + "su_n_data_filename_base", su_n_data_filename_base);
     saver.save_int64(subpath + "su_n_symbol_cache_mb", su_n_symbol_cache_mb);
     saver.save_int64(subpath + "tree_plan_cache_mb", tree_plan_cache_mb);
+    saver.save_int64(subpath + "tree_size_memo_mb", tree_size_memo_mb);
+    saver.save_int64(subpath + "su_n_packed_ram_mb", su_n_packed_ram_mb);
     saver.save_int64(subpath + "su2_cg_hweight", su2_cg_hweight);
     saver.save_int64(subpath + "su2_f_hweight", su2_f_hweight);
     saver.save_int64(subpath + "su2_r_hweight", su2_r_hweight);
@@ -682,6 +701,10 @@ LasytenConfig::from_hdf5(lasyten::hdf5::Loader& loader,
              [&](hid_t id) { obj.su_n_symbol_cache_mb = loader.load_int64(id); });
     load_opt("tree_plan_cache_mb",
              [&](hid_t id) { obj.tree_plan_cache_mb = loader.load_int64(id); });
+    load_opt("tree_size_memo_mb",
+             [&](hid_t id) { obj.tree_size_memo_mb = loader.load_int64(id); });
+    load_opt("su_n_packed_ram_mb",
+             [&](hid_t id) { obj.su_n_packed_ram_mb = loader.load_int64(id); });
     load_opt("su2_cg_hweight", [&](hid_t id) { obj.su2_cg_hweight = loader.load_int64(id); });
     load_opt("su2_f_hweight", [&](hid_t id) { obj.su2_f_hweight = loader.load_int64(id); });
     load_opt("su2_r_hweight", [&](hid_t id) { obj.su2_r_hweight = loader.load_int64(id); });

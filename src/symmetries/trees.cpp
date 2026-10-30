@@ -1652,17 +1652,13 @@ using TreeSizeCache = ByteLRU<std::string, TreeSizeEntry>;
 TreeSizeCache&
 tree_size_cache()
 {
-    static TreeSizeCache cache(
-      [] {
-          // one eighth of the tree-plan budget
-          return static_cast<std::size_t>(get_config().tree_plan_cache_mb) *
-                 (std::size_t{ 1 } << 20) / 8;
-      },
-      [](std::string const& key, TreeSizeEntry const&) {
-          constexpr std::size_t node_overhead = 112; // list node + hash node + control block
-          return 2 * (sizeof(std::string) + key.capacity()) + sizeof(TreeSizeEntry) +
-                 node_overhead;
-      });
+    static TreeSizeCache cache([] { return megabytes_to_bytes(get_config().tree_size_memo_mb); },
+                               [](std::string const& key, TreeSizeEntry const&) {
+                                   constexpr std::size_t node_overhead =
+                                     112; // list node + hash node + control block
+                                   return 2 * (sizeof(std::string) + key.capacity()) +
+                                          sizeof(TreeSizeEntry) + node_overhead;
+                               });
     return cache;
 }
 
@@ -1692,9 +1688,12 @@ clear_tree_size_cache()
 std::size_t
 FusionTree::approx_bytes() const
 {
-    return sizeof(FusionTree) + uncoupled.capacity() * sizeof(Sector) +
-           inner_sectors.capacity() * sizeof(Sector) + are_dual.capacity() +
-           multiplicities.capacity() * sizeof(int64);
+    // every non-empty vector is a separate heap block with allocator overhead (header, rounding)
+    constexpr std::size_t block_overhead = 16;
+    auto const block = [](std::size_t bytes) { return bytes == 0 ? 0 : bytes + block_overhead; };
+    return sizeof(FusionTree) + block(uncoupled.capacity() * sizeof(Sector)) +
+           block(inner_sectors.capacity() * sizeof(Sector)) + block(are_dual.capacity()) +
+           block(multiplicities.capacity() * sizeof(int64));
 }
 
 std::size_t

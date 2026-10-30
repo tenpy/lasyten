@@ -60,8 +60,18 @@ The following options are available::
                                                  and fusion outcomes (least-recently-used entries are evicted).
                                                  ``0`` disables the cache. Read at insertion time.
     ------------------------------  -----------  ----------------------------------------------------------------------
-    tree_plan_cache_mb              256          Memory budget in MB of the RAM cache for fusion-tree mappings and
-                                                 the ``fusion_trees`` size memo. ``0`` disables the caches.
+    tree_plan_cache_mb              256          Memory budget in MB of the RAM cache for fusion-tree mappings
+                                                 ("tree plans"). ``0`` disables the cache. Read at insertion time.
+    ------------------------------  -----------  ----------------------------------------------------------------------
+    tree_size_memo_mb               32           Memory budget in MB of the memo of the number of fusion trees
+                                                 (``fusion_trees.size``), independent of ``tree_plan_cache_mb``.
+                                                 ``0`` disables the memo.
+    ------------------------------  -----------  ----------------------------------------------------------------------
+    su_n_packed_ram_mb              256          The block data of an SU(N) symbol file in the packed layout is
+                                                 held in RAM if it is at most this many MB (checked per file when it
+                                                 is opened), else read block by block. This memory belongs to the
+                                                 open file and is not part of ``su_n_symbol_cache_mb``. ``0``
+                                                 always reads from the file.
     ------------------------------  -----------  ----------------------------------------------------------------------
     su2_cg_hweight                  0            Highest weight of the CG file of the production SU(2) symmetry
                                                  (``conserve='SU2'``). ``0`` auto-detects the largest weight found
