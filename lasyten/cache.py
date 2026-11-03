@@ -24,6 +24,7 @@ anywhere else is therefore released only when its plans are purged: this happens
 plans are inserted and whenever :func:`cache_info` is called, when the plans are evicted, and when
 :func:`clear_caches` is called, which also runs automatically at interpreter exit.
 """
+# Copyright (C) TeNPy Developers, Apache license
 
 import atexit
 
