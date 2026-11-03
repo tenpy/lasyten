@@ -70,6 +70,9 @@ class FusionTree
     bool is_abelian = false;
     BraidingStyle braiding_style{};
 
+    /// Estimated memory footprint in bytes (the object and the arrays it owns).
+    [[nodiscard]] std::size_t approx_bytes() const;
+
     FusionTree(Symmetry::Ptr symmetry,
                SectorArray uncoupled,
                Sector coupled,

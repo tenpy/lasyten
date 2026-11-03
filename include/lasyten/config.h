@@ -1,5 +1,9 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -20,6 +24,21 @@ std::string default_su_n_data_path();
 /// Expand a leading ``~`` (or ``~/...``) to the user's home directory. ``~user`` forms and paths
 /// without a resolvable home directory are returned unchanged.
 std::string expand_user(std::string path);
+
+/// Bytes of a memory budget given in MB (the ``*_mb`` options). Negative values count as 0 and
+/// huge values are clamped, so that the conversion cannot overflow (the options are validated when
+/// set, but not when a saved config is loaded).
+[[nodiscard]] inline std::size_t
+megabytes_to_bytes(int64 mb) noexcept
+{
+    constexpr int64 max_mb = std::numeric_limits<int64>::max() >> 20;
+    return mb <= 0 ? std::size_t{ 0 } : static_cast<std::size_t>(std::min(mb, max_mb)) << 20;
+}
+
+/// The weights ``{cg, f, r}`` pinned by the config for the symmetry SU(N); an entry is 0 if it is
+/// not pinned. Sources: the option ``su_n_hweights`` and, for N = 2, ``su2_{cg,f,r}_hweight``
+/// (which take precedence).
+std::array<int64, 3> su_n_pinned_hweights(int N);
 
 // NOLINTBEGIN(readability-magic-numbers)
 
@@ -49,6 +68,37 @@ class LasytenConfig
     /// Stem of the SU(N) data file names. The full name is
     /// ``<base>_N{N}_{CG|F|R}_hweight{H}.hdf5``.
     std::string su_n_data_filename_base = "su_n_clebsch_gordan_data";
+    /// Memory budget in MB of the RAM cache for SU(N) F symbols, R symbols and fusion outcomes
+    /// (least-recently-used entries are evicted when the estimated size exceeds it).
+    /// ``0`` disables the cache. The value is read whenever an entry is inserted, so it can be
+    /// changed at runtime (e.g. with ``temporary_options``).
+    int64 su_n_symbol_cache_mb = 256;
+    /// Memory budget in MB of the RAM cache for fusion-tree mappings ("tree plans"). ``0``
+    /// disables the cache. Read at insertion time. The ``fusion_trees::size`` memo has a budget of
+    /// its own (``tree_size_memo_mb``).
+    int64 tree_plan_cache_mb = 256;
+    /// Memory budget in MB of the memo of the number of fusion trees (``fusion_trees::size``),
+    /// which is independent of ``tree_plan_cache_mb``. ``0`` disables the memo. Read at insertion
+    /// time.
+    int64 tree_size_memo_mb = 32;
+    /// Block data of an SU(N) symbol file in the packed layout is held in RAM when it is not
+    /// larger than this many MB (checked per file when the file is opened); larger files are read
+    /// one block at a time. This memory belongs to the open file, not to the symbol cache budget
+    /// ``su_n_symbol_cache_mb``. ``0`` always reads from the file.
+    int64 su_n_packed_ram_mb = 256;
+    /// Pins the data weights of SU(N) symmetries that are created without explicit weights
+    /// (``SUN(N)``): a ``;``-separated list of ``N:cg[,f[,r]]`` entries, e.g. ``"3:5;4:3,3,3"``.
+    /// ``f`` and ``r`` default to ``cg``; ``0`` or a missing entry means "largest weight found in
+    /// ``su_n_data_path``". For N = 2 the options ``su2_{cg,f,r}_hweight`` take precedence.
+    std::string su_n_hweights = "";
+    /// Highest weight of the Clebsch-Gordan file of the production SU(2) symmetry
+    /// (``conserve='SU2'``). ``0`` (default) auto-detects the largest weight available in
+    /// ``su_n_data_path`` (finished files only); a positive value pins it.
+    int64 su2_cg_hweight = 0;
+    /// Highest weight of the F-symbol file of the production SU(2) symmetry; ``0`` auto-detects.
+    int64 su2_f_hweight = 0;
+    /// Highest weight of the R-symbol file of the production SU(2) symmetry; ``0`` auto-detects.
+    int64 su2_r_hweight = 0;
     /// Default singular-value cutoff when factorizing a `Coupling` (`from_dense_block` /
     /// `from_tensor`). Singular values below this threshold are discarded.
     float64 coupling_cutoff = 1.0e-13;

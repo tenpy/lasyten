@@ -2,6 +2,7 @@
 
 #include "../group.h"
 
+#include <array>
 #include <highfive/highfive.hpp>
 #include <lasyten/tools/hdf5.h>
 #include <map>
@@ -50,6 +51,10 @@ std::string su_n_data_file_path(int N,
 /// Clebsch-Gordan coefficients and F/R symbols need to be calculated with the
 /// clebsch_gordan_coefficients package and exported as HDF5 files.
 ///
+/// The F and R files may be in the folder layout (one dataset per key) or in the packed layout
+/// (root attribute ``Layout = "packed_v1"``, the keys and blocks stored in four arrays); the
+/// layout is detected for each file and does not change the results.
+///
 /// Construct from filenames (or via :func:`from_config`, which resolves standard paths)::
 ///
 ///     SUN(N, cg_path, f_path, r_path, descriptive_name=None)
@@ -86,9 +91,12 @@ class SUN : public Group
     ///
     /// ``hweight`` sets the highest weight for all three files; ``cg_hweight`` / ``f_hweight`` /
     /// ``r_hweight`` override it individually. The CG highest weight must be >= the F and R
-    /// highest weights.
+    /// highest weights. Without ``hweight`` every weight that is not given is taken from the
+    /// config option ``su_n_hweights`` or else is the largest
+    /// weight for which a data file exists (F and R not above the CG weight); a missing file
+    /// raises ``FileNotFoundError``.
     static Ptr from_config(int N,
-                           int64 hweight,
+                           std::optional<int64> hweight,
                            std::optional<int64> cg_hweight = std::nullopt,
                            std::optional<int64> f_hweight = std::nullopt,
                            std::optional<int64> r_hweight = std::nullopt,
@@ -169,10 +177,21 @@ class SUN : public Group
     std::shared_ptr<HighFive::File> CGfile_;
     std::shared_ptr<HighFive::File> Ffile_;
     std::shared_ptr<HighFive::File> Rfile_;
+    std::shared_ptr<void> state_; // per-object cache state, defined in sun.cpp (SunState)
 
     HighFive::Group cg_root() const;
     HighFive::Group f_root() const;
     HighFive::Group r_root() const;
 };
+
+/// Weights ``{cg, f, r}`` of the data files that ``SUN::from_config`` would use for N without
+/// explicit weights; entries that cannot be determined (nothing pinned, no file found) are empty.
+std::array<std::optional<int64>, 3> su_n_detect_hweights(
+  int N,
+  std::optional<std::string> path = std::nullopt,
+  std::optional<std::string> filename_base = std::nullopt,
+  std::optional<int64> cg_hweight = std::nullopt,
+  std::optional<int64> f_hweight = std::nullopt,
+  std::optional<int64> r_hweight = std::nullopt);
 
 } // namespace lasyten

@@ -1,4 +1,5 @@
 #include <lasyten/tools.h>
+#include <lasyten/tools/lru_cache.h>
 
 #include "doc_plus.h"
 #include "docstrings/tools.h"
@@ -38,6 +39,50 @@ bind_tools(py::module_& m)
           py::arg("length"),
           "Convert to a valid non-negative index into the given length.");
 
+    auto stats_dict = [](CacheStats const& s) {
+        py::dict d;
+        d["hits"] = s.hits;
+        d["misses"] = s.misses;
+        d["evictions"] = s.evictions;
+        d["rejected"] = s.rejected;
+        d["entries"] = s.entries;
+        d["bytes"] = s.bytes;
+        d["capacity_bytes"] = s.capacity_bytes;
+        return d;
+    };
+    m.def(
+      "symbol_cache_info",
+      [stats_dict] { return stats_dict(symbol_cache_stats()); },
+      "Statistics (hits, misses, evictions, rejected, entries, bytes, capacity_bytes) of the "
+      "RAM cache for SU(N) F symbols, R symbols and fusion outcomes.");
+    m.def(
+      "clear_symbol_cache", &clear_symbol_cache, "Remove all entries of the SU(N) symbol cache.");
+    m.def(
+      "tree_plan_cache_info",
+      [stats_dict] { return stats_dict(tree_plan_cache_stats()); },
+      "Statistics of the RAM cache for fusion-tree mappings ('tree plans').");
+    m.def("clear_tree_plan_cache", &clear_tree_plan_cache, "Remove all tree-plan cache entries.");
+    m.def("_tree_plan_cache_debug",
+          &tree_plan_cache_debug,
+          "Diagnostics: per plan and symmetry, (strong count, references held by the plan).");
+    m.def(
+      "tree_size_cache_info",
+      [stats_dict] { return stats_dict(tree_size_cache_stats()); },
+      "Statistics of the memo of the number of fusion trees (``fusion_trees.size``).");
+    m.def("clear_tree_size_cache", &clear_tree_size_cache, "Remove all entries of the size memo.");
+
+    m.def(
+      "packed_symbol_info",
+      [] {
+          auto const s = packed_file_stats();
+          py::dict d;
+          d["files"] = s.files;
+          d["index_bytes"] = s.index_bytes;
+          d["data_bytes_in_ram"] = s.data_bytes_in_ram;
+          return d;
+      },
+      "Memory held by open SU(N) symbol files in the packed layout (files, index_bytes, "
+      "data_bytes_in_ram); not part of the symbol cache budget.");
     m.def("permutation_as_swaps",
           &lasyten::permutation_as_swaps,
           py::arg("permutation"),

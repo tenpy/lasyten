@@ -1,6 +1,7 @@
 #include <lasyten/models/degrees_of_freedom.h>
 
 #include <lasyten/backends/backend_factory.h>
+#include <lasyten/config.h>
 #include <lasyten/symmetries/exceptions.h>
 #include <lasyten/symmetries/factors/fermion_number.h>
 #include <lasyten/symmetries/factors/fermion_parity.h>
@@ -17,6 +18,7 @@
 #include <lasyten/tensors/symmetric_tensor.h>
 #include <lasyten/tools.h>
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <format>
@@ -26,6 +28,7 @@
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -709,6 +712,26 @@ SpinDOF::spin_vector_from_Sp(py::array Sz, py::array Sp)
     return np.attr("stack")(py::make_tuple(Sx, Sy, Sz), py::arg("axis") = -1);
 }
 
+namespace {
+
+/// Weights (CG, F, R) of the data files of the production SU(2) symmetry: the config options
+/// ``su2_{cg,f,r}_hweight`` or ``su_n_hweights`` if set, otherwise the largest weights found in
+/// ``su_n_data_path`` (F and R not above the CG weight), otherwise the historic defaults 20 / 6
+/// / 6.
+std::array<int64, 3>
+su2_data_hweights()
+{
+    constexpr int64 default_cg = 20;
+    constexpr int64 default_f = 6;
+    constexpr int64 default_r = 6;
+    auto const detected = su_n_detect_hweights(2);
+    return { detected[0].value_or(default_cg),
+             detected[1].value_or(default_f),
+             detected[2].value_or(default_r) };
+}
+
+} // namespace
+
 Symmetry::Ptr
 SpinDOF::conservation_law_to_symmetry(std::optional<std::string> conserve, bool use_test_su2)
 {
@@ -719,15 +742,14 @@ SpinDOF::conservation_law_to_symmetry(std::optional<std::string> conserve, bool 
         if (use_test_su2) {
             return symmetry_from_factor(std::make_shared<_SU2>("spin"));
         }
-        // Production SU(2): SUN(N=2) with the same default hweights as tests / benchmarks.
-        constexpr int64 k_cg_hweight = 20;
-        constexpr int64 k_f_hweight = 6;
-        constexpr int64 k_r_hweight = 6;
+        // Production SU(2): SUN(N=2) with the data files found in ``su_n_data_path`` (largest
+        // available weights, or the config options ``su2_{cg,f,r}_hweight``).
+        auto const [h_cg, h_f, h_r] = su2_data_hweights();
         return symmetry_from_factor(SUN::from_config(2,
-                                                     k_cg_hweight,
+                                                     h_cg,
                                                      /*cg_hweight=*/std::nullopt,
-                                                     k_f_hweight,
-                                                     k_r_hweight,
+                                                     h_f,
+                                                     h_r,
                                                      /*path=*/std::nullopt,
                                                      /*filename_base=*/std::nullopt,
                                                      "spin"));

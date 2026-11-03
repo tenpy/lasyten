@@ -194,6 +194,12 @@ class TreePairMapping : public TensorMapping
 
     TreePairMapping(SparseMappingFusionTreePair mapping_, bool is_real_);
 
+    /// Estimated memory footprint in bytes.
+    [[nodiscard]] std::size_t approx_bytes() const
+    {
+        return sizeof(*this) + mapping.approx_bytes();
+    }
+
     /// The identity mapping.
     ///
     /// @param codomain, domain The codomain and domain that determine the possible fusion and
@@ -263,6 +269,14 @@ class FactorizedTreeMapping : public TensorMapping
   public:
     FusionTreeMappingVariant splitting_tree_mapping;
     FusionTreeMappingVariant fusion_tree_mapping;
+
+    /// Estimated memory footprint in bytes.
+    [[nodiscard]] std::size_t approx_bytes() const
+    {
+        auto const bytes = [](auto const& m) { return m.approx_bytes(); };
+        return sizeof(*this) + std::visit(bytes, splitting_tree_mapping) +
+               std::visit(bytes, fusion_tree_mapping);
+    }
 
     FactorizedTreeMapping(FusionTreeMappingVariant splitting_tree_mapping_,
                           FusionTreeMappingVariant fusion_tree_mapping_,

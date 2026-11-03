@@ -30,6 +30,7 @@ target_sources(lasyten
   symmetries/factors/u1.cpp
   symmetries/factors/zn.cpp
   symmetries/factors/sun.cpp
+  symmetries/factors/sun_packed.cpp
   symmetries/factors/fermion_number.cpp
   symmetries/factors/fermion_parity.cpp
   symmetries/factors/zn_anyon_category.cpp

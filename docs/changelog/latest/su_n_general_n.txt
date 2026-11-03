@@ -1,0 +1,10 @@
+- ``SUN(N)`` can be created without a weight (``SUN(3)``): the weights of the CG, F and R files are then
+  taken from the new config option ``su_n_hweights`` (for example ``'3:5;4:3,3,3'``, entries
+  ``N:cg[,f[,r]]``; ``f`` and ``r`` default to ``cg``) or are the largest weights for which data files
+  exist in ``su_n_data_path`` (F and R not above the CG weight). Weights passed as arguments still take
+  precedence, a missing file raises ``FileNotFoundError``, and for N = 2 the options
+  ``su2_{cg,f,r}_hweight`` keep winning over ``su_n_hweights``. The production SU(2) symmetry of the
+  spin sites uses the same detection.
+- Tests of the SU(N) symbol handling for N > 2 (packed and folder layout, symbol cache, missing keys,
+  exact sector dimensions) run on generated SU(3) / SU(4) data given by the environment variable
+  ``LASYTEN_TEST_SUN_DIR`` and are skipped without it.

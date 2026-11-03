@@ -9,6 +9,7 @@
 #include <fstream>
 #include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
+#include <map>
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
@@ -219,6 +220,14 @@ LasytenConfig::all_option_keys()
         "fusion_tree_eps",
         "su_n_data_path",
         "su_n_data_filename_base",
+        "su_n_symbol_cache_mb",
+        "tree_plan_cache_mb",
+        "tree_size_memo_mb",
+        "su_n_packed_ram_mb",
+        "su2_cg_hweight",
+        "su2_f_hweight",
+        "su2_r_hweight",
+        "su_n_hweights",
         "coupling_cutoff",
     };
     return keys;
@@ -228,6 +237,95 @@ std::string
 LasytenConfig::env_var_name(const std::string& key)
 {
     return "LASYTEN_" + to_upper(key);
+}
+
+namespace {
+
+/// Parses ``"N:cg[,f[,r]];..."``; throws ``ValueError`` for malformed text.
+std::map<int, std::array<int64, 3>>
+parse_su_n_hweights(std::string const& spec)
+{
+    auto bad = [&](std::string const& why) {
+        return py::value_error("Config option 'su_n_hweights': " + why + " in '" + spec +
+                               "' (expected e.g. '3:5;4:3,3,3')");
+    };
+    auto to_int = [&](std::string const& text) -> int64 {
+        if (text.empty() || text.size() > 9 ||
+            !std::all_of(
+              text.begin(), text.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+            throw bad("'" + text + "' is not a non-negative integer");
+        }
+        return std::stoll(text);
+    };
+    auto strip = [](std::string t) {
+        auto not_space = [](unsigned char c) { return std::isspace(c) == 0; };
+        t.erase(t.begin(), std::find_if(t.begin(), t.end(), not_space));
+        t.erase(std::find_if(t.rbegin(), t.rend(), not_space).base(), t.end());
+        return t;
+    };
+    auto split = [&](std::string const& text, char sep) {
+        std::vector<std::string> parts;
+        std::size_t start = 0;
+        for (;;) {
+            auto pos = text.find(sep, start);
+            parts.push_back(
+              strip(text.substr(start, pos == std::string::npos ? pos : pos - start)));
+            if (pos == std::string::npos) {
+                break;
+            }
+            start = pos + 1;
+        }
+        return parts;
+    };
+    std::map<int, std::array<int64, 3>> out;
+    if (strip(spec).empty()) {
+        return out;
+    }
+    for (auto const& entry : split(spec, ';')) {
+        if (entry.empty()) {
+            continue;
+        }
+        auto const colon = split(entry, ':');
+        if (colon.size() != 2) {
+            throw bad("entry '" + entry + "' needs the form N:cg[,f[,r]]");
+        }
+        int64 const n = to_int(colon[0]);
+        if (n < 2) {
+            throw bad("N must be >= 2");
+        }
+        auto const vals = split(colon[1], ',');
+        if (vals.empty() || vals.size() > 3) {
+            throw bad("entry '" + entry + "' has " + std::to_string(vals.size()) + " weights");
+        }
+        std::array<int64, 3> h{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            h[i] = i < vals.size() ? to_int(vals[i]) : h[0];
+        }
+        if (out.contains(static_cast<int>(n))) {
+            throw bad("N=" + std::to_string(n) + " appears twice");
+        }
+        out[static_cast<int>(n)] = h;
+    }
+    return out;
+}
+
+} // namespace
+
+std::array<int64, 3>
+su_n_pinned_hweights(int N)
+{
+    auto const& config = get_config();
+    std::array<int64, 3> pinned{ 0, 0, 0 };
+    auto const table = parse_su_n_hweights(config.su_n_hweights);
+    if (auto it = table.find(N); it != table.end()) {
+        pinned = it->second;
+    }
+    if (N == 2) {
+        pinned[0] = config.su2_cg_hweight > 0 ? config.su2_cg_hweight : pinned[0];
+        pinned[1] = config.su2_f_hweight > 0 ? config.su2_f_hweight : pinned[1];
+        pinned[2] = config.su2_r_hweight > 0 ? config.su2_r_hweight : pinned[2];
+    }
+    return pinned;
 }
 
 void
@@ -245,8 +343,34 @@ LasytenConfig::set_option(const std::string& key, int64 value)
     } else if (key == "maxlines_tensors") {
         check_min(value, 0, key);
         maxlines_tensors = value;
+    } else if (key == "su_n_symbol_cache_mb") {
+        check_min(value, 0, key);
+        su_n_symbol_cache_mb = value;
+    } else if (key == "tree_plan_cache_mb") {
+        check_min(value, 0, key);
+        tree_plan_cache_mb = value;
+    } else if (key == "tree_size_memo_mb") {
+        check_min(value, 0, key);
+        tree_size_memo_mb = value;
+    } else if (key == "su_n_packed_ram_mb") {
+        check_min(value, 0, key);
+        su_n_packed_ram_mb = value;
+    } else if (key == "su2_cg_hweight") {
+        check_min(value, 0, key);
+        su2_cg_hweight = value;
+    } else if (key == "su2_f_hweight") {
+        check_min(value, 0, key);
+        su2_f_hweight = value;
+    } else if (key == "su2_r_hweight") {
+        check_min(value, 0, key);
+        su2_r_hweight = value;
     } else if (key == "fusion_tree_eps" || key == "coupling_cutoff") {
         set_option(key, static_cast<float64>(value));
+    } else if (key == "su_n_hweights") {
+        throw py::type_error(
+          "Config option 'su_n_hweights' is a string like '3:5;4:3,3', not the integer " +
+          std::to_string(value) +
+          ". In YAML quote the value: an unquoted 2:24 is read as the base-60 number 144.");
     } else if (std::ranges::contains(all_option_keys(), key)) {
         throw py::type_error("Config option '" + key + "' is not an int");
     } else {
@@ -288,7 +412,9 @@ void
 LasytenConfig::set_option(const std::string& key, const std::string& value)
 {
     if (key == "print_linewidth" || key == "print_indent" || key == "maxlines_spaces" ||
-        key == "maxlines_tensors") {
+        key == "maxlines_tensors" || key == "su_n_symbol_cache_mb" ||
+        key == "tree_plan_cache_mb" || key == "tree_size_memo_mb" || key == "su_n_packed_ram_mb" ||
+        key == "su2_cg_hweight" || key == "su2_f_hweight" || key == "su2_r_hweight") {
         set_option(key, parse_int64(value));
     } else if (key == "check_fusion" || key == "implicit_scalar_conversion") {
         set_option(key, coerce_bool(value));
@@ -314,6 +440,9 @@ LasytenConfig::set_option(const std::string& key, const std::string& value)
         if (value.empty())
             throw py::value_error("Config option 'su_n_data_filename_base' must not be empty");
         su_n_data_filename_base = value;
+    } else if (key == "su_n_hweights") {
+        (void)parse_su_n_hweights(value); // validate
+        su_n_hweights = value;
     } else {
         throw py::key_error("Invalid config option: " + key);
     }
@@ -471,6 +600,22 @@ LasytenConfig::get_option(const std::string& key) const
         return py::cast(su_n_data_path);
     if (key == "su_n_data_filename_base")
         return py::cast(su_n_data_filename_base);
+    if (key == "su_n_symbol_cache_mb")
+        return py::cast(su_n_symbol_cache_mb);
+    if (key == "tree_plan_cache_mb")
+        return py::cast(tree_plan_cache_mb);
+    if (key == "tree_size_memo_mb")
+        return py::cast(tree_size_memo_mb);
+    if (key == "su_n_packed_ram_mb")
+        return py::cast(su_n_packed_ram_mb);
+    if (key == "su_n_hweights")
+        return py::cast(su_n_hweights);
+    if (key == "su2_cg_hweight")
+        return py::cast(su2_cg_hweight);
+    if (key == "su2_f_hweight")
+        return py::cast(su2_f_hweight);
+    if (key == "su2_r_hweight")
+        return py::cast(su2_r_hweight);
     if (key == "coupling_cutoff")
         return py::cast(coupling_cutoff);
     throw py::key_error("Invalid option name: " + key);
@@ -513,6 +658,14 @@ LasytenConfig::save_hdf5(lasyten::hdf5::Saver& saver,
     saver.save_float64(subpath + "fusion_tree_eps", fusion_tree_eps);
     saver.save_string(subpath + "su_n_data_path", su_n_data_path);
     saver.save_string(subpath + "su_n_data_filename_base", su_n_data_filename_base);
+    saver.save_int64(subpath + "su_n_symbol_cache_mb", su_n_symbol_cache_mb);
+    saver.save_int64(subpath + "tree_plan_cache_mb", tree_plan_cache_mb);
+    saver.save_int64(subpath + "tree_size_memo_mb", tree_size_memo_mb);
+    saver.save_int64(subpath + "su_n_packed_ram_mb", su_n_packed_ram_mb);
+    saver.save_int64(subpath + "su2_cg_hweight", su2_cg_hweight);
+    saver.save_int64(subpath + "su2_f_hweight", su2_f_hweight);
+    saver.save_int64(subpath + "su2_r_hweight", su2_r_hweight);
+    saver.save_string(subpath + "su_n_hweights", su_n_hweights);
     saver.save_float64(subpath + "coupling_cutoff", coupling_cutoff);
 }
 
@@ -544,6 +697,18 @@ LasytenConfig::from_hdf5(lasyten::hdf5::Loader& loader,
     load_opt("su_n_data_path", [&](hid_t id) { obj.su_n_data_path = loader.load_string(id); });
     load_opt("su_n_data_filename_base",
              [&](hid_t id) { obj.su_n_data_filename_base = loader.load_string(id); });
+    load_opt("su_n_symbol_cache_mb",
+             [&](hid_t id) { obj.su_n_symbol_cache_mb = loader.load_int64(id); });
+    load_opt("tree_plan_cache_mb",
+             [&](hid_t id) { obj.tree_plan_cache_mb = loader.load_int64(id); });
+    load_opt("tree_size_memo_mb",
+             [&](hid_t id) { obj.tree_size_memo_mb = loader.load_int64(id); });
+    load_opt("su_n_packed_ram_mb",
+             [&](hid_t id) { obj.su_n_packed_ram_mb = loader.load_int64(id); });
+    load_opt("su2_cg_hweight", [&](hid_t id) { obj.su2_cg_hweight = loader.load_int64(id); });
+    load_opt("su2_f_hweight", [&](hid_t id) { obj.su2_f_hweight = loader.load_int64(id); });
+    load_opt("su2_r_hweight", [&](hid_t id) { obj.su2_r_hweight = loader.load_int64(id); });
+    load_opt("su_n_hweights", [&](hid_t id) { obj.su_n_hweights = loader.load_string(id); });
     load_opt("coupling_cutoff", [&](hid_t id) { obj.coupling_cutoff = loader.load_float64(id); });
     (void)h5gr;
     return obj;

@@ -1,0 +1,20 @@
+- The automatic detection of the SU(N) data weights (``SUN(N)`` without weights and the production
+  SU(2) symmetry, ``conserve='SU2'``) only considers finished files: a file whose ``Highest_Weight``
+  attribute is missing (a generator run that has not finished or was interrupted), differs from the
+  weight in the file name, or that cannot be read is skipped with a warning that names it. Errors about
+  a missing attribute name the file.
+- ``SUN`` refuses to combine a CG file that records a ``Gauge_Version`` with an F or R file that records
+  none or another one (the symbols depend on the gauge); a set without any record, e.g. the files of
+  ``external/SUN_symbols``, still loads. A ``CG_Run_Id`` or ``Gauge_Version`` of ``"unknown"`` (written by
+  the generator for legacy CG files) or an empty one counts as not recorded.
+- ``SUN`` objects on the same, unchanged data files share their validated state: the packed indices, the
+  weights and the symbol cache entries (before, every ``SpinSite(conserve='SU2')`` scanned and indexed
+  the files again).
+- Cached tree plans no longer keep a dropped symmetry (with its open files and packed index) alive:
+  plans of symmetries that nothing else uses are purged while plans are inserted and when
+  :func:`lasyten.cache.cache_info` is called, and the caches are cleared at interpreter exit.
+- New config options ``tree_size_memo_mb`` (budget of the memo of the number of fusion trees, default 32 MB;
+  before it was one eighth of ``tree_plan_cache_mb``, so ``tree_plan_cache_mb=0`` also switched the
+  memo off) and ``su_n_packed_ram_mb`` (packed symbol files up to this size are held in RAM, default
+  256 MB; this memory is outside the cache budgets).
+- The estimated sizes of cache entries include the allocator overhead of their heap blocks.
