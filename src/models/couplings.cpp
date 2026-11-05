@@ -233,7 +233,10 @@ default_species_pair()
 }
 
 py::array
-quadratic_coupling_numpy(std::vector<Site::Ptr> const& sites, bool is_pairing, py::object species)
+quadratic_coupling_numpy(std::vector<Site::Ptr> const& sites,
+                         bool is_pairing,
+                         py::object species,
+                         bool add_hc = true)
 {
     check_site_count(sites, 2);
     auto occ_i = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
@@ -291,7 +294,7 @@ quadratic_coupling_numpy(std::vector<Site::Ptr> const& sites, bool is_pairing, p
                                  py::none(), py::slice(), py::slice(), py::none()))));
     }
     py::array h_conj = np.attr("transpose")(h.attr("conj")(), py::make_tuple(3, 2, 1, 0));
-    return (h + h_conj).cast<py::array>();
+    return add_hc ? (h + h_conj).cast<py::array>() : h.cast<py::array>();
 }
 
 py::object
@@ -1166,18 +1169,21 @@ density_density_interaction(std::vector<Site::Ptr> sites,
 
 Coupling
 hopping(std::vector<Site::Ptr> sites,
-        float64 t,
+        float64 t_left,
+        float64 t_right,
         py::object species,
         py::object /*backend*/,
         py::object /*device*/,
         py::object name)
 {
-    py::array h = quadratic_coupling_numpy(sites, false, species);
+    py::array h = quadratic_coupling_numpy(sites, false, species, false);
     auto np = numpy();
+    py::array h_conj =
+      np.attr("transpose")(h.attr("conj")(), py::make_tuple(3, 2, 1, 0)).cast<py::array>();
+    py::object weighted_h =
+      np_add(np_multiply(py::float_(t_left), h), np_multiply(py::float_(t_right), h_conj));
     return coupling_from_dense_block(
-      np_multiply(py::float_(-t), np.attr("array")(h)).cast<py::array>(),
-      sites,
-      parse_name(name, "hopping"));
+      weighted_h.cast<py::array>(), sites, parse_name(name, "hopping"));
 }
 
 Coupling
@@ -1246,6 +1252,7 @@ Coupling
 clock_clock_coupling(std::vector<Site::Ptr> sites,
                      float64 Jx,
                      float64 Jz,
+                     bool plus_hc,
                      py::object /*backend*/,
                      py::object /*device*/,
                      py::object name)
@@ -1287,7 +1294,9 @@ clock_clock_coupling(std::vector<Site::Ptr> sites,
                                            .attr("__getitem__")(py::make_tuple(
                                              py::none(), py::slice(), py::slice(), py::none())))));
     }
-    h = h.attr("__iadd__")(np.attr("transpose")(h.attr("conj")(), py::make_tuple(3, 2, 1, 0)));
+    if (plus_hc) {
+        h = h.attr("__iadd__")(np.attr("transpose")(h.attr("conj")(), py::make_tuple(3, 2, 1, 0)));
+    }
     return coupling_from_dense_block(h.cast<py::array>(), sites, parse_name(name, "clock-clock"));
 }
 

@@ -502,7 +502,7 @@ def test_hopping(any_backend, np_random):
             elif site.conserve_S in ['SU(2)']:
                 species1 = species2 = degrees_of_freedom.ALL_SPECIES
 
-        coupling = couplings.hopping([site] * 2, t, species=(species1, species2))
+        coupling = couplings.hopping([site] * 2, t, t, species=(species1, species2))
         coupling.test_sanity()
         tensor = coupling.to_tensor()
         # hermiticity
@@ -636,6 +636,11 @@ def test_clock_clock_coupling(any_backend, np_random):
         tensor = coupling.to_tensor()
         # hermiticity
         assert tensors.almost_equal(tensor.hc, tensor)
+        coupling_without_hc = couplings.clock_clock_coupling([site] * 2, Jx=Jx, Jz=Jz, plus_hc=False)
+        coupling_without_hc.test_sanity()
+        tensor_without_hc = coupling_without_hc.to_tensor()
+        if site.leg.dim > 2:
+            assert not tensors.almost_equal(tensor_without_hc.hc, tensor_without_hc)
         # trace is zero
         npt.assert_almost_equal(tensors.trace(tensor).to_numpy(), 0)
         # commutation relation
@@ -1142,6 +1147,25 @@ def _asym_hopping_dense_block(site):
     creator = site.get_creator_numpy(species=0, include_JW=True)
     annihilator = site.get_annihilator_numpy(species=0, include_JW=True)
     return (creator @ site._JW)[:, None, None, :] * annihilator[None, :, :, None]
+
+
+@pytest.mark.parametrize(
+    'site_factory',
+    [
+        lambda: sites.SpinlessBosonSite(Nmax=1, conserve='N'),
+        lambda: sites.SpinlessFermionSite(num_species=1, conserve='N'),
+    ],
+)
+def test_hopping_independent_prefactors(site_factory):
+    site = site_factory()
+    t_left, t_right = 2.3, -0.7
+    coupling = couplings.hopping([site, site], t_left, t_right)
+
+    directed = _asym_hopping_dense_block(site)
+    expected_block = t_left * directed + t_right * directed.conj().transpose(3, 2, 1, 0)
+    expected = couplings.Coupling.from_dense_block(expected_block, [site, site], understood_braiding=True)
+    assert tensors.almost_equal(coupling.to_tensor(), expected.to_tensor())
+    assert not tensors.almost_equal(coupling.to_tensor().hc, coupling.to_tensor())
 
 
 @pytest.mark.parametrize(

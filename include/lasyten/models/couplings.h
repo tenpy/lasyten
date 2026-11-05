@@ -352,19 +352,21 @@ class Coupling
 /// Hopping of fermions or bosons. Two-site coupling.
 ///
 /// \f[
-///     h_{ij} = -\mathtt{t} \sum_{k \in \mathtt{species}} a_{i, k_i}^\dagger a_{j, k_j} +
-///     h.c.
+///     h_{ij} = \sum_{k \in \mathtt{species}} \mathtt{t}_{left} a_{i, k_i}^\dagger a_{j, k_j}
+///     + \mathtt{t}_{right} a_{j, k_j}^\dagger a_{i, k_i}
 /// \f]
 ///
 /// @param sites The sites that the coupling acts on. Note that the order matters for the final leg
 /// order.
-/// @param t Prefactor, as given above. By default ``1``.
+/// @param t_left Prefactor of @f$ a_{i, k_i}^\dagger a_{j, k_j} @f$. By default ``1``.
+/// @param t_right Prefactor of @f$ a_{j, k_j}^\dagger a_{i, k_i} @f$. By default ``1``.
 /// @param species Which species should participate (the sum above goes over ``k_i, k_j in
 /// zip(*species)``). By default, we let @f$ k_i = k_j @f$ go over all species, i.e. include all
 /// "species preserving" hoppings.
 /// @param backend, device, name Optional tensor backend, device, and coupling name.
 [[nodiscard]] Coupling hopping(std::vector<Site::Ptr> sites,
-                               float64 t = 1,
+                               float64 t_left = 1,
+                               float64 t_right = 1,
                                py::object species = py::none(),
                                py::object backend = py::none(),
                                py::object device = py::none(),
@@ -419,16 +421,19 @@ class Coupling
 /// Two-site coupling between quantum clocks.
 ///
 /// \f[
-///     h_{ij} = \mathtt{Jx} X_i X_j^\dagger + \mathtt{Jz} Z_i Z_j^\dagger + h.c.
+///     h_{ij} = \mathtt{Jx} X_i X_j^\dagger + \mathtt{Jz} Z_i Z_j^\dagger
+///     \quad \text{(+ h.c. if \mathtt{plus\_hc})}
 /// \f]
 ///
 /// @param sites The sites that the coupling acts on. Note that the order matters for the final leg
 /// order.
 /// @param Jx, Jz Prefactor, as given above. By default, all prefactors vanish.
+/// @param plus_hc Whether to add the Hermitian conjugate. By default ``true``.
 /// @param backend, device, name Optional tensor backend, device, and coupling name.
 [[nodiscard]] Coupling clock_clock_coupling(std::vector<Site::Ptr> sites,
                                             float64 Jx = 0,
                                             float64 Jz = 0,
+                                            bool plus_hc = true,
                                             py::object backend = py::none(),
                                             py::object device = py::none(),
                                             py::object name = py::none());
