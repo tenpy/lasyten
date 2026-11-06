@@ -3984,6 +3984,30 @@ def test_tensor_from_grid(cod, dom, row, col, make_compatible_tensor, make_compa
         npt.assert_almost_equal(res1.to_numpy(understood_braiding=True), res2.to_numpy(understood_braiding=True))
 
 
+def test_tensor_from_grid_empty_rows_and_columns(make_compatible_tensor, make_compatible_space):
+    T: SymmetricTensor = make_compatible_tensor([None], [None], cls=SymmetricTensor, use_pipes=False)
+    row_summands = [T.codomain[0], make_compatible_space(is_dual=T.codomain[0].is_dual)]
+    col_summands = [T.domain[-1], make_compatible_space(is_dual=T.domain[-1].is_dual)]
+    grid = [[T, None], [None, None]]
+
+    with pytest.raises(ValueError, match='row_summands'):
+        tensors.tensor_from_grid(grid, col_summands=col_summands)
+    with pytest.raises(ValueError, match='col_summands'):
+        tensors.tensor_from_grid(grid, row_summands=row_summands)
+
+    result = tensors.tensor_from_grid(
+        grid,
+        row_labels=['row0', 'row1'],
+        col_labels=['col0', 'col1'],
+        row_summands=row_summands,
+        col_summands=col_summands,
+    )
+    assert result.codomain[0].spaces == row_summands
+    assert result.domain[-1].spaces == col_summands
+    assert result.codomain[0].summand_labels == ['row0', 'row1']
+    assert result.domain[-1].summand_labels == ['col0', 'col1']
+
+
 def test_tensor_grid_cell_roundtrip(make_compatible_tensor, make_compatible_space):
     """Recover grid cells via DirectSumSpace projections (works without dense bases)."""
     T: SymmetricTensor = make_compatible_tensor([None], [None], cls=SymmetricTensor, use_pipes=False)

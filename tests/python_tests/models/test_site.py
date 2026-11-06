@@ -60,6 +60,9 @@ def test_site(np_random, block_backend, symmetry_backend, use_sym):
     site = degrees_of_freedom.Site(leg, backend=backend, state_labels=labels)
     assert site.state_index('x10') == 0
     assert site.state_index('x17') == 7
+    site.test_op('Id')
+    with pytest.raises(ValueError, match='unknown operator name'):
+        site.test_op('unknown')
     assert set(site.onsite_operators.keys()) == set(('Id',))
     op1 = lasyten.SymmetricTensor.from_random_uniform([leg], [leg], backend=backend, labels=['p', 'p*'])
     site.add_onsite_operator('silly_op', op1)
@@ -70,10 +73,22 @@ def test_site(np_random, block_backend, symmetry_backend, use_sym):
     site.add_onsite_operator('op2', op2)
     assert site.onsite_operators['op2'] is op2
 
+    site.add_onsite_operator('silly_op_hc', lasyten.dagger(op1))
+    site.add_onsite_operator('op2_hc', lasyten.dagger(op2), hc='op2')
+    assert site.hc_ops['silly_op'] == 'silly_op_hc'
+    assert site.hc_ops['silly_op_hc'] == 'silly_op'
+    assert site.hc_ops['op2'] == 'op2_hc'
+    assert site.hc_ops['op2_hc'] == 'op2'
+    assert site.get_hc_op_name('silly_op op2') == 'op2_hc silly_op_hc'
+
     op3_dense = np.diag(np.arange(10, 10 + dim))
     site.add_onsite_operator('op3', op3_dense, is_diagonal=True)
     assert isinstance(site.onsite_operators['op3'], lasyten.DiagonalTensor)
     npt.assert_equal(site.onsite_operators['op3'].to_numpy(), op3_dense)
+    assert site.get_hc_op_name('op3') == 'op3'
+    with pytest.raises(ValueError, match='hermitian conjugate of operator unknown unknown'):
+        site.get_hc_op_name('unknown')
+    site.test_sanity()
 
     # test get_op and multiplication of operators
     # the correct order of multiplication is checked using the spin algebra in test_spin_site
@@ -82,6 +97,10 @@ def test_site(np_random, block_backend, symmetry_backend, use_sym):
     for ops in combinations:
         ops_name = site.multiply_op_names(ops)
         assert lasyten.almost_equal(site.multiply_operators(ops), site.get_op(ops_name))
+
+    site.rename_op('op3', 'op3_renamed')
+    assert site.get_hc_op_name('op3_renamed') == 'op3_renamed'
+    site.test_sanity()
 
     # if use_sym:
     #     leg2 = leg.drop_symmetry(1)
@@ -150,6 +169,17 @@ def test_spin_site(any_backend, spin):
             if site.double_total_spin == 1:
                 expect_ops.update(Sigmax=False, Sigmay=False)
         check_operator_availability(site, expect_ops)
+
+        if conserve == 'SU(2)':
+            with pytest.raises(lasyten.SymmetryError, match='known but unavailable'):
+                site.test_op('Sz')
+        elif conserve != 'None':
+            with pytest.raises(lasyten.SymmetryError, match='known but unavailable'):
+                site.test_op('Sx')
+        else:
+            site.test_op('Sx Sy')
+        with pytest.raises(ValueError, match='unknown operator name'):
+            site.test_op('not_a_spin_operator')
 
         site_list.append(site)
     check_same_operators(site_list)
@@ -374,6 +404,17 @@ def test_spin_half_fermion_site(block_backend, np_random):
             expect_ops.update(dN=True, dNdN=True)
         check_operator_availability(site, expect_ops)
 
+        if conserve_S == 'SU(2)':
+            with pytest.raises(lasyten.SymmetryError, match='known but unavailable'):
+                site.test_op('Nup')
+        elif conserve_S != 'None':
+            with pytest.raises(lasyten.SymmetryError, match='known but unavailable'):
+                site.test_op('Sx')
+        else:
+            site.test_op('Sx')
+        with pytest.raises(ValueError, match='unknown operator name'):
+            site.test_op('not_a_spin_operator')
+
         site_list.append(site)
     check_same_operators(site_list)
 
@@ -410,6 +451,11 @@ def test_clock_site(any_backend, q):
         if conserve == 'None':
             expect_ops.update(X=False, Xhc=False, Xphc=False)
         check_operator_availability(site, expect_ops)
+        if conserve == 'None':
+            site.test_op('X')
+        else:
+            with pytest.raises(lasyten.SymmetryError, match='known but unavailable'):
+                site.test_op('X')
 
         site_list.append(site)
     check_same_operators(site_list)

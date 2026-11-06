@@ -66,6 +66,12 @@ bind_models_couplings(py::module_& m)
                   py::arg("cutoff") = py::none(),
                   DOC(lasyten, Coupling, from_tensor))
       .def("to_tensor", &Coupling::to_tensor, DOC(lasyten, Coupling, to_tensor))
+      .def("dagger",
+           &Coupling::dagger,
+           py::arg("new_name") = py::none(),
+           "The hermitian conjugate of this coupling. Keeps the name unless `new_name` is given.")
+      .def_property_readonly(
+        "hc", [](Coupling const& self) { return self.dagger(); }, "Synonym for ``dagger()``.")
       .def("to_numpy",
            &Coupling::to_numpy,
            py::arg("leg_order") = py::none(),
@@ -125,9 +131,11 @@ bind_models_couplings(py::module_& m)
           py::arg("Jx") = 0,
           py::arg("Jy") = 0,
           py::arg("Jz") = 0,
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
+          py::arg("Jpp") = complex128{},
+          py::arg("Jmp") = complex128{},
+          py::arg("Jpm") = complex128{},
+          py::arg("Jmm") = complex128{},
           DOC(lasyten, spin_spin_coupling));
 
     m.def("spin_field_coupling",
@@ -136,8 +144,6 @@ bind_models_couplings(py::module_& m)
           py::arg("hx") = 0,
           py::arg("hy") = 0,
           py::arg("hz") = 0,
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, spin_field_coupling));
 
@@ -145,8 +151,6 @@ bind_models_couplings(py::module_& m)
           &aklt_coupling,
           py::arg("sites"),
           py::arg("J") = 1,
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, aklt_coupling));
 
@@ -154,8 +158,6 @@ bind_models_couplings(py::module_& m)
           &heisenberg_coupling,
           py::arg("sites"),
           py::arg("J") = 1,
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, heisenberg_coupling));
 
@@ -163,8 +165,6 @@ bind_models_couplings(py::module_& m)
           &chiral_3spin_coupling,
           py::arg("sites"),
           py::arg("chi") = 1,
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, chiral_3spin_coupling));
 
@@ -173,8 +173,6 @@ bind_models_couplings(py::module_& m)
           py::arg("sites"),
           py::arg("mu"),
           py::arg_v("species", all_species_sentinel(), "ALL_SPECIES"),
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, chemical_potential));
 
@@ -183,8 +181,6 @@ bind_models_couplings(py::module_& m)
           py::arg("sites"),
           py::arg("U") = 1,
           py::arg_v("species", all_species_sentinel(), "ALL_SPECIES"),
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, onsite_interaction));
 
@@ -194,18 +190,15 @@ bind_models_couplings(py::module_& m)
           py::arg("V") = 1,
           py::arg_v("species_i", all_species_sentinel(), "ALL_SPECIES"),
           py::arg_v("species_j", all_species_sentinel(), "ALL_SPECIES"),
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, density_density_interaction));
 
     m.def("hopping",
           &hopping,
           py::arg("sites"),
-          py::arg("t") = 1,
+          py::arg("t_left") = 1,
+          py::arg("t_right") = 1,
           py::arg("species") = py::none(),
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, hopping));
 
@@ -214,8 +207,6 @@ bind_models_couplings(py::module_& m)
           py::arg("sites"),
           py::arg("Delta") = 1,
           py::arg("species") = py::none(),
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, pairing));
 
@@ -224,8 +215,6 @@ bind_models_couplings(py::module_& m)
           py::arg("sites"),
           py::arg("Delta") = 1,
           py::arg("species") = py::none(),
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, onsite_pairing));
 
@@ -234,8 +223,7 @@ bind_models_couplings(py::module_& m)
           py::arg("sites"),
           py::arg("Jx") = 0,
           py::arg("Jz") = 0,
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
+          py::arg("plus_hc") = true,
           py::arg("name") = py::none(),
           DOC(lasyten, clock_clock_coupling));
 
@@ -244,8 +232,6 @@ bind_models_couplings(py::module_& m)
           py::arg("sites"),
           py::arg("hx") = py::none(),
           py::arg("hz") = py::none(),
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, clock_field_coupling));
 
@@ -255,16 +241,12 @@ bind_models_couplings(py::module_& m)
           py::arg("J"),
           py::arg("sector"),
           py::arg("name"),
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           DOC(lasyten, sector_projection_coupling));
 
     m.def("gold_coupling",
           &gold_coupling,
           py::arg("sites"),
           py::arg("J") = 1,
-          py::arg("backend") = py::none(),
-          py::arg("device") = py::none(),
           py::arg("name") = py::none(),
           DOC(lasyten, gold_coupling));
 }

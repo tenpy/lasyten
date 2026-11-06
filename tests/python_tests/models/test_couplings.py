@@ -190,6 +190,9 @@ def test_spin_spin_coupling(any_backend, np_random):
             tensor = coupling.to_tensor()
             # hermiticity
             assert tensors.almost_equal(tensor.hc, tensor)
+            assert tensors.almost_equal(coupling.hc.to_tensor(), tensor)
+            assert tensors.almost_equal(coupling.dagger().to_tensor(), tensor.hc)
+            assert coupling.dagger(new_name='renamed').name == 'renamed'
             # trace is zero
             npt.assert_almost_equal(tensors.trace(tensor).to_numpy(), 0)
             if site1 == site2:
@@ -223,6 +226,29 @@ def test_spin_spin_coupling(any_backend, np_random):
                 npt.assert_almost_equal(evs, np.sort(Jz * expect_evs))
 
     check_coupling(couplings.spin_spin_coupling, site_num=2, invalid_site_nums=[1, 3], boson_fermion_mixing=False)
+
+
+def test_spin_spin_coupling_ladder_coefficients(any_backend):
+    site0 = sites.SpinSite(S=0.5, conserve='None', backend=any_backend)
+    site1 = sites.SpinSite(S=1, conserve='None', backend=any_backend)
+    zero_coupling = couplings.spin_spin_coupling([site0, site1])
+    npt.assert_array_equal(zero_coupling.to_numpy(understood_braiding=True), 0)
+
+    Jpp, Jmp, Jpm, Jmm = 1 + 2j, 3 + 4j, 5 + 6j, 7 + 8j
+    coupling = couplings.spin_spin_coupling([site0, site1], Jpp=Jpp, Jmp=Jmp, Jpm=Jpm, Jmm=Jmm)
+
+    sx0, sy0 = site0.spin_vector[:, :, 0], site0.spin_vector[:, :, 1]
+    sx1, sy1 = site1.spin_vector[:, :, 0], site1.spin_vector[:, :, 1]
+    sp0, sm0 = sx0 + 1j * sy0, sx0 - 1j * sy0
+    sp1, sm1 = sx1 + 1j * sy1, sx1 - 1j * sy1
+    expected = (
+        Jpp * np.tensordot(sp0, sp1, axes=0)
+        + Jmp * np.tensordot(sm0, sp1, axes=0)
+        + Jpm * np.tensordot(sp0, sm1, axes=0)
+        + Jmm * np.tensordot(sm0, sm1, axes=0)
+    )
+    expected = expected.transpose(0, 2, 3, 1)
+    npt.assert_allclose(coupling.to_numpy(understood_braiding=True), expected)
 
 
 def test_spin_field_coupling(any_backend, np_random):
@@ -476,7 +502,7 @@ def test_hopping(any_backend, np_random):
             elif site.conserve_S in ['SU(2)']:
                 species1 = species2 = degrees_of_freedom.ALL_SPECIES
 
-        coupling = couplings.hopping([site] * 2, t, species=(species1, species2))
+        coupling = couplings.hopping([site] * 2, t, t, species=(species1, species2))
         coupling.test_sanity()
         tensor = coupling.to_tensor()
         # hermiticity
@@ -610,6 +636,11 @@ def test_clock_clock_coupling(any_backend, np_random):
         tensor = coupling.to_tensor()
         # hermiticity
         assert tensors.almost_equal(tensor.hc, tensor)
+        coupling_without_hc = couplings.clock_clock_coupling([site] * 2, Jx=Jx, Jz=Jz, plus_hc=False)
+        coupling_without_hc.test_sanity()
+        tensor_without_hc = coupling_without_hc.to_tensor()
+        if site.leg.dim > 2:
+            assert not tensors.almost_equal(tensor_without_hc.hc, tensor_without_hc)
         # trace is zero
         npt.assert_almost_equal(tensors.trace(tensor).to_numpy(), 0)
         # commutation relation
@@ -1116,6 +1147,25 @@ def _asym_hopping_dense_block(site):
     creator = site.get_creator_numpy(species=0, include_JW=True)
     annihilator = site.get_annihilator_numpy(species=0, include_JW=True)
     return (creator @ site._JW)[:, None, None, :] * annihilator[None, :, :, None]
+
+
+@pytest.mark.parametrize(
+    'site_factory',
+    [
+        lambda: sites.SpinlessBosonSite(Nmax=1, conserve='N'),
+        lambda: sites.SpinlessFermionSite(num_species=1, conserve='N'),
+    ],
+)
+def test_hopping_independent_prefactors(site_factory):
+    site = site_factory()
+    t_left, t_right = 2.3, -0.7
+    coupling = couplings.hopping([site, site], t_left, t_right)
+
+    directed = _asym_hopping_dense_block(site)
+    expected_block = t_left * directed + t_right * directed.conj().transpose(3, 2, 1, 0)
+    expected = couplings.Coupling.from_dense_block(expected_block, [site, site], understood_braiding=True)
+    assert tensors.almost_equal(coupling.to_tensor(), expected.to_tensor())
+    assert not tensors.almost_equal(coupling.to_tensor().hc, coupling.to_tensor())
 
 
 @pytest.mark.parametrize(

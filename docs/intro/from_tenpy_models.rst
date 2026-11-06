@@ -146,13 +146,13 @@ plus a separate ``Sz Sz`` term; here it is one coupling.
 Hopping :math:`c^\dagger c`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Fermion hopping in a Hamiltonian is the Hermitian combination
-:math:`-t\,(c^\dagger_i c_j + \mathrm{h.c.})`:
+Fermion hopping in a Hamiltonian is the combination
+:math:`t_\mathrm{left}\,c^\dagger_i c_j + t_\mathrm{right}\,c^\dagger_j c_i`:
 
 .. code-block:: python
 
     ferm = lasy.models.SpinlessFermionSite(num_species=1, conserve='N')
-    hop = lasy.models.hopping([ferm, ferm], t=1)
+    hop = lasy.models.hopping([ferm, ferm], t_left=1, t_right=1)
 
 A correlation function :math:`c^\dagger_i c_j` is the same geometry **without**
 the hermitian conjugate: one creation on the left, one annihilation on the
