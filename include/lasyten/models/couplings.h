@@ -201,7 +201,7 @@ class Coupling
                                           float64 Jx = 0,
                                           float64 Jy = 0,
                                           float64 Jz = 0,
-                                          py::object name = py::none(),
+                                          std::optional<std::string> name = std::nullopt,
                                           complex128 Jpp = {},
                                           complex128 Jmp = {},
                                           complex128 Jpm = {},
@@ -221,7 +221,7 @@ class Coupling
                                            float64 hx = 0,
                                            float64 hy = 0,
                                            float64 hz = 0,
-                                           py::object name = py::none());
+                                           std::optional<std::string> name = std::nullopt);
 
 /// Two-site AKLT coupling between spins.
 ///
@@ -244,7 +244,7 @@ class Coupling
 /// @param name Optional coupling name.
 [[nodiscard]] Coupling aklt_coupling(std::vector<Site::Ptr> sites,
                                      float64 J = 1,
-                                     py::object name = py::none());
+                                     std::optional<std::string> name = std::nullopt);
 
 /// Two-site Heisenberg coupling between spins.
 ///
@@ -258,7 +258,7 @@ class Coupling
 /// @param name Optional coupling name.
 [[nodiscard]] Coupling heisenberg_coupling(std::vector<Site::Ptr> sites,
                                            float64 J = 1,
-                                           py::object name = py::none());
+                                           std::optional<std::string> name = std::nullopt);
 
 /// Chiral coupling of three spins.
 ///
@@ -272,7 +272,7 @@ class Coupling
 /// @param name Optional coupling name.
 [[nodiscard]] Coupling chiral_3spin_coupling(std::vector<Site::Ptr> sites,
                                              float64 chi = 1,
-                                             py::object name = py::none());
+                                             std::optional<std::string> name = std::nullopt);
 
 /// Chemical potential for bosons or fermions. Single-site coupling.
 ///
@@ -291,7 +291,7 @@ class Coupling
 [[nodiscard]] Coupling chemical_potential(std::vector<Site::Ptr> sites,
                                           float64 mu,
                                           py::object species = py::none(),
-                                          py::object name = py::none());
+                                          std::optional<std::string> name = std::nullopt);
 
 /// Onsite interaction for bosons or fermions. Single-site coupling.
 ///
@@ -310,7 +310,7 @@ class Coupling
 [[nodiscard]] Coupling onsite_interaction(std::vector<Site::Ptr> sites,
                                           float64 U = 1,
                                           py::object species = py::none(),
-                                          py::object name = py::none());
+                                          std::optional<std::string> name = std::nullopt);
 
 /// Density-density interaction. Two-site coupling.
 ///
@@ -331,7 +331,7 @@ class Coupling
                                                    float64 V = 1,
                                                    py::object species_i = py::none(),
                                                    py::object species_j = py::none(),
-                                                   py::object name = py::none());
+                                                   std::optional<std::string> name = std::nullopt);
 
 /// Hopping of fermions or bosons. Two-site coupling.
 ///
@@ -352,7 +352,7 @@ class Coupling
                                float64 t_left = 1,
                                float64 t_right = 1,
                                py::object species = py::none(),
-                               py::object name = py::none());
+                               std::optional<std::string> name = std::nullopt);
 
 /// Superconducting pairing of fermions or bosons. Two-site coupling.
 ///
@@ -375,7 +375,7 @@ class Coupling
 [[nodiscard]] Coupling pairing(std::vector<Site::Ptr> sites,
                                float64 Delta = 1,
                                py::object species = py::none(),
-                               py::object name = py::none());
+                               std::optional<std::string> name = std::nullopt);
 
 /// Superconducting pairing of fermions or bosons. Single-site coupling.
 ///
@@ -394,7 +394,7 @@ class Coupling
 [[nodiscard]] Coupling onsite_pairing(std::vector<Site::Ptr> sites,
                                       float64 Delta = 1,
                                       py::object species = py::none(),
-                                      py::object name = py::none());
+                                      std::optional<std::string> name = std::nullopt);
 
 /// Two-site coupling between quantum clocks.
 ///
@@ -412,7 +412,7 @@ class Coupling
                                             float64 Jx = 0,
                                             float64 Jz = 0,
                                             bool plus_hc = true,
-                                            py::object name = py::none());
+                                            std::optional<std::string> name = std::nullopt);
 
 /// Single-site coupling of a quantum clock to an external field.
 ///
@@ -427,7 +427,7 @@ class Coupling
 [[nodiscard]] Coupling clock_field_coupling(std::vector<Site::Ptr> sites,
                                             std::optional<float64> hx = std::nullopt,
                                             std::optional<float64> hz = std::nullopt,
-                                            py::object name = py::none());
+                                            std::optional<std::string> name = std::nullopt);
 
 /// Coupling that is given by the projector onto a single sector
 ///
@@ -438,7 +438,7 @@ class Coupling
 [[nodiscard]] Coupling sector_projection_coupling(std::vector<Site::Ptr> sites,
                                                   float64 J,
                                                   Sector sector,
-                                                  py::object name);
+                                                  std::optional<std::string> name);
 
 /// Two-site coupling of Fibonacci anyons that energy splits fusion to vacuum or tau.
 ///
@@ -453,6 +453,6 @@ class Coupling
 /// @param name Optional coupling name.
 [[nodiscard]] Coupling gold_coupling(std::vector<Site::Ptr> sites,
                                      float64 J = 1,
-                                     py::object name = py::none());
+                                     std::optional<std::string> name = std::nullopt);
 
 } // namespace lasyten

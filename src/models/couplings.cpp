@@ -44,12 +44,12 @@ same_backend(std::vector<Site::Ptr> const& sites)
 }
 
 std::optional<std::string>
-parse_name(py::object name, std::string const& default_name)
+parse_name(std::optional<std::string> name, std::string const& default_name)
 {
-    if (name.is_none()) {
+    if (!name.has_value()) {
         return default_name;
     }
-    return name.cast<std::string>();
+    return name;
 }
 
 int64
@@ -937,7 +937,7 @@ spin_spin_coupling(std::vector<Site::Ptr> sites,
                    float64 Jx,
                    float64 Jy,
                    float64 Jz,
-                   py::object name,
+                   std::optional<std::string> name,
                    complex128 Jpp,
                    complex128 Jmp,
                    complex128 Jpm,
@@ -996,7 +996,7 @@ spin_field_coupling(std::vector<Site::Ptr> sites,
                     float64 hx,
                     float64 hy,
                     float64 hz,
-                    py::object name)
+                    std::optional<std::string> name)
 {
     check_site_count(sites, 1);
     auto spin = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
@@ -1027,7 +1027,7 @@ spin_field_coupling(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-aklt_coupling(std::vector<Site::Ptr> sites, float64 J, py::object name)
+aklt_coupling(std::vector<Site::Ptr> sites, float64 J, std::optional<std::string> name)
 {
     check_site_count(sites, 2);
     auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
@@ -1049,13 +1049,13 @@ aklt_coupling(std::vector<Site::Ptr> sites, float64 J, py::object name)
 }
 
 Coupling
-heisenberg_coupling(std::vector<Site::Ptr> sites, float64 J, py::object name)
+heisenberg_coupling(std::vector<Site::Ptr> sites, float64 J, std::optional<std::string> name)
 {
-    return spin_spin_coupling(sites, J, J, J, name.is_none() ? py::str("S.S") : name);
+    return spin_spin_coupling(sites, J, J, J, name.value_or("S.S"));
 }
 
 Coupling
-chiral_3spin_coupling(std::vector<Site::Ptr> sites, float64 chi, py::object name)
+chiral_3spin_coupling(std::vector<Site::Ptr> sites, float64 chi, std::optional<std::string> name)
 {
     check_site_count(sites, 3);
     auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
@@ -1078,7 +1078,10 @@ chiral_3spin_coupling(std::vector<Site::Ptr> sites, float64 chi, py::object name
 }
 
 Coupling
-chemical_potential(std::vector<Site::Ptr> sites, float64 mu, py::object species, py::object name)
+chemical_potential(std::vector<Site::Ptr> sites,
+                   float64 mu,
+                   py::object species,
+                   std::optional<std::string> name)
 {
     check_site_count(sites, 1);
     auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
@@ -1091,7 +1094,10 @@ chemical_potential(std::vector<Site::Ptr> sites, float64 mu, py::object species,
 }
 
 Coupling
-onsite_interaction(std::vector<Site::Ptr> sites, float64 U, py::object species, py::object name)
+onsite_interaction(std::vector<Site::Ptr> sites,
+                   float64 U,
+                   py::object species,
+                   std::optional<std::string> name)
 {
     check_site_count(sites, 1);
     auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
@@ -1110,7 +1116,7 @@ density_density_interaction(std::vector<Site::Ptr> sites,
                             float64 V,
                             py::object species_i,
                             py::object species_j,
-                            py::object name)
+                            std::optional<std::string> name)
 {
     check_site_count(sites, 2);
     auto occ0 = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
@@ -1143,7 +1149,7 @@ hopping(std::vector<Site::Ptr> sites,
         float64 t_left,
         float64 t_right,
         py::object species,
-        py::object name)
+        std::optional<std::string> name)
 {
     py::array h = quadratic_coupling_numpy(sites, false, species, false);
     auto np = numpy();
@@ -1156,7 +1162,10 @@ hopping(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-pairing(std::vector<Site::Ptr> sites, float64 Delta, py::object species, py::object name)
+pairing(std::vector<Site::Ptr> sites,
+        float64 Delta,
+        py::object species,
+        std::optional<std::string> name)
 {
     py::array h = quadratic_coupling_numpy(sites, true, species);
     auto np = numpy();
@@ -1167,7 +1176,10 @@ pairing(std::vector<Site::Ptr> sites, float64 Delta, py::object species, py::obj
 }
 
 Coupling
-onsite_pairing(std::vector<Site::Ptr> sites, float64 Delta, py::object species, py::object name)
+onsite_pairing(std::vector<Site::Ptr> sites,
+               float64 Delta,
+               py::object species,
+               std::optional<std::string> name)
 {
     check_site_count(sites, 1);
     auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
@@ -1212,7 +1224,7 @@ clock_clock_coupling(std::vector<Site::Ptr> sites,
                      float64 Jx,
                      float64 Jz,
                      bool plus_hc,
-                     py::object name)
+                     std::optional<std::string> name)
 {
     check_site_count(sites, 2);
     auto clock0 = std::dynamic_pointer_cast<ClockDOF>(sites[0]);
@@ -1261,7 +1273,7 @@ Coupling
 clock_field_coupling(std::vector<Site::Ptr> sites,
                      std::optional<float64> hx,
                      std::optional<float64> hz,
-                     py::object name)
+                     std::optional<std::string> name)
 {
     check_site_count(sites, 1);
     auto clock = std::dynamic_pointer_cast<ClockDOF>(sites[0]);
@@ -1282,7 +1294,10 @@ clock_field_coupling(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-sector_projection_coupling(std::vector<Site::Ptr> sites, float64 J, Sector sector, py::object name)
+sector_projection_coupling(std::vector<Site::Ptr> sites,
+                           float64 J,
+                           Sector sector,
+                           std::optional<std::string> name)
 {
     auto backend = same_backend(sites);
     std::string device = sites.front()->default_device;
@@ -1310,15 +1325,11 @@ sector_projection_coupling(std::vector<Site::Ptr> sites, float64 J, Sector secto
       codomain, sector, backend, labels, std::nullopt, device);
     auto scaled =
       as_symmetric(scalar_multiply(backend->block_backend->as_scalar(J), TensorCPtr{ projector }));
-    std::optional<std::string> parsed_name;
-    if (!name.is_none()) {
-        parsed_name = name.cast<std::string>();
-    }
-    return Coupling::from_tensor(scaled, sites, parsed_name);
+    return Coupling::from_tensor(scaled, sites, name);
 }
 
 Coupling
-gold_coupling(std::vector<Site::Ptr> sites, float64 J, py::object name)
+gold_coupling(std::vector<Site::Ptr> sites, float64 J, std::optional<std::string> name)
 {
     check_site_count(sites, 2);
     auto fib_sym = fibonacci_symmetry();
@@ -1331,7 +1342,7 @@ gold_coupling(std::vector<Site::Ptr> sites, float64 J, py::object name)
         }
     }
     return sector_projection_coupling(
-      sites, -J, FibonacciAnyonCategory::vacuum, name.is_none() ? py::str("gold") : name);
+      sites, -J, FibonacciAnyonCategory::vacuum, name.value_or("gold"));
 }
 
 } // namespace lasyten
