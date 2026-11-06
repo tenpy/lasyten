@@ -550,6 +550,10 @@ SpinlessFermionSite::prepare(int64 num_species, py::object conserve)
         state_labels[label] = idx;
     }
     state_labels["vac"] = 0;
+    state_labels["empty"] = 0;
+    if (num_species == 1) {
+        state_labels["full"] = 1;
+    }
     auto ops = FermionicDOF::creation_annihilation_ops(num_species);
     return { leg, ops.first, ops.second, state_labels };
 }

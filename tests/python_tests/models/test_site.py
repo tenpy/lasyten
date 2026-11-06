@@ -340,10 +340,12 @@ def test_spinless_fermion_site(block_backend, np_random, num_species):
         site.test_sanity()
 
         vac = site.state_labels['vac']
+        assert site.state_labels['empty'] == vac
         npt.assert_almost_equal(site.n_tot[vac, vac], 0)
         if num_species == 1:
             assert site.state_labels['0'] == vac
             state = site.state_labels['1']
+            assert site.state_labels['full'] == state
             npt.assert_almost_equal(site.n_tot[state, state], 1)
         else:
             for occupations in it.product([0, 1], repeat=num_species):
