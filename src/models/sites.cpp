@@ -969,6 +969,10 @@ SpinHalfFermionSite::SpinHalfFermionSite(Prepared&& prepared,
     }
     add_total_occupation_ops();
 
+    auto NtotNtot = np.attr("matmul")(n_tot, n_tot);
+    auto NupNdown = np.attr("multiply")(0.5, NtotNtot - n_tot);
+    add_onsite_operator("NupNdown", NupNdown, true);
+
     std::map<std::string, py::object> ops;
     if (!factor_is_su2(sym_S_factor)) {
         ops["Sz"] = spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 2));

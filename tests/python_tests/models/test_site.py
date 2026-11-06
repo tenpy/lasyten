@@ -395,8 +395,12 @@ def test_spin_half_fermion_site(block_backend, np_random):
             npt.assert_almost_equal(site.number_operators[state, state, 0], occupations[0])  # spin up
             npt.assert_almost_equal(site.number_operators[state, state, 1], occupations[1])  # spin down
             npt.assert_almost_equal(site.spin_vector[state, state, 2], 0.5 * (occupations[0] - occupations[1]))
+            npt.assert_almost_equal(
+                site.get_op('NupNdown').to_numpy(understood_braiding=True)[state, state],
+                occupations[0] * occupations[1],
+            )
 
-        expect_ops = dict(Id=True, Ntot=True, Ptot=True, NtotNtot=True)
+        expect_ops = dict(Id=True, Ntot=True, Ptot=True, NtotNtot=True, NupNdown=True)
         if conserve_S in ['Sz', 'parity', 'None']:
             expect_ops.update(Nup=True, Ndown=True)
             expect_ops.update(Sz=True, Sigmaz=True)
