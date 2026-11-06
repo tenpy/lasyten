@@ -937,8 +937,6 @@ spin_spin_coupling(std::vector<Site::Ptr> sites,
                    float64 Jx,
                    float64 Jy,
                    float64 Jz,
-                   py::object /*backend*/,
-                   py::object /*device*/,
                    py::object name,
                    complex128 Jpp,
                    complex128 Jmp,
@@ -998,8 +996,6 @@ spin_field_coupling(std::vector<Site::Ptr> sites,
                     float64 hx,
                     float64 hy,
                     float64 hz,
-                    py::object /*backend*/,
-                    py::object /*device*/,
                     py::object name)
 {
     check_site_count(sites, 1);
@@ -1031,11 +1027,7 @@ spin_field_coupling(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-aklt_coupling(std::vector<Site::Ptr> sites,
-              float64 J,
-              py::object /*backend*/,
-              py::object /*device*/,
-              py::object name)
+aklt_coupling(std::vector<Site::Ptr> sites, float64 J, py::object name)
 {
     check_site_count(sites, 2);
     auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
@@ -1057,22 +1049,13 @@ aklt_coupling(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-heisenberg_coupling(std::vector<Site::Ptr> sites,
-                    float64 J,
-                    py::object backend,
-                    py::object device,
-                    py::object name)
+heisenberg_coupling(std::vector<Site::Ptr> sites, float64 J, py::object name)
 {
-    return spin_spin_coupling(
-      sites, J, J, J, backend, device, name.is_none() ? py::str("S.S") : name);
+    return spin_spin_coupling(sites, J, J, J, name.is_none() ? py::str("S.S") : name);
 }
 
 Coupling
-chiral_3spin_coupling(std::vector<Site::Ptr> sites,
-                      float64 chi,
-                      py::object /*backend*/,
-                      py::object /*device*/,
-                      py::object name)
+chiral_3spin_coupling(std::vector<Site::Ptr> sites, float64 chi, py::object name)
 {
     check_site_count(sites, 3);
     auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
@@ -1095,12 +1078,7 @@ chiral_3spin_coupling(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-chemical_potential(std::vector<Site::Ptr> sites,
-                   float64 mu,
-                   py::object species,
-                   py::object /*backend*/,
-                   py::object /*device*/,
-                   py::object name)
+chemical_potential(std::vector<Site::Ptr> sites, float64 mu, py::object species, py::object name)
 {
     check_site_count(sites, 1);
     auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
@@ -1113,12 +1091,7 @@ chemical_potential(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-onsite_interaction(std::vector<Site::Ptr> sites,
-                   float64 U,
-                   py::object species,
-                   py::object /*backend*/,
-                   py::object /*device*/,
-                   py::object name)
+onsite_interaction(std::vector<Site::Ptr> sites, float64 U, py::object species, py::object name)
 {
     check_site_count(sites, 1);
     auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
@@ -1137,8 +1110,6 @@ density_density_interaction(std::vector<Site::Ptr> sites,
                             float64 V,
                             py::object species_i,
                             py::object species_j,
-                            py::object /*backend*/,
-                            py::object /*device*/,
                             py::object name)
 {
     check_site_count(sites, 2);
@@ -1172,8 +1143,6 @@ hopping(std::vector<Site::Ptr> sites,
         float64 t_left,
         float64 t_right,
         py::object species,
-        py::object /*backend*/,
-        py::object /*device*/,
         py::object name)
 {
     py::array h = quadratic_coupling_numpy(sites, false, species, false);
@@ -1187,12 +1156,7 @@ hopping(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-pairing(std::vector<Site::Ptr> sites,
-        float64 Delta,
-        py::object species,
-        py::object /*backend*/,
-        py::object /*device*/,
-        py::object name)
+pairing(std::vector<Site::Ptr> sites, float64 Delta, py::object species, py::object name)
 {
     py::array h = quadratic_coupling_numpy(sites, true, species);
     auto np = numpy();
@@ -1203,12 +1167,7 @@ pairing(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-onsite_pairing(std::vector<Site::Ptr> sites,
-               float64 Delta,
-               py::object species,
-               py::object /*backend*/,
-               py::object /*device*/,
-               py::object name)
+onsite_pairing(std::vector<Site::Ptr> sites, float64 Delta, py::object species, py::object name)
 {
     check_site_count(sites, 1);
     auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
@@ -1253,8 +1212,6 @@ clock_clock_coupling(std::vector<Site::Ptr> sites,
                      float64 Jx,
                      float64 Jz,
                      bool plus_hc,
-                     py::object /*backend*/,
-                     py::object /*device*/,
                      py::object name)
 {
     check_site_count(sites, 2);
@@ -1304,8 +1261,6 @@ Coupling
 clock_field_coupling(std::vector<Site::Ptr> sites,
                      std::optional<float64> hx,
                      std::optional<float64> hz,
-                     py::object /*backend*/,
-                     py::object /*device*/,
                      py::object name)
 {
     check_site_count(sites, 1);
@@ -1327,12 +1282,7 @@ clock_field_coupling(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-sector_projection_coupling(std::vector<Site::Ptr> sites,
-                           float64 J,
-                           Sector sector,
-                           py::object name,
-                           py::object /*backend*/,
-                           py::object /*device*/)
+sector_projection_coupling(std::vector<Site::Ptr> sites, float64 J, Sector sector, py::object name)
 {
     auto backend = same_backend(sites);
     std::string device = sites.front()->default_device;
@@ -1368,11 +1318,7 @@ sector_projection_coupling(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-gold_coupling(std::vector<Site::Ptr> sites,
-              float64 J,
-              py::object backend,
-              py::object device,
-              py::object name)
+gold_coupling(std::vector<Site::Ptr> sites, float64 J, py::object name)
 {
     check_site_count(sites, 2);
     auto fib_sym = fibonacci_symmetry();
@@ -1384,12 +1330,8 @@ gold_coupling(std::vector<Site::Ptr> sites,
             throw std::invalid_argument("gold_coupling requires sites with a tau sector");
         }
     }
-    return sector_projection_coupling(sites,
-                                      -J,
-                                      FibonacciAnyonCategory::vacuum,
-                                      name.is_none() ? py::str("gold") : name,
-                                      backend,
-                                      device);
+    return sector_projection_coupling(
+      sites, -J, FibonacciAnyonCategory::vacuum, name.is_none() ? py::str("gold") : name);
 }
 
 } // namespace lasyten
