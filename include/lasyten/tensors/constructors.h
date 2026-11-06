@@ -149,15 +149,14 @@ namespace lasyten {
 ///     resulting domain leg. If omitted, each column must contain a tensor from which its space
 ///     can be inferred. If given, must have one entry per column and agree with any tensors in
 ///     that column.
-[[nodiscard]] TensorPtr tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
-                                         std::optional<OptionalLabels> labels = std::nullopt,
-                                         std::optional<Dtype> dtype = std::nullopt,
-                                         std::optional<OptionalLabels> row_labels = std::nullopt,
-                                         std::optional<OptionalLabels> col_labels = std::nullopt,
-                                         std::optional<std::vector<ElementarySpace::Ptr>> row_summands =
-                                           std::nullopt,
-                                         std::optional<std::vector<ElementarySpace::Ptr>> col_summands =
-                                           std::nullopt);
+[[nodiscard]] TensorPtr tensor_from_grid(
+  std::vector<std::vector<TensorPtr>> grid,
+  std::optional<OptionalLabels> labels = std::nullopt,
+  std::optional<Dtype> dtype = std::nullopt,
+  std::optional<OptionalLabels> row_labels = std::nullopt,
+  std::optional<OptionalLabels> col_labels = std::nullopt,
+  std::optional<std::vector<ElementarySpace::Ptr>> row_summands = std::nullopt,
+  std::optional<std::vector<ElementarySpace::Ptr>> col_summands = std::nullopt);
 
 /// Extract cell ``(row, col)`` from a tensor stacked by `tensor_from_grid`.
 ///

@@ -404,8 +404,8 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
             if (!row_space) {
                 row_space = cell_space;
             } else if (!row_space->equals_es(*cell_space)) {
-                throw std::invalid_argument(
-                  "row_summands must agree with the first codomain leg of every tensor in its row");
+                throw std::invalid_argument("row_summands must agree with the first codomain leg "
+                                            "of every tensor in its row");
             }
         }
         if (!row_space) {
@@ -430,8 +430,8 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
             if (!col_space) {
                 col_space = cell_space;
             } else if (!col_space->equals_es(*cell_space)) {
-                throw std::invalid_argument(
-                  "col_summands must agree with the last domain leg of every tensor in its column");
+                throw std::invalid_argument("col_summands must agree with the last domain leg of "
+                                            "every tensor in its column");
             }
         }
         if (!col_space) {

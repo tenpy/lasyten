@@ -252,8 +252,7 @@ is_known_but_unavailable(Site const& site, std::string const& name)
                 (spin->double_total_spin == 1 && one_of({ "Sigmax", "Sigmay" })));
     }
     if (auto const* spin_fermion = dynamic_cast<SpinHalfFermionSite const*>(&site)) {
-        if (is_su2(spin_fermion->conserve_S) &&
-            one_of({ "Nup", "Ndown", "Sz", "Sigmaz" })) {
+        if (is_su2(spin_fermion->conserve_S) && one_of({ "Nup", "Ndown", "Sz", "Sigmaz" })) {
             return true;
         }
         return !is_no_symmetry(spin_fermion->conserve_S) &&
@@ -502,8 +501,8 @@ Site::test_op(std::string const& opname) const
             continue;
         }
         if (is_known_but_unavailable(*this, name)) {
-            throw SymmetryError(std::format(
-              "Operator '{}' is known but unavailable for the site's symmetry", name));
+            throw SymmetryError(
+              std::format("Operator '{}' is known but unavailable for the site's symmetry", name));
         }
         throw std::invalid_argument(std::format("unknown operator name: {}", name));
     }

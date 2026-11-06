@@ -175,14 +175,13 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
               }
               g.push_back(std::move(row));
           }
-          auto res = tensor_from_grid(
-            std::move(g),
-            std::nullopt,
-            dtype_opt,
-            std::move(row_labels),
-            std::move(col_labels),
-            std::move(row_summands),
-            std::move(col_summands));
+          auto res = tensor_from_grid(std::move(g),
+                                      std::nullopt,
+                                      dtype_opt,
+                                      std::move(row_labels),
+                                      std::move(col_labels),
+                                      std::move(row_summands),
+                                      std::move(col_summands));
           if (!labels.is_none()) {
               res->set_labels(parse_tensor_init_labels(labels, res->codomain, res->domain));
           }
