@@ -129,6 +129,10 @@ class PyBaseSymmetry
     {
         PYBIND11_OVERRIDE(std::string, BaseSymmetry, sector_str, a);
     }
+    Sector get_sector(std::string const& s) const override
+    {
+        PYBIND11_OVERRIDE(Sector, BaseSymmetry, get_sector, s);
+    }
     SectorArray dual_sectors(SectorArray const& sectors) const override
     {
         PYBIND11_OVERRIDE(SectorArray, BaseSymmetry, dual_sectors, sectors);
@@ -277,6 +281,10 @@ class PySymmetryFactor
     {
         PYBIND11_OVERRIDE(std::string, SymmetryFactor, sector_str, a);
     }
+    Sector get_sector(std::string const& s) const override
+    {
+        PYBIND11_OVERRIDE(Sector, SymmetryFactor, get_sector, s);
+    }
     SectorArray dual_sectors(SectorArray const& sectors) const override
     {
         PYBIND11_OVERRIDE(SectorArray, SymmetryFactor, dual_sectors, sectors);
@@ -419,6 +427,10 @@ class PyGroup
     {
         PYBIND11_OVERRIDE(std::string, Group, sector_str, a);
     }
+    Sector get_sector(std::string const& s) const override
+    {
+        PYBIND11_OVERRIDE(Sector, Group, get_sector, s);
+    }
     SectorArray dual_sectors(SectorArray const& sectors) const override
     {
         PYBIND11_OVERRIDE(SectorArray, Group, dual_sectors, sectors);
@@ -560,6 +572,10 @@ class PyAbelianGroup
     std::string sector_str(Sector a) const override
     {
         PYBIND11_OVERRIDE(std::string, AbelianGroup, sector_str, a);
+    }
+    Sector get_sector(std::string const& s) const override
+    {
+        PYBIND11_OVERRIDE(Sector, AbelianGroup, get_sector, s);
     }
     SectorArray dual_sectors(SectorArray const& sectors) const override
     {

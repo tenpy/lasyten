@@ -837,6 +837,79 @@ SUN::is_valid_sector(Sector a) const
     return a.q[a.len() - 1] == 0;
 }
 
+Sector
+SUN::get_sector(std::string const& s) const
+{
+    auto const start = s.find_first_not_of(" \t\n\r");
+    if (start == std::string::npos) {
+        throw std::invalid_argument("get_sector: empty string");
+    }
+    auto const end = s.find_last_not_of(" \t\n\r");
+    auto const t = std::string_view(s).substr(start, end - start + 1);
+    if (t.size() < 2 || t.front() != '[' || t.back() != ']') {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    auto inner = t.substr(1, t.size() - 2);
+    auto const i0 = inner.find_first_not_of(" \t\n\r");
+    if (i0 == std::string_view::npos) {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    auto const i1 = inner.find_last_not_of(" \t\n\r");
+    inner = inner.substr(i0, i1 - i0 + 1);
+
+    std::array<int16_t, max_sector_ind_len> vals{};
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while (pos < inner.size()) {
+        while (pos < inner.size() && (inner[pos] == ' ' || inner[pos] == '\t')) {
+            ++pos;
+        }
+        if (pos >= inner.size()) {
+            break;
+        }
+        auto const tok_start = pos;
+        if (inner[pos] == '+' || inner[pos] == '-') {
+            ++pos;
+        }
+        while (pos < inner.size() && inner[pos] >= '0' && inner[pos] <= '9') {
+            ++pos;
+        }
+        if (pos == tok_start ||
+            (pos == tok_start + 1 && (inner[tok_start] == '+' || inner[tok_start] == '-'))) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        if (count >= static_cast<std::size_t>(N) || count >= max_sector_ind_len) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        auto const tok = inner.substr(tok_start, pos - tok_start);
+        std::size_t idx = 0;
+        long value = 0;
+        try {
+            value = std::stol(std::string(tok), &idx, 10);
+        } catch (std::exception const&) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        if (idx != tok.size() || value < static_cast<long>(std::numeric_limits<int16_t>::min()) ||
+            value > static_cast<long>(std::numeric_limits<int16_t>::max())) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        vals[count++] = static_cast<int16_t>(value);
+    }
+    if (count != static_cast<std::size_t>(N)) {
+        throw std::invalid_argument(
+          std::format("get_sector: expected {} components for SU({}), got {}", N, N, count));
+    }
+    auto const a = Sector::from_span(std::span<const int16_t>(vals.data(), count));
+    if (!is_valid_sector(a)) {
+        throw std::invalid_argument(std::format("get_sector: '{}' is not a valid sector", s));
+    }
+    return a;
+}
+
 bool
 SUN::_is_equivalent_factor(SymmetryFactor const& other) const
 {

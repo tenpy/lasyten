@@ -2,10 +2,54 @@
 
 #include <lasyten/symmetries/topo_ones.h>
 
+#include <cstdint>
+#include <format>
+#include <limits>
+#include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace lasyten {
+
+namespace {
+
+std::string
+trim_ws(std::string_view s)
+{
+    auto const start = s.find_first_not_of(" \t\n\r");
+    if (start == std::string_view::npos) {
+        return {};
+    }
+    auto const end = s.find_last_not_of(" \t\n\r");
+    return std::string(s.substr(start, end - start + 1));
+}
+
+bool
+parse_int16_token(std::string_view s, int16_t& out)
+{
+    if (s.empty()) {
+        return false;
+    }
+    std::size_t idx = 0;
+    long value = 0;
+    try {
+        value = std::stol(std::string(s), &idx, 10);
+    } catch (std::exception const&) {
+        return false;
+    }
+    if (idx != s.size()) {
+        return false;
+    }
+    if (value < static_cast<long>(std::numeric_limits<int16_t>::min()) ||
+        value > static_cast<long>(std::numeric_limits<int16_t>::max())) {
+        return false;
+    }
+    out = static_cast<int16_t>(value);
+    return true;
+}
+
+} // namespace
 
 AbelianGroup::AbelianGroup(Sector trivial_sector,
                            std::string group_name,
@@ -34,6 +78,24 @@ AbelianGroup::sector_str(Sector a) const
         return "";
     }
     return std::to_string(a.q[0]);
+}
+
+Sector
+AbelianGroup::get_sector(std::string const& s) const
+{
+    auto t = trim_ws(s);
+    if (t.size() >= 2 && t.front() == '[' && t.back() == ']') {
+        t = trim_ws(std::string_view(t).substr(1, t.size() - 2));
+    }
+    int16_t n = 0;
+    if (!parse_int16_token(t, n)) {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    Sector const a{ n };
+    if (!is_valid_sector(a)) {
+        throw std::invalid_argument(std::format("get_sector: '{}' is not a valid sector", s));
+    }
+    return a;
 }
 
 int64

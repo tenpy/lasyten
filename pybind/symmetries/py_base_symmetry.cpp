@@ -251,6 +251,10 @@ bind_base_symmetry(py::module_& m)
            &BaseSymmetry::sector_str,
            py::arg("a"),
            DOC(lasyten, BaseSymmetry, sector_str))
+      .def("get_sector",
+           &BaseSymmetry::get_sector,
+           py::arg("s"),
+           DOC(lasyten, BaseSymmetry, get_sector))
       .def("dual_sectors",
            &BaseSymmetry::dual_sectors,
            py::arg("sectors"),

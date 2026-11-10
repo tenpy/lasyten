@@ -32,6 +32,7 @@ class FermionNumber : public SymmetryFactor
     int64 sector_dim(Sector a) const override;
     std::vector<int64> batch_sector_dim(SectorArray const& a) const override;
     std::vector<float64> batch_qdim(SectorArray const& a) const override;
+    Sector get_sector(std::string const& s) const override;
     bool _is_equivalent_factor(SymmetryFactor const& other) const override;
     Sector dual_sector(Sector a) const override;
     SectorArray dual_sectors(SectorArray const& sectors) const override;
