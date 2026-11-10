@@ -1452,6 +1452,14 @@ def test_almost_equal(cls, make_compatible_tensor):
         pytest.xfail(str(e))
 
 
+def test_almost_equal_rejects_none(make_compatible_tensor):
+    T = make_compatible_tensor()
+    with pytest.raises(ValueError, match='non-null'):
+        tensors.almost_equal(T, None)
+    with pytest.raises(ValueError, match='non-null'):
+        tensors.almost_equal(None, T)
+
+
 @pytest.mark.deselect_invalid_ChargedTensor_cases
 @pytest.mark.parametrize(
     'cls, codomain, domain, which_leg',

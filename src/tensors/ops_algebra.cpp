@@ -627,6 +627,9 @@ almost_equal(TensorCPtr tensor_1,
              float64 atol,
              bool allow_different_types)
 {
+    if (!tensor_1 || !tensor_2) {
+        throw std::invalid_argument("almost_equal() requires non-null Tensor arguments");
+    }
     check_same_legs(tensor_1, tensor_2);
     (void)get_same_device({ tensor_1, tensor_2 });
 

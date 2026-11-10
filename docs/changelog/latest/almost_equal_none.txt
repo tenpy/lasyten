@@ -1,0 +1,2 @@
+- ``almost_equal(None, …)`` / ``almost_equal(…, None)`` now raises ``ValueError`` instead of
+  segfaulting. Addresses https://github.com/tenpy/lasyten/issues/313.
