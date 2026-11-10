@@ -66,6 +66,7 @@ def test_ElementarySpace(any_symmetry, make_any_sectors, np_random):
     assert not s1.is_trivial
     assert not s2.is_trivial
     assert spaces.ElementarySpace.from_trivial_sector(dim=1).is_trivial
+    assert not spaces.ElementarySpace.from_trivial_sector(dim=0).is_trivial
     assert spaces.ElementarySpace(
         symmetry=any_symmetry, defining_sectors=SectorArray.from_sector(any_symmetry.trivial_sector)
     ).is_trivial
