@@ -1,0 +1,18 @@
+- Add byte-capped least-recently-used RAM caches for the data read from the SU(N) HDF5 files (F
+  symbols, R symbols, fusion outcomes and multiplicities) and for fusion-tree mappings ("tree
+  plans") and the number of fusion trees. The sizes are set by the new config options
+  ``su_n_symbol_cache_mb`` and ``tree_plan_cache_mb`` (default 256 MB each, ``0`` disables); see
+  :mod:`lasyten.cache` for statistics and for clearing the caches. This speeds up DMRG with
+  SU(2) symmetry from the data files by orders of magnitude.
+- ``SUN`` F symbols: a missing key is no longer replaced by the F symbol of the dual sectors or
+  by a ``1x1x1x1`` array of zeros. For files without a ``Gauge_Version`` attribute (written by
+  older versions of the generator, which omit vanishing blocks) an allowed channel without a
+  dataset gives zeros with the correct shape; files with a ``Gauge_Version`` attribute must be
+  complete and raise an error otherwise; a missing R symbol is always an error. Channels that
+  are not allowed by the fusion rules raise a ``SymmetryError``.
+- ``SUN.sector_dim`` uses exact integer arithmetic (it was off by one for large irreps, e.g. SU(4)
+  with weight 4).
+- ``SUN`` refuses to combine CG, F and R files that carry different ``CG_Run_Id`` attributes.
+- The production SU(2) symmetry (``conserve='SU2'``) detects the largest weights of the CG, F and
+  R files in ``su_n_data_path`` instead of assuming weights 20, 6 and 6; the config options
+  ``su2_cg_hweight``, ``su2_f_hweight`` and ``su2_r_hweight`` pin them.

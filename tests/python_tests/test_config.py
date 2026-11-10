@@ -168,3 +168,87 @@ def test_su_n_data_file_path():
     assert su_n_data_file_path(3, 'CG', 7, path='/a/b/') == '/a/b/su_n_clebsch_gordan_data_N3_CG_hweight7.hdf5'
     with temporary_options(su_n_data_path='/x', su_n_data_filename_base='b'):
         assert su_n_data_file_path(3, 'R', 4) == '/x/b_N3_R_hweight4.hdf5'
+
+
+def test_cache_option_defaults():
+    config = LasytenConfig()
+    assert config.get_option('su_n_symbol_cache_mb') == 256
+    assert config.get_option('tree_plan_cache_mb') == 256
+    assert config.get_option('tree_size_memo_mb') == 32  # its own budget, not a share of the plan budget
+    assert config.get_option('su_n_packed_ram_mb') == 256
+    for key in ('su2_cg_hweight', 'su2_f_hweight', 'su2_r_hweight'):
+        assert config.get_option(key) == 0  # 0 = detect from the data directory
+
+
+@pytest.mark.parametrize(
+    'key',
+    [
+        'su_n_symbol_cache_mb',
+        'tree_plan_cache_mb',
+        'tree_size_memo_mb',
+        'su_n_packed_ram_mb',
+        'su2_cg_hweight',
+        'su2_f_hweight',
+        'su2_r_hweight',
+    ],
+)
+def test_cache_option_validation(key):
+    config = LasytenConfig()
+    config.set_option(key, 0)
+    config.set_option(key, 64)
+    assert config.get_option(key) == 64
+    config.set_option(key, '128')  # envvars and YAML files give strings
+    assert config.get_option(key) == 128
+    with pytest.raises(ValueError):
+        config.set_option(key, -1)
+
+
+def test_cache_option_env_override(monkeypatch):
+    with monkeypatch.context() as m:
+        m.setenv('LASYTEN_SU_N_SYMBOL_CACHE_MB', '17')
+        m.setenv('LASYTEN_TREE_PLAN_CACHE_MB', '0')
+        m.setenv('LASYTEN_TREE_SIZE_MEMO_MB', '5')
+        m.setenv('LASYTEN_SU_N_PACKED_RAM_MB', '0')
+        restore_defaults()
+        assert get_option('su_n_symbol_cache_mb') == 17
+        assert get_option('tree_plan_cache_mb') == 0
+        assert get_option('tree_size_memo_mb') == 5
+        assert get_option('su_n_packed_ram_mb') == 0
+    restore_defaults()
+    assert get_option('su_n_symbol_cache_mb') == 256
+    assert get_option('tree_size_memo_mb') == 32
+
+
+def test_cache_option_temporary():
+    with temporary_options(su_n_symbol_cache_mb=3):
+        assert get_option('su_n_symbol_cache_mb') == 3
+    assert get_option('su_n_symbol_cache_mb') == 256
+
+
+def test_su_n_hweights_option():
+    config = LasytenConfig()
+    assert config.get_option('su_n_hweights') == ''
+    for spec in ('3:5', '3:5,4,4', '3:5;4:3,3,3', ' 3 : 5 , 4 ; 4:3 ', '3:0,0,0', ''):
+        config.set_option('su_n_hweights', spec)
+        assert config.get_option('su_n_hweights') == spec
+    for bad in ('3', '3:', '3:a', '1:5', '3:5;3:4', '3:1,2,3,4', ':5', '3:-1', 'x:5'):
+        with pytest.raises(ValueError, match='su_n_hweights'):
+            config.set_option('su_n_hweights', bad)
+    assert config.get_option('su_n_hweights') == ''  # a rejected value does not change the option
+
+
+def test_su_n_hweights_env_override(monkeypatch):
+    with monkeypatch.context() as m:
+        m.setenv('LASYTEN_SU_N_HWEIGHTS', '3:5;4:3')
+        restore_defaults()
+        assert get_option('su_n_hweights') == '3:5;4:3'
+    restore_defaults()
+    assert get_option('su_n_hweights') == ''
+
+
+def test_unquoted_yaml_su_n_hweights_gets_a_hint():
+    config = LasytenConfig()
+    with pytest.raises(TypeError, match='quote'):
+        config.update_from_yaml('su_n_hweights: 2:24')  # YAML reads the unquoted 2:24 as the number 144
+    config.update_from_yaml("su_n_hweights: '2:24'")
+    assert config.get_option('su_n_hweights') == '2:24'

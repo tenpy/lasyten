@@ -20,6 +20,7 @@ If you're new here, start with the :doc:`readme_wrap` and the
 
     main
     python/lasyten.config
+    python/lasyten.cache
     python/lasyten.backends
     python/lasyten.block_backends
     python/lasyten.symmetries

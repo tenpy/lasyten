@@ -13,6 +13,19 @@
 
 namespace lasyten {
 
+/// Estimated memory footprint in bytes of a mapping key (used by `SparseMapping::approx_bytes`).
+[[nodiscard]] inline std::size_t
+approx_bytes_of(FusionTree const& tree)
+{
+    return tree.approx_bytes();
+}
+
+[[nodiscard]] inline std::size_t
+approx_bytes_of(std::pair<FusionTree, FusionTree> const& pair)
+{
+    return pair.first.approx_bytes() + pair.second.approx_bytes();
+}
+
 /// A sparse matrix, where the labels of basis states are a structured type, not just int.
 ///
 /// Used in `TreePairMapping` and related objects.
@@ -71,6 +84,21 @@ class SparseMapping
             }
         }
         return res;
+    }
+
+    /// Estimated memory footprint in bytes (keys, coefficients and hash-table overhead).
+    [[nodiscard]] std::size_t approx_bytes() const
+    {
+        constexpr std::size_t node_overhead = 32;
+        std::size_t total = sizeof(*this) + data.bucket_count() * sizeof(void*);
+        for (auto const& [j, self_j] : data) {
+            total += approx_bytes_of(j) + sizeof(Inner) + node_overhead +
+                     self_j.bucket_count() * sizeof(void*);
+            for (auto const& [i, value] : self_j) {
+                total += approx_bytes_of(i) + sizeof(value) + node_overhead;
+            }
+        }
+        return total;
     }
 
     /// The idcs ``i`` for which there are entries ``self_{ij} = self[j][i]`` set.
@@ -139,6 +167,16 @@ class IdentityMapping
     using value_type = Scalar;
 
     std::unordered_set<KT> keys;
+
+    /// Estimated memory footprint in bytes.
+    [[nodiscard]] std::size_t approx_bytes() const
+    {
+        std::size_t total = sizeof(*this) + keys.bucket_count() * sizeof(void*);
+        for (KT const& k : keys) {
+            total += approx_bytes_of(k) + 32;
+        }
+        return total;
+    }
 
     IdentityMapping() = default;
     explicit IdentityMapping(std::vector<KT> const& keys_)
