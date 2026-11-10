@@ -115,6 +115,21 @@ file_attr_int64(HighFive::File& file, char const* name)
     return *v;
 }
 
+[[noreturn]] void
+throw_hweight_too_low(char const* kind, std::string const& path, int64 needed, int64 available)
+{
+    throw std::invalid_argument(std::format(
+      "SU(N) {} data in '{}' only covers highest weight {}, but an irrep of weight {} was "
+      "requested.\n"
+      "Recalculate the SU(N) data with a larger highest weight using the "
+      "clebsch_gordan_coefficients package (or point lasyten at such files via su_n_data_path / "
+      "su_n_hweights).",
+      kind,
+      path,
+      available,
+      needed));
+}
+
 Sector
 zeros_sector(int N)
 {
@@ -931,8 +946,7 @@ SUN::can_fuse_to(Sector a, Sector b, Sector c) const
 {
     auto const hmax = hweight_from_CG_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max(a.q[0], b.q[0]), hmax);
     }
     if (c.q[0] > a.q[0] + b.q[0]) {
         return false;
@@ -975,8 +989,7 @@ SUN::fusion_outcomes(Sector a, Sector b) const
 {
     auto const hmax = hweight_from_CG_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max(a.q[0], b.q[0]), hmax);
     }
     auto const outcomes = sun_outcomes(*static_cast<SunState*>(state_.get()), *CGfile_, N, a, b);
     return SectorArray(std::vector<Sector>(outcomes->labels));
@@ -1035,8 +1048,7 @@ SUN::clebschgordan(Sector a, int64 q_a, Sector b, int64 q_b, Sector c, int64 q_c
 {
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
     auto key1 = cg_key(N, a, b);
     auto key2 = std::string("Irrep") + sector_concat(c) + "a" + std::to_string(mu);
@@ -1064,8 +1076,7 @@ SUN::_fusion_tensor(Sector a, Sector b, Sector c, bool Z_a, bool Z_b) const
     }
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
     auto dim_Sa = static_cast<std::size_t>(sector_dim(a));
     auto dim_Sb = static_cast<std::size_t>(sector_dim(b));
@@ -1101,8 +1112,8 @@ SUN::_f_symbol_from_CG(Sector a, Sector b, Sector c, Sector d, Sector e, Sector 
 {
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw || d.q[0] > hw || e.q[0] > hw || f.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low(
+          "CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0], d.q[0], e.q[0], f.q[0] }), hw);
     }
     auto& be = *static_cast<BlockBackend*>(NumpyBlockBackend::from_factory("cpu"));
     auto X1 =
@@ -1147,8 +1158,8 @@ SUN::_f_symbol(Sector a, Sector b, Sector c, Sector d, Sector e, Sector f) const
     auto const hmax = hweight_from_F_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax || c.q[0] > hmax || d.q[0] > hmax || e.q[0] > hmax ||
         f.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low(
+          "F", Fpath, std::max({ a.q[0], b.q[0], c.q[0], d.q[0], e.q[0], f.q[0] }), hmax);
     }
     auto const& state = *static_cast<SunState*>(state_.get());
     auto const cached =
@@ -1204,8 +1215,7 @@ SUN::_r_symbol_from_CG(Sector a, Sector b, Sector c) const
 {
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
     BlockBackend& be = *NumpyBlockBackend::from_factory("cpu");
     auto X1 = block_from_fusion_symbol(be, fusion_tensor(a, b, c));
@@ -1225,8 +1235,7 @@ SUN::_r_symbol(Sector a, Sector b, Sector c) const
 {
     auto const hmax = hweight_from_R_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax || c.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("R", Rpath, std::max({ a.q[0], b.q[0], c.q[0] }), hmax);
     }
     auto const& state = *static_cast<SunState*>(state_.get());
     auto const cached = symbol_cache().get_or_make(symbol_key(state.id, 'R', { a, b, c }), [&] {

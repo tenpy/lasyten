@@ -1,0 +1,5 @@
+- SU(N) errors for irreps above the highest weight stored in a CG / F / R data file now name that
+  file, report the needed and available highest weights, and tell the user to recalculate the data
+  with a larger highest weight (via the ``clebsch_gordan_coefficients`` package or by pointing
+  ``su_n_data_path`` / ``su_n_hweights`` at such files). Addresses
+  https://github.com/tenpy/lasyten/issues/303.

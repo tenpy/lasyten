@@ -247,8 +247,12 @@ def test_not_allowed_channels_and_weights():
     with temporary_options(check_fusion=False):
         with pytest.raises(SymmetryError):
             sym.f_symbol(fund, fund, fund, triv, triv, triv)
-    with pytest.raises(ValueError, match='higher weight'):
+    with pytest.raises(ValueError, match='highest weight 4') as exc:
         sym.f_symbol(np.array([5, 0, 0]), triv, triv, np.array([5, 0, 0]), triv, np.array([5, 0, 0]))
+    msg = str(exc.value)
+    assert os.path.basename(sym.Fpath) in msg
+    assert 'irrep of weight 5' in msg
+    assert 'Recalculate' in msg and 'larger highest weight' in msg
 
 
 def test_cg_run_id_mismatch_is_refused(tmp_path):
