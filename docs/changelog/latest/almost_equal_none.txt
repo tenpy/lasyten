@@ -1,2 +1,5 @@
-- ``almost_equal(None, …)`` / ``almost_equal(…, None)`` now raises ``ValueError`` instead of
-  segfaulting. Addresses https://github.com/tenpy/lasyten/issues/313.
+- Passing ``None`` where a Tensor is required (Python ``None`` → null ``shared_ptr``) now raises
+  ``ValueError`` instead of segfaulting for the shared helpers ``get_same_device``,
+  ``get_same_backend`` and ``check_same_legs``, and for entry points that dereference before those
+  helpers (``almost_equal``, ``planar_almost_equal``, ``planar_contraction``, ``_compose_with_Mask``,
+  ``move_hidden_leg``). Addresses https://github.com/tenpy/lasyten/issues/313.
