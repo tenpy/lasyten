@@ -1783,6 +1783,9 @@ horizontal_factorization(TensorCPtr tensor,
 bool
 planar_almost_equal(TensorCPtr tensor_1, TensorCPtr tensor_2, float64 rtol, float64 atol)
 {
+    if (!tensor_1 || !tensor_2) {
+        throw std::invalid_argument("planar_almost_equal() requires non-null Tensor arguments");
+    }
     auto labs1 = tensor_1->labels();
     auto labs2 = tensor_2->labels();
     if (contains(labs1, OptionalLabel{}) || contains(labs2, OptionalLabel{})) {
@@ -2211,6 +2214,9 @@ planar_contraction(TensorCPtr tensor1,
                    std::map<std::string, std::string> relabel1,
                    std::map<std::string, std::string> relabel2)
 {
+    if (!tensor1 || !tensor2) {
+        throw std::invalid_argument("planar_contraction() requires non-null Tensor arguments");
+    }
     auto legs1_idcs = tensor1->get_leg_idcs(legs1);
     auto legs2_idcs = tensor2->get_leg_idcs(legs2);
     auto num_contr = static_cast<int64>(legs1_idcs.size());

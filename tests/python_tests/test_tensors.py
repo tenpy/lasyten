@@ -1452,6 +1452,26 @@ def test_almost_equal(cls, make_compatible_tensor):
         pytest.xfail(str(e))
 
 
+def test_almost_equal_rejects_none(make_compatible_tensor):
+    T = make_compatible_tensor()
+    with pytest.raises(ValueError, match='non-null'):
+        tensors.almost_equal(T, None)
+    with pytest.raises(ValueError, match='non-null'):
+        tensors.almost_equal(None, T)
+
+
+def test_null_tensor_guards_reject_none(make_compatible_tensor):
+    """None must raise ValueError via shared helpers or entry guards, not segfault."""
+    from lasyten.tensors.planar import planar_almost_equal
+
+    T = make_compatible_tensor()
+    for fn in (tensors.compose, tensors.check_same_legs, planar_almost_equal):
+        with pytest.raises(ValueError, match='non-null'):
+            fn(T, None)
+        with pytest.raises(ValueError, match='non-null'):
+            fn(None, T)
+
+
 @pytest.mark.deselect_invalid_ChargedTensor_cases
 @pytest.mark.parametrize(
     'cls, codomain, domain, which_leg',

@@ -282,6 +282,9 @@ check_same_legs(TensorCPtr t1, TensorCPtr t2)
     // --- hints from Python check_same_legs ---
     // either l1 is None or l1 not in l2.labels
     // ---
+    if (!t1 || !t2) {
+        throw std::invalid_argument("check_same_legs() requires non-null Tensor arguments");
+    }
     if (!t1->symmetry->is_equivalent_to(*t2->symmetry)) {
         throw std::invalid_argument("Incompatible symmetries");
     }
@@ -1578,6 +1581,9 @@ move_hidden_leg(HiddenLegTensorCPtr A,
                 std::optional<int64> target_codomain_pos,
                 std::optional<int64> target_domain_pos)
 {
+    if (!A) {
+        throw std::invalid_argument("move_hidden_leg() requires non-null Tensor arguments");
+    }
     if (!B) {
         throw std::invalid_argument("move_hidden_leg: B must not be null");
     }

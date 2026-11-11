@@ -115,6 +115,21 @@ file_attr_int64(HighFive::File& file, char const* name)
     return *v;
 }
 
+[[noreturn]] void
+throw_hweight_too_low(char const* kind, std::string const& path, int64 needed, int64 available)
+{
+    throw std::invalid_argument(std::format(
+      "SU(N) {} data in '{}' only covers highest weight {}, but an irrep of weight {} was "
+      "requested.\n"
+      "Recalculate the SU(N) data with a larger highest weight using the "
+      "clebsch_gordan_coefficients package (or point lasyten at such files via su_n_data_path / "
+      "su_n_hweights).",
+      kind,
+      path,
+      available,
+      needed));
+}
+
 Sector
 zeros_sector(int N)
 {
@@ -822,6 +837,79 @@ SUN::is_valid_sector(Sector a) const
     return a.q[a.len() - 1] == 0;
 }
 
+Sector
+SUN::get_sector(std::string const& s) const
+{
+    auto const start = s.find_first_not_of(" \t\n\r");
+    if (start == std::string::npos) {
+        throw std::invalid_argument("get_sector: empty string");
+    }
+    auto const end = s.find_last_not_of(" \t\n\r");
+    auto const t = std::string_view(s).substr(start, end - start + 1);
+    if (t.size() < 2 || t.front() != '[' || t.back() != ']') {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    auto inner = t.substr(1, t.size() - 2);
+    auto const i0 = inner.find_first_not_of(" \t\n\r");
+    if (i0 == std::string_view::npos) {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    auto const i1 = inner.find_last_not_of(" \t\n\r");
+    inner = inner.substr(i0, i1 - i0 + 1);
+
+    std::array<int16_t, max_sector_ind_len> vals{};
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while (pos < inner.size()) {
+        while (pos < inner.size() && (inner[pos] == ' ' || inner[pos] == '\t')) {
+            ++pos;
+        }
+        if (pos >= inner.size()) {
+            break;
+        }
+        auto const tok_start = pos;
+        if (inner[pos] == '+' || inner[pos] == '-') {
+            ++pos;
+        }
+        while (pos < inner.size() && inner[pos] >= '0' && inner[pos] <= '9') {
+            ++pos;
+        }
+        if (pos == tok_start ||
+            (pos == tok_start + 1 && (inner[tok_start] == '+' || inner[tok_start] == '-'))) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        if (count >= static_cast<std::size_t>(N) || count >= max_sector_ind_len) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        auto const tok = inner.substr(tok_start, pos - tok_start);
+        std::size_t idx = 0;
+        long value = 0;
+        try {
+            value = std::stol(std::string(tok), &idx, 10);
+        } catch (std::exception const&) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        if (idx != tok.size() || value < static_cast<long>(std::numeric_limits<int16_t>::min()) ||
+            value > static_cast<long>(std::numeric_limits<int16_t>::max())) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        vals[count++] = static_cast<int16_t>(value);
+    }
+    if (count != static_cast<std::size_t>(N)) {
+        throw std::invalid_argument(
+          std::format("get_sector: expected {} components for SU({}), got {}", N, N, count));
+    }
+    auto const a = Sector::from_span(std::span<const int16_t>(vals.data(), count));
+    if (!is_valid_sector(a)) {
+        throw std::invalid_argument(std::format("get_sector: '{}' is not a valid sector", s));
+    }
+    return a;
+}
+
 bool
 SUN::_is_equivalent_factor(SymmetryFactor const& other) const
 {
@@ -931,8 +1019,7 @@ SUN::can_fuse_to(Sector a, Sector b, Sector c) const
 {
     auto const hmax = hweight_from_CG_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max(a.q[0], b.q[0]), hmax);
     }
     if (c.q[0] > a.q[0] + b.q[0]) {
         return false;
@@ -975,8 +1062,7 @@ SUN::fusion_outcomes(Sector a, Sector b) const
 {
     auto const hmax = hweight_from_CG_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max(a.q[0], b.q[0]), hmax);
     }
     auto const outcomes = sun_outcomes(*static_cast<SunState*>(state_.get()), *CGfile_, N, a, b);
     return SectorArray(std::vector<Sector>(outcomes->labels));
@@ -1035,8 +1121,7 @@ SUN::clebschgordan(Sector a, int64 q_a, Sector b, int64 q_b, Sector c, int64 q_c
 {
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
     auto key1 = cg_key(N, a, b);
     auto key2 = std::string("Irrep") + sector_concat(c) + "a" + std::to_string(mu);
@@ -1064,8 +1149,7 @@ SUN::_fusion_tensor(Sector a, Sector b, Sector c, bool Z_a, bool Z_b) const
     }
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
     auto dim_Sa = static_cast<std::size_t>(sector_dim(a));
     auto dim_Sb = static_cast<std::size_t>(sector_dim(b));
@@ -1101,8 +1185,8 @@ SUN::_f_symbol_from_CG(Sector a, Sector b, Sector c, Sector d, Sector e, Sector 
 {
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw || d.q[0] > hw || e.q[0] > hw || f.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low(
+          "CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0], d.q[0], e.q[0], f.q[0] }), hw);
     }
     auto& be = *static_cast<BlockBackend*>(NumpyBlockBackend::from_factory("cpu"));
     auto X1 =
@@ -1147,8 +1231,8 @@ SUN::_f_symbol(Sector a, Sector b, Sector c, Sector d, Sector e, Sector f) const
     auto const hmax = hweight_from_F_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax || c.q[0] > hmax || d.q[0] > hmax || e.q[0] > hmax ||
         f.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low(
+          "F", Fpath, std::max({ a.q[0], b.q[0], c.q[0], d.q[0], e.q[0], f.q[0] }), hmax);
     }
     auto const& state = *static_cast<SunState*>(state_.get());
     auto const cached =
@@ -1204,8 +1288,7 @@ SUN::_r_symbol_from_CG(Sector a, Sector b, Sector c) const
 {
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
     BlockBackend& be = *NumpyBlockBackend::from_factory("cpu");
     auto X1 = block_from_fusion_symbol(be, fusion_tensor(a, b, c));
@@ -1225,8 +1308,7 @@ SUN::_r_symbol(Sector a, Sector b, Sector c) const
 {
     auto const hmax = hweight_from_R_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax || c.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("R", Rpath, std::max({ a.q[0], b.q[0], c.q[0] }), hmax);
     }
     auto const& state = *static_cast<SunState*>(state_.get());
     auto const cached = symbol_cache().get_or_make(symbol_key(state.id, 'R', { a, b, c }), [&] {

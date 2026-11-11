@@ -611,6 +611,12 @@ get_same_device(std::vector<TensorCPtr> const& tensors, std::string const& error
     if (tensors.empty()) {
         throw std::invalid_argument("Need at least one tensor");
     }
+    for (std::size_t i = 0; i < tensors.size(); ++i) {
+        if (!tensors[i]) {
+            throw std::invalid_argument(std::format(
+              "get_same_device() requires non-null Tensor arguments (null at index {})", i));
+        }
+    }
     std::string device = tensors[0]->device;
     for (std::size_t i = 1; i < tensors.size(); ++i) {
         if (tensors[i]->device != device) {
@@ -627,6 +633,9 @@ almost_equal(TensorCPtr tensor_1,
              float64 atol,
              bool allow_different_types)
 {
+    if (!tensor_1 || !tensor_2) {
+        throw std::invalid_argument("almost_equal() requires non-null Tensor arguments");
+    }
     check_same_legs(tensor_1, tensor_2);
     (void)get_same_device({ tensor_1, tensor_2 });
 

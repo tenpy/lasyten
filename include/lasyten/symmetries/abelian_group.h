@@ -24,6 +24,8 @@ class AbelianGroup : public Group
 
     /// sector_dim of every sector (row) in a
     std::string sector_str(Sector a) const override;
+    /// Inverse of `sector_str` for abelian groups labelled by a single integer.
+    Sector get_sector(std::string const& s) const override;
     int64 sector_dim(Sector a) const override;
     std::vector<int64> batch_sector_dim(SectorArray const& a) const override;
     /// Optimized version of self.n_symbol that assumes that c is a valid fusion outcome.

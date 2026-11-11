@@ -39,6 +39,7 @@ class _SU2 : public Group
     int64 sector_dim(Sector a) const override;
     std::vector<int64> batch_sector_dim(SectorArray const& a) const override;
     std::string sector_str(Sector a) const override;
+    Sector get_sector(std::string const& s) const override;
     std::string repr() const override;
     bool _is_equivalent_factor(SymmetryFactor const& other) const override;
     Sector dual_sector(Sector a) const override;

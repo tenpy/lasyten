@@ -107,6 +107,7 @@ class SUN : public Group
     bool is_valid_sector(Sector a) const override;
     bool _is_equivalent_factor(SymmetryFactor const& other) const override;
     int64 sector_dim(Sector a) const override;
+    Sector get_sector(std::string const& s) const override;
     std::string repr() const override;
     Sector dual_sector(Sector a) const override;
 
