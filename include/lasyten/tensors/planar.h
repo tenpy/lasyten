@@ -4,6 +4,7 @@
 #include <lasyten/lasyten.h>
 #include <lasyten/tensors/decompositions.h>
 #include <lasyten/tensors/diagonal_tensor.h>
+#include <lasyten/tensors/forward_declare.h>
 #include <lasyten/tensors/labels.h>
 #include <lasyten/tensors/ops_algebra.h>
 #include <lasyten/tensors/ops_legs.h>
@@ -626,6 +627,14 @@ class PlanarLinearOperator : public LinearOperator
                                               std::vector<LegRef> legs2,
                                               std::map<std::string, std::string> relabel1 = {},
                                               std::map<std::string, std::string> relabel2 = {});
+/// Planarly compose a mask into exactly one leg of a tensor.
+[[nodiscard]] TensorPtr planar_contract_mask(
+  TensorCPtr tensor1,
+  MaskCPtr mask2,
+  std::vector<LegRef> legs1,
+  std::vector<LegRef> legs2,
+  std::map<std::string, std::string> relabel1 = {},
+  std::map<std::string, std::string> relabel2 = {});
 [[nodiscard]] TensorPlaceholder planar_contraction(TensorPlaceholder const& tensor1,
                                                    TensorPlaceholder const& tensor2,
                                                    std::vector<LegRef> legs1,

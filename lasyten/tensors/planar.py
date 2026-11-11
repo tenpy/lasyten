@@ -17,7 +17,8 @@ There are additional useful planar functions provided ranging from planar decomp
 :func:`planar_qr`, :func:`planar_svd`,
 :func:`planar_truncated_svd`) and planar leg permutations (:func:`planar_permute_legs`),
 to planar leg combinations (:func:`planar_combine_legs`), planar partial traces
-(:func:`planar_partial_trace`), and planar tensor contractions (:func:`planar_contraction`).
+(:func:`planar_partial_trace`), and planar tensor contractions
+(:func:`planar_contraction`, :func:`planar_contract_mask`).
 It is also possible to compare two tensors up to cyclic leg permutations
 (:func:`planar_almost_equal`).
 """
@@ -32,6 +33,7 @@ from .._core import (  # noqa: F401
     horizontal_factorization,
     parse_leg_bipartition,
     planar_almost_equal,
+    planar_contract_mask,
     planar_combine_legs,
     planar_contraction,
     planar_decomposition,
@@ -39,8 +41,8 @@ from .._core import (  # noqa: F401
     planar_eigh,
     planar_eigvals,
     planar_lq,
-    planar_partial_trace,
     planar_permute_legs,
+    planar_partial_trace,
     planar_qr,
     planar_svd,
     planar_truncated_svd,
