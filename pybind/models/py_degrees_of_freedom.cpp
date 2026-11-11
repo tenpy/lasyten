@@ -152,6 +152,15 @@ bind_models_degrees_of_freedom(py::module_& m)
       .def("test_sanity", &Site::test_sanity, DOC(lasyten, Site, test_sanity))
       .def_property_readonly("symmetry", &Site::symmetry)
       .def_property_readonly("dim", [](Site const& self) { return dim_to_python(self.dim()); })
+      .def(
+        "change_leg",
+        [](Site& self, ElementarySpace::Ptr new_leg) -> Site& {
+            self.change_leg(std::move(new_leg));
+            return self;
+        },
+        py::arg("new_leg") = ElementarySpace::Ptr{},
+        py::return_value_policy::reference_internal,
+        DOC(lasyten, Site, change_leg))
       .def("add_onsite_operator",
            &Site::add_onsite_operator,
            py::arg("name"),

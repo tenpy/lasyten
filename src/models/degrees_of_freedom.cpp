@@ -36,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace lasyten {
@@ -503,6 +504,48 @@ float64
 Site::dim() const
 {
     return leg->Space::dim;
+}
+
+void
+Site::change_leg(ElementarySpace::Ptr new_leg)
+{
+    auto const old_dim = static_cast<int64>(dim());
+    if (!new_leg) {
+        // Match TeNPy / cyten "trivial charges": drop to no_symmetry with the same dim.
+        new_leg = ElementarySpace::from_trivial_sector(old_dim);
+    }
+    if (leg_dim(new_leg) != old_dim) {
+        throw std::invalid_argument(std::format(
+          "change_leg: new leg dim {} does not match site dim {}", leg_dim(new_leg), old_dim));
+    }
+
+    auto old_ops = std::move(onsite_operators);
+    onsite_operators.clear();
+    // Keep hc_ops: names are unchanged; add_onsite_operator skips hc inference when the name
+    // is already present in hc_ops.
+
+    leg = std::move(new_leg);
+    for (auto& [dof_name, dof] : dofs) {
+        (void)dof_name;
+        if (auto occ = std::dynamic_pointer_cast<OccupationDOF>(dof)) {
+            occ->set_leg(leg);
+        }
+    }
+
+    auto const sym = leg_symmetry(leg);
+    Dtype id_dtype = sym->has_complex_topological_data ? Dtype::Complex128 : Dtype::Float64;
+    add_onsite_operator(
+      "Id", py::cast(Identity::from_eye(leg, backend, pp_labels(), id_dtype, default_device)));
+
+    std::vector<std::variant<int64, std::string>> const pp{ "p", "p*" };
+    for (auto& [name, op] : old_ops) {
+        if (name == "Id") {
+            continue;
+        }
+        bool const is_diag = static_cast<bool>(std::dynamic_pointer_cast<DiagonalTensor>(op));
+        py::array dense = op->to_numpy(pp, py::none(), /*understood_braiding=*/true);
+        add_onsite_operator(name, dense, is_diag, /*understood_braiding=*/true, std::nullopt);
+    }
 }
 
 void
@@ -1259,6 +1302,21 @@ OccupationDOF::get_occupation_numpy(py::object species)
     return np.attr("sum")(
       number_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), indices)),
       py::arg("axis") = 2);
+}
+
+void
+OccupationDOF::set_leg(ElementarySpace::Ptr leg)
+{
+    if (!leg) {
+        throw std::invalid_argument("OccupationDOF::set_leg: leg must not be null");
+    }
+    if (leg_dim(leg) != leg_dim(leg_)) {
+        throw std::invalid_argument(
+          std::format("OccupationDOF::set_leg: new leg dim {} does not match DOF dim {}",
+                      leg_dim(leg),
+                      leg_dim(leg_)));
+    }
+    leg_ = std::move(leg);
 }
 
 int64

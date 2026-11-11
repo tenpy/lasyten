@@ -44,3 +44,11 @@ Multiple DOFs of the same kind are allowed under different names
 (e.g. `"spin"` + `"valley"`, or `"0.spin"` / `"1.spin"` after grouping).
 Coupling factories currently use the default conventional names; an explicit
 `dof=` argument is deferred to issue #152.
+
+## Common symmetry (#153) before grouping (#152)
+
+`lasyten.models.sites.set_common_symmetry` (plus `Site.change_leg`) remaps a list of
+sites onto one shared product symmetry (`by_name` / `same`, `independent`, `drop`,
+or an explicit sector map). Issue #152 `GroupedSite` / `group_sites` should call the
+same combine modes (or reuse this helper) so piped legs share a symmetry before
+`ElementarySpace.from_independent_symmetries` / operator `outer`.

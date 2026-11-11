@@ -102,18 +102,20 @@ def test_site(np_random, block_backend, symmetry_backend, use_sym):
     assert site.get_hc_op_name('op3_renamed') == 'op3_renamed'
     site.test_sanity()
 
-    # if use_sym:
-    #     leg2 = leg.drop_symmetry(1)
-    #     leg2 = leg2.change_symmetry(symmetry=z3_symmetry, sector_map=lambda s: s % 3)
-    # else:
-    #     leg2 = leg
-    # leg2.test_sanity()
-    # site2 = copy.deepcopy(site)
-    # site2.change_leg(leg2)
-    # for name in ['silly_op', 'op2', 'op3']:
-    #     site_op = site.onsite_operators[name].to_numpy()
-    #     site2_op = site2.onsite_operators[name].to_numpy()
-    #     npt.assert_equal(site_op, site2_op)
+    ops_before = {
+        name: site.onsite_operators[name].to_numpy(understood_braiding=True)
+        for name in ['silly_op', 'op2', 'op3_renamed']
+    }
+    if use_sym:
+        # Dropping all symmetry always preserves dense operators.
+        leg2 = site.leg.drop_symmetry()
+    else:
+        leg2 = site.leg
+    leg2.test_sanity()
+    site.change_leg(leg2)
+    for name, expected in ops_before.items():
+        npt.assert_equal(site.onsite_operators[name].to_numpy(understood_braiding=True), expected)
+    site.test_sanity()
 
 
 def test_site_rejects_out_of_range_state_label(block_backend):
@@ -480,3 +482,131 @@ def test_site_dofs_registry_allows_multiple_spins(block_backend):
     assert combined.spin is None  # conventional key unused
     assert combined.dofs['0.spin'] is site_a.spin
     assert combined.dofs['1.spin'].spin_vector.shape[-1] == 3
+
+
+def _factor_names(site):
+    return tuple(f.descriptive_name for f in site.symmetry.factors)
+
+
+def _ops_as_numpy(site):
+    return {name: op.to_numpy(understood_braiding=True) for name, op in site.onsite_operators.items()}
+
+
+def test_set_common_symmetry_duplicate_site_rejected(block_backend):
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    spin = sites.SpinSite(0.5, 'Sz', backend=backend)
+    with pytest.raises(ValueError, match='same object multiple times'):
+        sites.set_common_symmetry([spin, spin])
+
+
+@pytest.mark.parametrize('mode', ['by_name', 'same'])
+def test_set_common_symmetry_by_name(block_backend, mode):
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    spin = sites.SpinSite(0.5, 'Sz', backend=backend)
+    ferm = sites.SpinHalfFermionSite(conserve_N='N', conserve_S='Sz', backend=backend)
+    spin_ops = _ops_as_numpy(spin)
+    ferm_ops = _ops_as_numpy(ferm)
+
+    sites.set_common_symmetry([spin, ferm], mode)
+
+    assert spin.symmetry.is_equivalent_to(ferm.symmetry, strict_ordering=True)
+    assert _factor_names(spin) == ('2*Sz', 'total_fermion_occupation', 'total_fermion_parity')
+    spin.test_sanity()
+    ferm.test_sanity()
+    for name, op in spin_ops.items():
+        npt.assert_equal(spin.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    for name, op in ferm_ops.items():
+        npt.assert_equal(ferm.onsite_operators[name].to_numpy(understood_braiding=True), op)
+
+
+def test_set_common_symmetry_independent(block_backend):
+    backend = backends.get_backend('abelian', block_backend=block_backend)
+    s1 = sites.SpinSite(0.5, 'Sz', backend=backend)
+    s2 = sites.SpinSite(1.0, 'Sz', backend=backend)
+    s1_ops = _ops_as_numpy(s1)
+    s2_ops = _ops_as_numpy(s2)
+
+    sites.set_common_symmetry([s1, s2], 'independent')
+
+    assert s1.symmetry.is_equivalent_to(s2.symmetry, strict_ordering=True)
+    # Same descriptive_name '2*Sz' but independent keeps both factors.
+    assert len(s1.symmetry.factors) == 2
+    assert _factor_names(s1) == ('2*Sz', '2*Sz')
+    s1.test_sanity()
+    s2.test_sanity()
+    for name, op in s1_ops.items():
+        npt.assert_equal(s1.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    for name, op in s2_ops.items():
+        npt.assert_equal(s2.onsite_operators[name].to_numpy(understood_braiding=True), op)
+
+
+def test_set_common_symmetry_drop(block_backend):
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    spin = sites.SpinSite(0.5, 'Sz', backend=backend)
+    ferm = sites.SpinlessFermionSite(conserve='N', backend=backend)
+    spin_ops = _ops_as_numpy(spin)
+    ferm_ops = _ops_as_numpy(ferm)
+
+    sites.set_common_symmetry([spin, ferm], 'drop')
+
+    assert len(spin.symmetry.factors) == 1
+    assert isinstance(spin.symmetry.factors[0], lasyten.NoSymmetry)
+    assert spin.symmetry.is_equivalent_to(ferm.symmetry)
+    spin.test_sanity()
+    ferm.test_sanity()
+    for name, op in spin_ops.items():
+        npt.assert_equal(spin.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    for name, op in ferm_ops.items():
+        npt.assert_equal(ferm.onsite_operators[name].to_numpy(understood_braiding=True), op)
+
+
+def test_set_common_symmetry_list_combo(block_backend):
+    """Explicit linear combination (v1-style), e.g. total 2*Sz from fermion + spin."""
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    ferm = sites.SpinHalfFermionSite(conserve_N='N', conserve_S='Sz', backend=backend)
+    spin = sites.SpinSite(0.5, 'Sz', backend=backend)
+    ferm_ops = _ops_as_numpy(ferm)
+    spin_ops = _ops_as_numpy(spin)
+
+    # SpinHalfFermionSite factors: 2*Sz, total_fermion_occupation, total_fermion_parity
+    # SpinSite factors: 2*Sz
+    new_symmetry = lasyten.U1('2*Sz').as_Symmetry()
+    sites.set_common_symmetry(
+        [ferm, spin],
+        [[(1, 0, 0), (1, 1, 0)]],  # 2*Sz_f + 2*Sz_spin
+        new_symmetry=new_symmetry,
+    )
+
+    assert _factor_names(ferm) == ('2*Sz',)
+    assert ferm.symmetry.is_equivalent_to(spin.symmetry, strict_ordering=True)
+    ferm.test_sanity()
+    spin.test_sanity()
+    for name, op in ferm_ops.items():
+        npt.assert_equal(ferm.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    for name, op in spin_ops.items():
+        npt.assert_equal(spin.onsite_operators[name].to_numpy(understood_braiding=True), op)
+
+
+def test_set_common_symmetry_ferm_bos_combo(block_backend):
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    ferm = sites.SpinlessFermionSite(conserve='N', backend=backend)
+    bos = sites.SpinlessBosonSite(Nmax=2, conserve='N', backend=backend)
+    ferm_ops = _ops_as_numpy(ferm)
+    bos_ops = _ops_as_numpy(bos)
+
+    # Fermion: U1(N) + FermionParity; Boson: U1(N). Keep N_f + 2 N_b only (drop parity).
+    new_symmetry = lasyten.U1('N_f + 2 N_b').as_Symmetry()
+    sites.set_common_symmetry(
+        [ferm, bos],
+        [[(1, 0, 0), (2, 1, 0)]],
+        new_symmetry=new_symmetry,
+    )
+
+    assert _factor_names(ferm) == ('N_f + 2 N_b',)
+    assert ferm.symmetry.is_equivalent_to(bos.symmetry, strict_ordering=True)
+    for name, op in ferm_ops.items():
+        npt.assert_equal(ferm.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    for name, op in bos_ops.items():
+        npt.assert_equal(bos.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    ferm.test_sanity()
+    bos.test_sanity()

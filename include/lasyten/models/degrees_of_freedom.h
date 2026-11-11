@@ -167,6 +167,16 @@ class Site : public std::enable_shared_from_this<Site>
     [[nodiscard]] Symmetry::Ptr symmetry() const;
     [[nodiscard]] float64 dim() const;
 
+    /// Change the `leg` of the site in place.
+    ///
+    /// Assumes that `state_labels` remain valid (same basis order / dimension). Rebuilds
+    /// `onsite_operators` from their dense blocks under the new leg; operators that are not
+    /// symmetric under the new symmetry raise. Rebinds any `OccupationDOF` legs to `new_leg`.
+    ///
+    /// @param new_leg The new physical leg. If ``nullptr``, use a trivial-sector space of the
+    /// same dimension (dropping all symmetry information).
+    void change_leg(ElementarySpace::Ptr new_leg = nullptr);
+
     /// Add an operator to the `onsite_operators`.
     ///
     /// If `hc` is not specified, infer the hermitian-conjugate name by comparing this operator's
@@ -415,6 +425,9 @@ class OccupationDOF : public DegreeOfFreedom
     /// Get the occupation number operator for some or multiple species as a numpy array.
     [[nodiscard]] py::array get_occupation_numpy(py::object species = py::none());
     [[nodiscard]] int64 get_species_idx(py::object species) const;
+
+    /// Rebind the Hilbert-space leg (same dimension); used by `Site::change_leg`.
+    void set_leg(ElementarySpace::Ptr leg);
 
   protected:
     ElementarySpace::Ptr leg_;

@@ -40,6 +40,7 @@ from .sites import (
     SpinlessFermionSite,
     SpinSite,
     SU2kSpin1Site,
+    set_common_symmetry,
 )
 
 
@@ -77,6 +78,7 @@ __all__ = [
     'onsite_pairing',
     'pairing',
     'sector_projection_coupling',
+    'set_common_symmetry',
     'spin_field_coupling',
     'spin_spin_coupling',
 ]
