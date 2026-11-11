@@ -277,6 +277,32 @@ def test_planar_contraction(
         npt.assert_almost_equal(res.to_numpy(), expect.to_numpy())
 
 
+def test_planar_contract_mask(make_compatible_space, make_compatible_tensor, compatible_backend):
+    v = make_compatible_space(is_dual=False)
+    w = lasy.DirectSumSpace([v, v, v], is_dual=False, summand_labels=['IdL', 'A', 'IdR'])
+    mask = w.projection_onto_summand('IdL', backend=compatible_backend, labels=['wL', 'wR'])
+    init_lp = make_compatible_tensor(
+        codomain=[v, mask.small_leg.dual], domain=[v], labels=['vR*', 'wR', 'vR']
+    )
+
+    relabel1 = {'vR*': 'vL*', 'vR': 'vL'}
+    relabel2 = {'wR': 'w'}
+    result = lasy.planar_contract_mask(init_lp, mask, 'wR', 'wL', relabel1, relabel2)
+    expect = lasy.planar_contraction(
+        init_lp, mask.as_SymmetricTensor(), 'wR', 'wL', relabel1=relabel1, relabel2=relabel2
+    )
+
+    assert lasy.planar.planar_almost_equal(result, expect)
+    assert set(result.labels) == {'vL*', 'vL', 'w'}
+
+    init_lp = make_compatible_tensor(
+        codomain=[v, mask.large_leg], domain=[v], labels=['vR*', 'wR', 'vR']
+    )
+    result = lasy.planar_contract_mask(init_lp, mask, 'wR', 'wR')
+    expect = lasy.planar_contraction(init_lp, mask.as_SymmetricTensor(), 'wR', 'wR')
+    assert lasy.planar.planar_almost_equal(result, expect)
+
+
 @pytest.mark.parametrize(
     'cls, dom, cod, dom_cut, cod_cut, new_leg_dual',
     [
