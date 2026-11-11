@@ -148,8 +148,42 @@ def main() -> int:
     return 0
 
 
+def _load_so(so: Path, *, repo: Path) -> ModuleType | None:
+    """Load a compiled ``_core`` extension from ``so`` into ``sys.modules``."""
+    try:
+        spec = importlib.util.spec_from_file_location('lasyten._core', so)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        if 'lasyten' not in sys.modules:
+            pkg = ModuleType('lasyten')
+            pkg.__path__ = [str(repo / 'lasyten')]  # type: ignore[attr-defined]
+            sys.modules['lasyten'] = pkg
+        # Drop a previously imported (possibly stale installed) extension.
+        sys.modules.pop('lasyten._core', None)
+        sys.modules['lasyten._core'] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception as exc:
+        print(f'SKIP: could not load {so} ({exc})')
+        return None
+
+
 def _load_live_core() -> ModuleType | None:
-    """Import the compiled extension without preferring a pure-Python stub."""
+    """Import the compiled extension without preferring a pure-Python stub.
+
+    Prefer ``build/_core*.so`` when present so local pre-commit (which runs
+    ``cmake --build build`` just before this check) compares against the
+    freshly built extension rather than a stale installed wheel/editable copy.
+    """
+    repo = Path(__file__).resolve().parent.parent
+
+    build_candidates = sorted((repo / 'build').glob('_core*.so'))
+    if build_candidates:
+        mod = _load_so(build_candidates[-1], repo=repo)
+        if mod is not None:
+            return mod
+
     # Prefer an already-imported extension module.
     existing = sys.modules.get('lasyten._core')
     if existing is not None:
@@ -173,27 +207,10 @@ def _load_live_core() -> ModuleType | None:
             return live
 
     # Last resort: load .so from the scikit-build install tree.
-    repo = Path(__file__).resolve().parent.parent
     candidates = sorted((repo / 'build' / 'install' / 'platlib' / 'lasyten').glob('_core*.so'))
     if not candidates:
         return None
-    so = candidates[-1]
-    try:
-        spec = importlib.util.spec_from_file_location('lasyten._core', so)
-        if spec is None or spec.loader is None:
-            return None
-        mod = importlib.util.module_from_spec(spec)
-        # Minimal parent package for relative expectations
-        if 'lasyten' not in sys.modules:
-            pkg = ModuleType('lasyten')
-            pkg.__path__ = [str(repo / 'lasyten')]  # type: ignore[attr-defined]
-            sys.modules['lasyten'] = pkg
-        sys.modules['lasyten._core'] = mod
-        spec.loader.exec_module(mod)
-        return mod
-    except Exception as exc:
-        print(f'SKIP: could not load {so} ({exc})')
-        return None
+    return _load_so(candidates[-1], repo=repo)
 
 
 if __name__ == '__main__':
