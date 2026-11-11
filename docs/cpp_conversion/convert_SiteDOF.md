@@ -38,17 +38,20 @@ Degrees of freedom are composed into `Site` via a named `dofs` registry.
 | `dynamic_pointer_cast<ClockDOF>(site)` | `site->get_clock()` / `site->require_clock()` |
 | `OccupationDOF::add_*_ops()` on `*this` | `occ->add_*_ops(site)` |
 
-## Multi-DOF / grouping
+## Multi-DOF / grouping (#152)
 
-Multiple DOFs of the same kind are allowed under different names
-(e.g. `"spin"` + `"valley"`, or `"0.spin"` / `"1.spin"` after grouping).
-Coupling factories currently use the default conventional names; an explicit
-`dof=` argument is deferred to issue #152.
+- C++ `GroupedSite` / `group_sites` (abelian only via `AbelianLegPipe`): physical leg is a
+  pipe; onsite ops are Kronecker-embedded as `opname + label` (e.g. `Sz0`); child DOFs are
+  registered under `"{label}.{kind}"` with dense arrays embedded into the grouped dim.
+- `symmetry_combine`: `'same'` | `'drop'` | `'independent'`. For mismatched site types, call
+  C++ `set_common_symmetry` first, then `GroupedSite(..., symmetry_combine='same')`.
+- Spin coupling factories take optional `dof=` (default `"spin"` / per-site `"spin"`) so
+  grouped multi-spin sites can target `"0.spin"` / `"1.spin"`.
 
-## Common symmetry (#153) before grouping (#152)
+## Common symmetry (#153)
 
-`lasyten.models.sites.set_common_symmetry` (plus `Site.change_leg`) remaps a list of
-sites onto one shared product symmetry (`by_name` / `same`, `independent`, `drop`,
-or an explicit sector map). Issue #152 `GroupedSite` / `group_sites` should call the
-same combine modes (or reuse this helper) so piped legs share a symmetry before
-`ElementarySpace.from_independent_symmetries` / operator `outer`.
+C++ `set_common_symmetry` (pybind-exported; re-exported from `lasyten.models.sites`) remaps a
+list of sites onto one shared product symmetry (`by_name` / `same`, `independent`, `drop`,
+callable, or explicit linear-combo list), via `Site.change_leg`.
+
+Non-abelian grouping (general `LegPipe` as `Site.leg`) remains deferred.

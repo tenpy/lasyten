@@ -420,6 +420,71 @@ bind_models_degrees_of_freedom(py::module_& m)
       .def_static("creation_annihilation_ops",
                   &FermionicDOF::creation_annihilation_ops,
                   py::arg("num_species"));
+
+    m.def(
+      "set_common_symmetry",
+      [](py::sequence sites_obj, py::object symmetry_combine, py::object new_symmetry_obj) {
+          std::vector<Site::Ptr> sites;
+          sites.reserve(static_cast<std::size_t>(py::len(sites_obj)));
+          for (py::handle item : sites_obj) {
+              sites.push_back(item.cast<Site::Ptr>());
+          }
+          Symmetry::Ptr new_symmetry;
+          if (!new_symmetry_obj.is_none()) {
+              new_symmetry = new_symmetry_obj.cast<Symmetry::Ptr>();
+          }
+
+          if (py::isinstance<py::str>(symmetry_combine)) {
+              set_common_symmetry(sites, symmetry_combine.cast<std::string>(), new_symmetry);
+              return;
+          }
+          if (py::isinstance<py::list>(symmetry_combine) ||
+              py::isinstance<py::tuple>(symmetry_combine)) {
+              CommonSymmetryComboSpec spec;
+              for (py::handle col_obj : symmetry_combine) {
+                  CommonSymmetryComboColumn col;
+                  for (py::handle term_obj : col_obj) {
+                      py::tuple term = term_obj.cast<py::tuple>();
+                      if (term.size() != 3) {
+                          throw py::value_error(
+                            "symmetry_combine terms must be (prefactor, site_idx, old_col_idx)");
+                      }
+                      col.emplace_back(
+                        term[0].cast<float64>(), term[1].cast<int64>(), term[2].cast<int64>());
+                  }
+                  spec.push_back(std::move(col));
+              }
+              set_common_symmetry(sites, spec, new_symmetry);
+              return;
+          }
+          if (py::isinstance<py::function>(symmetry_combine) ||
+              py::hasattr(symmetry_combine, "__call__")) {
+              py::object fn = symmetry_combine;
+              SiteSectorMapFn map = [fn](int64 site_idx, SectorArray const& old_sectors) {
+                  return fn(site_idx, old_sectors).cast<SectorArray>();
+              };
+              set_common_symmetry(sites, std::move(map), new_symmetry);
+              return;
+          }
+          throw py::type_error("symmetry_combine must be str, callable, or list; got " +
+                               py::str(py::type::of(symmetry_combine)).cast<std::string>());
+      },
+      py::arg("sites"),
+      py::arg("symmetry_combine") = "by_name",
+      py::arg("new_symmetry") = py::none(),
+      doc_cpp_ref(
+        R"pydoc(Adjust the symmetries of the given sites *in place* so they can be used together.
+
+Parameters
+----------
+sites
+    Sites to combine. Modified **in place**; the same object must not appear twice.
+symmetry_combine : ``'by_name'`` | ``'same'`` | ``'drop'`` | ``'independent'`` | callable | list
+    How the common symmetry is built from the individual ones.
+new_symmetry
+    Required for callable / list modes; ignored for the string presets.
+)pydoc",
+        "lasyten::set_common_symmetry()"));
 }
 
 } // namespace lasyten

@@ -11,12 +11,14 @@
 #include <lasyten/tensors/symmetric_tensor.h>
 
 #include <format>
+#include <functional>
 #include <lasyten/tools/hdf5.h>
 #include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -512,5 +514,30 @@ class FermionicDOF : public OccupationDOF
 };
 
 [[nodiscard]] py::array as_immutable_array(py::object a, py::object dtype = py::none());
+
+/// Sector map with an explicit site index (callable mode of `set_common_symmetry`).
+using SiteSectorMapFn = std::function<SectorArray(int64 site_idx, SectorArray const& old_sectors)>;
+
+/// One new sector column as a sum of ``(prefactor, site_idx, old_col_idx)`` terms.
+using CommonSymmetryComboColumn = std::vector<std::tuple<float64, int64, int64>>;
+/// Explicit linear-combination mode of `set_common_symmetry` (TeNPy v1 style).
+using CommonSymmetryComboSpec = std::vector<CommonSymmetryComboColumn>;
+
+/// Adjust site symmetries in place so the sites can be used together.
+///
+/// String presets: ``"by_name"`` / ``"same"``, ``"independent"``, ``"drop"``.
+/// For more complex remaps, use the callable or linear-combo overloads with an explicit
+/// `new_symmetry`. See also issue #153 / TeNPy v1 ``set_common_charges``.
+void set_common_symmetry(std::vector<Site::Ptr> const& sites,
+                         std::string const& symmetry_combine = "by_name",
+                         Symmetry::Ptr new_symmetry = nullptr);
+
+void set_common_symmetry(std::vector<Site::Ptr> const& sites,
+                         SiteSectorMapFn sector_map,
+                         Symmetry::Ptr new_symmetry);
+
+void set_common_symmetry(std::vector<Site::Ptr> const& sites,
+                         CommonSymmetryComboSpec const& symmetry_combine,
+                         Symmetry::Ptr new_symmetry);
 
 } // namespace lasyten

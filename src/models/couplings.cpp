@@ -933,6 +933,26 @@ Coupling::repr() const
       "Coupling(name={}, sites=[{}], shapes=[{}])", name_repr, site_names, shapes);
 }
 
+namespace {
+
+std::vector<std::string>
+normalize_spin_dofs(std::vector<std::string> dof, std::size_t n)
+{
+    if (dof.empty()) {
+        return std::vector<std::string>(n, DOF_SPIN);
+    }
+    if (dof.size() == 1 && n > 1) {
+        return std::vector<std::string>(n, dof[0]);
+    }
+    if (dof.size() != n) {
+        throw std::invalid_argument(
+          std::format("dof: expected {} name(s), got {}", n, dof.size()));
+    }
+    return dof;
+}
+
+} // namespace
+
 Coupling
 spin_spin_coupling(std::vector<Site::Ptr> sites,
                    float64 Jx,
@@ -942,14 +962,13 @@ spin_spin_coupling(std::vector<Site::Ptr> sites,
                    complex128 Jpp,
                    complex128 Jmp,
                    complex128 Jpm,
-                   complex128 Jmm)
+                   complex128 Jmm,
+                   std::vector<std::string> dof)
 {
     check_site_count(sites, 2);
-    auto spin0 = sites[0]->get_spin();
-    auto spin1 = sites[1]->get_spin();
-    if (!spin0 || !spin1) {
-        throw std::invalid_argument("spin_spin_coupling requires SpinDOF sites");
-    }
+    dof = normalize_spin_dofs(std::move(dof), 2);
+    auto spin0 = sites[0]->require_spin(dof[0]);
+    auto spin1 = sites[1]->require_spin(dof[1]);
     auto np = numpy();
     py::object h = np.attr("zeros")(py::make_tuple(
       site_dim(sites[0]), site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1])));
@@ -997,13 +1016,11 @@ spin_field_coupling(std::vector<Site::Ptr> sites,
                     float64 hx,
                     float64 hy,
                     float64 hz,
-                    std::optional<std::string> name)
+                    std::optional<std::string> name,
+                    std::string dof)
 {
     check_site_count(sites, 1);
-    auto spin = sites[0]->get_spin();
-    if (!spin) {
-        throw std::invalid_argument("spin_field_coupling requires SpinDOF sites");
-    }
+    auto spin = sites[0]->require_spin(dof);
     auto np = numpy();
     py::object h = np.attr("zeros")(py::make_tuple(site_dim(sites[0]), site_dim(sites[0])));
     if (hx != 0.) {
@@ -1028,14 +1045,15 @@ spin_field_coupling(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-aklt_coupling(std::vector<Site::Ptr> sites, float64 J, std::optional<std::string> name)
+aklt_coupling(std::vector<Site::Ptr> sites,
+              float64 J,
+              std::optional<std::string> name,
+              std::vector<std::string> dof)
 {
     check_site_count(sites, 2);
-    auto spin0 = sites[0]->get_spin();
-    auto spin1 = sites[1]->get_spin();
-    if (!spin0 || !spin1) {
-        throw std::invalid_argument("aklt_coupling requires SpinDOF sites");
-    }
+    dof = normalize_spin_dofs(std::move(dof), 2);
+    auto spin0 = sites[0]->require_spin(dof[0]);
+    auto spin1 = sites[1]->require_spin(dof[1]);
     auto np = numpy();
     py::object S_dot_S =
       np.attr("tensordot")(spin0->spin_vector,
@@ -1050,21 +1068,26 @@ aklt_coupling(std::vector<Site::Ptr> sites, float64 J, std::optional<std::string
 }
 
 Coupling
-heisenberg_coupling(std::vector<Site::Ptr> sites, float64 J, std::optional<std::string> name)
+heisenberg_coupling(std::vector<Site::Ptr> sites,
+                    float64 J,
+                    std::optional<std::string> name,
+                    std::vector<std::string> dof)
 {
-    return spin_spin_coupling(sites, J, J, J, name.value_or("S.S"));
+    return spin_spin_coupling(
+      sites, J, J, J, name.value_or("S.S"), {}, {}, {}, {}, std::move(dof));
 }
 
 Coupling
-chiral_3spin_coupling(std::vector<Site::Ptr> sites, float64 chi, std::optional<std::string> name)
+chiral_3spin_coupling(std::vector<Site::Ptr> sites,
+                      float64 chi,
+                      std::optional<std::string> name,
+                      std::vector<std::string> dof)
 {
     check_site_count(sites, 3);
-    auto spin0 = sites[0]->get_spin();
-    auto spin1 = sites[1]->get_spin();
-    auto spin2 = sites[2]->get_spin();
-    if (!spin0 || !spin1 || !spin2) {
-        throw std::invalid_argument("chiral_3spin_coupling requires SpinDOF sites");
-    }
+    dof = normalize_spin_dofs(std::move(dof), 3);
+    auto spin0 = sites[0]->require_spin(dof[0]);
+    auto spin1 = sites[1]->require_spin(dof[1]);
+    auto spin2 = sites[2]->require_spin(dof[2]);
     auto np = numpy();
     py::object SxS = np.attr("cross")(
       spin1->spin_vector.attr("__getitem__")(

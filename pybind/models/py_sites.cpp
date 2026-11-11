@@ -6,6 +6,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace lasyten {
 
@@ -164,6 +165,33 @@ bind_models_sites(py::module_& m)
            py::arg("default_device") = py::none())
       .def_readwrite("k", &SU2kSpin1Site::k)
       .def("__repr__", &SU2kSpin1Site::repr);
+
+    py::class_<GroupedSite, Site, py::smart_holder> grouped_site(m, "GroupedSite");
+    grouped_site.doc() = DOC(lasyten, GroupedSite);
+
+    grouped_site
+      .def(
+        py::init<std::vector<Site::Ptr>, std::optional<std::vector<std::string>>, std::string>(),
+        py::arg("sites"),
+        py::arg("labels") = py::none(),
+        py::arg("symmetry_combine") = "same")
+      .def_readwrite("n_sites", &GroupedSite::n_sites)
+      .def_readwrite("sites", &GroupedSite::sites)
+      .def_readwrite("labels", &GroupedSite::labels)
+      .def_readwrite("symmetry_combine", &GroupedSite::symmetry_combine)
+      .def("kroneckerproduct",
+           &GroupedSite::kroneckerproduct,
+           py::arg("ops"),
+           DOC(lasyten, GroupedSite, kroneckerproduct))
+      .def("__repr__", &GroupedSite::repr);
+
+    m.def("group_sites",
+          &group_sites,
+          py::arg("sites"),
+          py::arg("n") = 2,
+          py::arg("labels") = py::none(),
+          py::arg("symmetry_combine") = "same",
+          DOC(lasyten, group_sites));
 }
 
 } // namespace lasyten

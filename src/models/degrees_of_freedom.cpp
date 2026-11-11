@@ -22,6 +22,7 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <format>
 #include <functional>
 #include <hdf5_io/constants.h>
@@ -382,9 +383,18 @@ Site::Site(ElementarySpace::Ptr leg,
       this->state_labels, static_cast<int64>(dim()), this->symmetry()->can_be_dropped());
     auto const sym = leg_symmetry(this->leg);
     Dtype id_dtype = sym->has_complex_topological_data ? Dtype::Complex128 : Dtype::Float64;
-    add_onsite_operator("Id",
-                        py::cast(Identity::from_eye(
-                          this->leg, this->backend, pp_labels(), id_dtype, this->default_device)));
+    // Identity / DiagonalTensor are not defined on LegPipes (e.g. GroupedSite).
+    if (std::dynamic_pointer_cast<LegPipe>(this->leg)) {
+        auto tp = product_of_leg(this->leg);
+        add_onsite_operator("Id",
+                            py::cast(SymmetricTensor::from_eye(
+                              tp, this->backend, pp_labels(), id_dtype, this->default_device)));
+    } else {
+        add_onsite_operator(
+          "Id",
+          py::cast(Identity::from_eye(
+            this->leg, this->backend, pp_labels(), id_dtype, this->default_device)));
+    }
     add_onsite_operators_from_map(*this, onsite_operators);
 }
 
@@ -534,8 +544,15 @@ Site::change_leg(ElementarySpace::Ptr new_leg)
 
     auto const sym = leg_symmetry(leg);
     Dtype id_dtype = sym->has_complex_topological_data ? Dtype::Complex128 : Dtype::Float64;
-    add_onsite_operator(
-      "Id", py::cast(Identity::from_eye(leg, backend, pp_labels(), id_dtype, default_device)));
+    if (std::dynamic_pointer_cast<LegPipe>(leg)) {
+        auto tp = product_of_leg(leg);
+        add_onsite_operator(
+          "Id",
+          py::cast(SymmetricTensor::from_eye(tp, backend, pp_labels(), id_dtype, default_device)));
+    } else {
+        add_onsite_operator(
+          "Id", py::cast(Identity::from_eye(leg, backend, pp_labels(), id_dtype, default_device)));
+    }
 
     std::vector<std::variant<int64, std::string>> const pp{ "p", "p*" };
     for (auto& [name, op] : old_ops) {
@@ -1650,6 +1667,256 @@ as_immutable_array(py::object a, py::object dtype)
     py::object arr = dtype.is_none() ? np.attr("asarray")(a) : np.attr("asarray")(a, dtype);
     arr.attr("setflags")(py::arg("write") = false);
     return arr.cast<py::array>();
+}
+
+namespace {
+
+void
+check_unique_site_objects(std::vector<Site::Ptr> const& sites)
+{
+    for (std::size_t i = 0; i < sites.size(); ++i) {
+        if (!sites[i]) {
+            throw std::invalid_argument("set_common_symmetry: sites must not contain null");
+        }
+        for (std::size_t j = i + 1; j < sites.size(); ++j) {
+            if (sites[j].get() == sites[i].get()) {
+                throw std::invalid_argument(
+                  "`sites` contains the same object multiple times. Make copies!");
+            }
+        }
+    }
+}
+
+Symmetry::Ptr
+symmetry_from_factor_list(std::vector<SymmetryFactor::Ptr> factors)
+{
+    if (factors.empty()) {
+        return std::make_shared<Symmetry>(
+          std::vector<SymmetryFactor::Ptr>{ std::make_shared<NoSymmetry>() });
+    }
+    return std::make_shared<Symmetry>(std::move(factors));
+}
+
+ElementarySpace::Ptr
+as_elementary_space(Space::Ptr space)
+{
+    auto leg = std::dynamic_pointer_cast<ElementarySpace>(space);
+    if (!leg) {
+        throw std::invalid_argument("Expected an ElementarySpace after change_symmetry/drop");
+    }
+    return leg;
+}
+
+void
+copy_sector_slice(Sector& dst, Sector const& src, int dst_start, int src_start, int width)
+{
+    for (int k = 0; k < width; ++k) {
+        dst[static_cast<std::size_t>(dst_start + k)] =
+          src[static_cast<std::size_t>(src_start + k)];
+    }
+}
+
+SectorArray
+embed_sector_slices(SectorArray const& old_sectors,
+                    Sector const& trivial,
+                    std::vector<std::pair<std::pair<int, int>, std::pair<int, int>>> const& slices)
+{
+    auto mapped = SectorArray::repeat(trivial, old_sectors.size());
+    for (std::size_t r = 0; r < old_sectors.size(); ++r) {
+        for (auto const& [dst, src] : slices) {
+            auto const width = dst.second - dst.first;
+            copy_sector_slice(mapped[r], old_sectors[r], dst.first, src.first, width);
+        }
+    }
+    return mapped;
+}
+
+void
+set_common_symmetry_by_name(std::vector<Site::Ptr> const& sites)
+{
+    std::vector<SymmetryFactor::Ptr> factors;
+    std::vector<std::vector<std::pair<int64, std::pair<int, int>>>> sites_and_slices;
+
+    for (int64 i = 0; static_cast<std::size_t>(i) < sites.size(); ++i) {
+        auto const& sym = *sites[static_cast<std::size_t>(i)]->leg->Space::symmetry;
+        for (std::size_t n = 0; n < sym.factors.size(); ++n) {
+            auto const& f = sym.factors[n];
+            std::pair<int, int> slc{ static_cast<int>(sym.sector_slices[n]),
+                                     static_cast<int>(sym.sector_slices[n + 1]) };
+            std::optional<std::size_t> found;
+            for (std::size_t k = 0; k < factors.size(); ++k) {
+                if (factors[k]->equals(*f)) {
+                    found = k;
+                    break;
+                }
+            }
+            if (found) {
+                sites_and_slices[*found].emplace_back(i, slc);
+            } else {
+                factors.push_back(f);
+                sites_and_slices.push_back({ { i, slc } });
+            }
+        }
+    }
+
+    auto new_symmetry = symmetry_from_factor_list(factors);
+    std::vector<std::pair<int, int>> new_slices;
+    new_slices.reserve(factors.size());
+    for (std::size_t n = 0; n < factors.size(); ++n) {
+        new_slices.emplace_back(static_cast<int>(new_symmetry->sector_slices[n]),
+                                static_cast<int>(new_symmetry->sector_slices[n + 1]));
+    }
+
+    for (int64 i = 0; static_cast<std::size_t>(i) < sites.size(); ++i) {
+        std::vector<std::pair<std::pair<int, int>, std::pair<int, int>>> slice_tuples;
+        for (std::size_t n = 0; n < factors.size(); ++n) {
+            for (auto const& [j, slc] : sites_and_slices[n]) {
+                if (j == i) {
+                    slice_tuples.emplace_back(new_slices[n], slc);
+                }
+            }
+        }
+        Sector const trivial = new_symmetry->trivial_sector;
+        SectorMapFn sector_map = [slice_tuples, trivial](SectorArray const& s) {
+            return embed_sector_slices(s, trivial, slice_tuples);
+        };
+        auto& site = *sites[static_cast<std::size_t>(i)];
+        site.change_leg(as_elementary_space(site.leg->change_symmetry(new_symmetry, sector_map)));
+    }
+}
+
+void
+set_common_symmetry_independent(std::vector<Site::Ptr> const& sites)
+{
+    std::vector<SymmetryFactor::Ptr> factors;
+    std::vector<std::vector<std::pair<int, int>>> kept_slices_per_site;
+    kept_slices_per_site.reserve(sites.size());
+
+    for (auto const& site : sites) {
+        auto const& sym = *site->leg->Space::symmetry;
+        std::vector<std::pair<int, int>> kept;
+        for (std::size_t n = 0; n < sym.factors.size(); ++n) {
+            auto const& f = sym.factors[n];
+            if (dynamic_cast<NoSymmetry const*>(f.get()) != nullptr) {
+                continue;
+            }
+            factors.push_back(f);
+            kept.emplace_back(static_cast<int>(sym.sector_slices[n]),
+                              static_cast<int>(sym.sector_slices[n + 1]));
+        }
+        kept_slices_per_site.push_back(std::move(kept));
+    }
+
+    auto new_symmetry = symmetry_from_factor_list(factors);
+    Sector const trivial = new_symmetry->trivial_sector;
+    int start = 0;
+    for (std::size_t si = 0; si < sites.size(); ++si) {
+        auto const& kept = kept_slices_per_site[si];
+        int ind_len = 0;
+        for (auto const& slc : kept) {
+            ind_len += slc.second - slc.first;
+        }
+        std::vector<std::pair<std::pair<int, int>, std::pair<int, int>>> slice_tuples;
+        int col = start;
+        for (auto const& slc : kept) {
+            int width = slc.second - slc.first;
+            slice_tuples.emplace_back(std::pair{ col, col + width }, slc);
+            col += width;
+        }
+        SectorMapFn sector_map = [slice_tuples, trivial](SectorArray const& s) {
+            return embed_sector_slices(s, trivial, slice_tuples);
+        };
+        auto& site = *sites[si];
+        site.change_leg(as_elementary_space(site.leg->change_symmetry(new_symmetry, sector_map)));
+        start += ind_len;
+    }
+}
+
+} // namespace
+
+void
+set_common_symmetry(std::vector<Site::Ptr> const& sites,
+                    std::string const& symmetry_combine,
+                    Symmetry::Ptr new_symmetry)
+{
+    check_unique_site_objects(sites);
+    (void)new_symmetry; // ignored for string presets (matches Python / cyten)
+    if (symmetry_combine == "by_name" || symmetry_combine == "same") {
+        set_common_symmetry_by_name(sites);
+        return;
+    }
+    if (symmetry_combine == "drop") {
+        for (auto const& site : sites) {
+            site->change_leg(as_elementary_space(site->leg->drop_symmetry()));
+        }
+        return;
+    }
+    if (symmetry_combine == "independent") {
+        set_common_symmetry_independent(sites);
+        return;
+    }
+    throw std::invalid_argument(
+      std::format("Unknown symmetry_combine keyword: \"{}\"", symmetry_combine));
+}
+
+void
+set_common_symmetry(std::vector<Site::Ptr> const& sites,
+                    SiteSectorMapFn sector_map,
+                    Symmetry::Ptr new_symmetry)
+{
+    check_unique_site_objects(sites);
+    if (!new_symmetry) {
+        throw std::invalid_argument("Need to specify new_symmetry");
+    }
+    if (!sector_map) {
+        throw std::invalid_argument("sector_map must be callable");
+    }
+    for (int64 i = 0; static_cast<std::size_t>(i) < sites.size(); ++i) {
+        auto& site = *sites[static_cast<std::size_t>(i)];
+        SectorMapFn map = [sector_map, i](SectorArray const& s) { return sector_map(i, s); };
+        site.change_leg(as_elementary_space(site.leg->change_symmetry(new_symmetry, map)));
+    }
+}
+
+void
+set_common_symmetry(std::vector<Site::Ptr> const& sites,
+                    CommonSymmetryComboSpec const& symmetry_combine,
+                    Symmetry::Ptr new_symmetry)
+{
+    if (symmetry_combine.empty()) {
+        throw std::invalid_argument("symmetry_combine list must be non-empty");
+    }
+    SiteSectorMapFn map = [symmetry_combine](int64 site_idx,
+                                             SectorArray const& old_sectors) -> SectorArray {
+        auto const n = old_sectors.size();
+        auto const q = static_cast<std::uint8_t>(symmetry_combine.size());
+        SectorArray out(n, q);
+        for (std::size_t col = 0; col < symmetry_combine.size(); ++col) {
+            for (std::size_t r = 0; r < n; ++r) {
+                double acc = 0.;
+                for (auto const& [factor, i, col_idx] : symmetry_combine[col]) {
+                    if (i != site_idx) {
+                        continue;
+                    }
+                    if (col_idx < 0 ||
+                        static_cast<std::size_t>(col_idx) >= old_sectors.sector_ind_len()) {
+                        throw std::invalid_argument(
+                          "old_col_idx out of range in symmetry_combine");
+                    }
+                    acc += factor *
+                           static_cast<double>(old_sectors[r][static_cast<std::size_t>(col_idx)]);
+                }
+                auto rounded = std::llround(acc);
+                if (std::abs(acc - static_cast<double>(rounded)) > 1e-5) {
+                    throw std::invalid_argument(
+                      std::format("Sectors must have integer entries. Got {}", acc));
+                }
+                out[r][col] = static_cast<int16_t>(rounded);
+            }
+        }
+        return out;
+    };
+    set_common_symmetry(sites, std::move(map), std::move(new_symmetry));
 }
 
 } // namespace lasyten

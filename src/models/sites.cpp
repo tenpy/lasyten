@@ -12,14 +12,20 @@
 #include <lasyten/symmetries/sector_numpy.h>
 #include <lasyten/symmetries/spaces.h>
 #include <lasyten/symmetries/symmetry.h>
+#include <lasyten/tensors/diagonal_tensor.h>
+#include <lasyten/tensors/ops_algebra.h>
+#include <lasyten/tensors/ops_legs.h>
 #include <lasyten/tensors/symmetric_tensor.h>
 #include <lasyten/tools.h>
 
 #include <cmath>
 #include <format>
+#include <functional>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+#include <variant>
 
 namespace lasyten {
 
@@ -1323,6 +1329,442 @@ SU2kSpin1Site::hdf5_init_kwargs() const
     py::dict d = hdf5_backend_kwargs();
     d["k"] = k;
     return d;
+}
+
+namespace {
+
+ElementarySpace::Ptr
+as_es(Space::Ptr space)
+{
+    auto leg = std::dynamic_pointer_cast<ElementarySpace>(space);
+    if (!leg) {
+        throw std::invalid_argument("GroupedSite: expected ElementarySpace");
+    }
+    return leg;
+}
+
+std::vector<std::variant<int64, std::string>> const kPpLabels{ "p", "p*" };
+
+OptionalLabels
+pp_optional_labels()
+{
+    return OptionalLabels{ "p", "p*" };
+}
+
+Site::Ptr
+clone_site_same_leg(Site const& site)
+{
+    auto cloned = std::make_shared<Site>(site.leg,
+                                         site.state_labels,
+                                         std::map<std::string, SymmetricTensorPtr>{},
+                                         site.backend,
+                                         site.default_device);
+    for (auto const& [name, op] : site.onsite_operators) {
+        if (name == "Id") {
+            continue;
+        }
+        bool const is_diag = static_cast<bool>(std::dynamic_pointer_cast<DiagonalTensor>(op));
+        py::array dense = op->to_numpy(kPpLabels, py::none(), true);
+        cloned->add_onsite_operator(name, dense, is_diag, true, std::nullopt);
+    }
+    cloned->hc_ops = site.hc_ops;
+    for (auto const& [name, dof] : site.dofs) {
+        if (auto spin = std::dynamic_pointer_cast<SpinDOF>(dof)) {
+            cloned->set_dof(name, std::make_shared<SpinDOF>(cloned->leg, spin->spin_vector));
+        } else if (auto clock = std::dynamic_pointer_cast<ClockDOF>(dof)) {
+            cloned->set_dof(name, std::make_shared<ClockDOF>(cloned->leg, clock->clock_operators));
+        } else if (auto anyon = std::dynamic_pointer_cast<AnyonDOF>(dof)) {
+            cloned->set_dof(name, std::make_shared<AnyonDOF>(cloned->leg, anyon->sector_names));
+        } else if (auto ferm = std::dynamic_pointer_cast<FermionicDOF>(dof)) {
+            auto copy = std::make_shared<FermionicDOF>(
+              cloned->leg, ferm->creators, ferm->annihilators, ferm->species_names);
+            copy->partial_JWs = ferm->partial_JWs;
+            copy->JW = ferm->JW;
+            cloned->set_dof(name, std::move(copy));
+        } else if (auto bos = std::dynamic_pointer_cast<BosonicDOF>(dof)) {
+            auto copy = std::make_shared<BosonicDOF>(
+              cloned->leg, bos->Nmax, bos->creators, bos->annihilators, bos->species_names);
+            copy->JW = bos->JW;
+            cloned->set_dof(name, std::move(copy));
+        }
+    }
+    return cloned;
+}
+
+Site::Ptr
+clone_site_with_leg(Site const& site, ElementarySpace::Ptr new_leg)
+{
+    auto cloned = clone_site_same_leg(site);
+    cloned->change_leg(std::move(new_leg));
+    return cloned;
+}
+
+py::array
+numpy_eye(int64 dim)
+{
+    return numpy_module().attr("eye")(dim);
+}
+
+py::array
+kron_embed_matrix(py::array mat, int64 site_idx, std::vector<int64> const& dims)
+{
+    auto np = numpy_module();
+    int64 left = 1;
+    for (int64 i = 0; i < site_idx; ++i) {
+        left *= dims[static_cast<std::size_t>(i)];
+    }
+    int64 right = 1;
+    for (std::size_t i = static_cast<std::size_t>(site_idx) + 1; i < dims.size(); ++i) {
+        right *= dims[i];
+    }
+    py::object out = mat;
+    if (left > 1) {
+        out = np.attr("kron")(numpy_eye(left), out);
+    }
+    if (right > 1) {
+        out = np.attr("kron")(out, numpy_eye(right));
+    }
+    return as_immutable_array(out);
+}
+
+py::array
+kron_embed_stack3(py::array stack, int64 site_idx, std::vector<int64> const& dims)
+{
+    auto np = numpy_module();
+    py::ssize_t n_ops = stack.attr("shape").attr("__getitem__")(2).cast<py::ssize_t>();
+    py::list mats;
+    for (py::ssize_t a = 0; a < n_ops; ++a) {
+        py::array mat = stack.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), a));
+        mats.append(kron_embed_matrix(mat, site_idx, dims));
+    }
+    return as_immutable_array(np.attr("stack")(mats, py::arg("axis") = 2));
+}
+
+std::map<std::string, int64>
+combined_state_labels(std::vector<Site::Ptr> const& working,
+                      std::vector<std::string> const& labels,
+                      AbelianLegPipe const& pipe)
+{
+    std::map<std::string, int64> out;
+    if (working.empty()) {
+        return out;
+    }
+    for (auto const& s : working) {
+        if (s->state_labels.empty()) {
+            return out; // product over empty → no labels
+        }
+    }
+    std::vector<int64> dims;
+    dims.reserve(working.size());
+    for (auto const& s : working) {
+        dims.push_back(static_cast<int64>(s->dim()));
+    }
+    std::vector<int64> strides(dims.size(), 1);
+    for (std::ptrdiff_t i = static_cast<std::ptrdiff_t>(dims.size()) - 2; i >= 0; --i) {
+        strides[static_cast<std::size_t>(i)] =
+          strides[static_cast<std::size_t>(i + 1)] * dims[static_cast<std::size_t>(i + 1)];
+    }
+    auto perm = pipe.basis_perm();
+
+    // Nested iteration over state_labels of each site via recursive lambda.
+    std::vector<std::pair<std::string, int64>> chosen;
+    chosen.reserve(working.size());
+    std::function<void(std::size_t)> rec = [&](std::size_t site_i) {
+        if (site_i == working.size()) {
+            int64 pipe_idx = 0;
+            std::ostringstream name;
+            for (std::size_t i = 0; i < chosen.size(); ++i) {
+                pipe_idx += chosen[i].second * strides[i];
+                if (i > 0) {
+                    name << ' ';
+                }
+                name << chosen[i].first << '_' << labels[i];
+            }
+            int64 mapped = pipe_idx;
+            if (!perm.empty()) {
+                mapped = perm[static_cast<std::size_t>(pipe_idx)];
+            }
+            out[name.str()] = mapped;
+            return;
+        }
+        for (auto const& [lbl, idx] : working[site_i]->state_labels) {
+            chosen.emplace_back(lbl, idx);
+            rec(site_i + 1);
+            chosen.pop_back();
+        }
+    };
+    rec(0);
+    return out;
+}
+
+} // namespace
+
+GroupedSite::Prepared
+GroupedSite::prepare(std::vector<Site::Ptr> sites,
+                     std::optional<std::vector<std::string>> labels_opt,
+                     std::string symmetry_combine)
+{
+    if (sites.empty()) {
+        throw std::invalid_argument("GroupedSite: need at least one site");
+    }
+    for (auto const& s : sites) {
+        if (!s) {
+            throw std::invalid_argument("GroupedSite: sites must not contain null");
+        }
+    }
+    auto const n = static_cast<int64>(sites.size());
+    std::vector<std::string> labels;
+    if (labels_opt) {
+        labels = *labels_opt;
+        if (static_cast<int64>(labels.size()) != n) {
+            throw std::invalid_argument("GroupedSite: labels length must match number of sites");
+        }
+    } else {
+        labels.reserve(static_cast<std::size_t>(n));
+        for (int64 i = 0; i < n; ++i) {
+            labels.push_back(std::to_string(i));
+        }
+    }
+
+    auto backend = sites[0]->backend;
+    auto device = sites[0]->default_device;
+    for (auto const& s : sites) {
+        if (s->backend.get() != backend.get()) {
+            throw std::invalid_argument("GroupedSite: all sites must share the same backend");
+        }
+    }
+
+    std::vector<Site::Ptr> working;
+    working.reserve(sites.size());
+    std::vector<ElementarySpace::Ptr> legs;
+
+    if (symmetry_combine == "same") {
+        auto const& sym0 = *sites[0]->symmetry();
+        for (auto const& s : sites) {
+            if (!s->symmetry()->is_equivalent_to(sym0, /*strict_ordering=*/true)) {
+                throw std::invalid_argument(
+                  "GroupedSite(symmetry_combine='same'): sites must share equivalent symmetries; "
+                  "call set_common_symmetry first");
+            }
+            if (!s->symmetry()->is_abelian()) {
+                throw std::invalid_argument("GroupedSite: only abelian symmetries are supported");
+            }
+            working.push_back(s);
+            legs.push_back(s->leg);
+        }
+    } else if (symmetry_combine == "drop") {
+        for (auto const& s : sites) {
+            auto new_leg = as_es(s->leg->drop_symmetry());
+            working.push_back(clone_site_with_leg(*s, new_leg));
+            legs.push_back(working.back()->leg);
+        }
+    } else if (symmetry_combine == "independent") {
+        std::vector<Symmetry::Ptr> all_symmetries;
+        all_symmetries.reserve(sites.size());
+        for (auto const& s : sites) {
+            if (!s->symmetry()->is_abelian()) {
+                throw std::invalid_argument("GroupedSite: only abelian symmetries are supported");
+            }
+            all_symmetries.push_back(s->symmetry());
+        }
+        for (std::size_t i = 0; i < sites.size(); ++i) {
+            std::vector<ElementarySpace::Ptr> independent_gradings;
+            independent_gradings.reserve(sites.size());
+            auto const dim_i = static_cast<int64>(sites[i]->dim());
+            for (std::size_t j = 0; j < sites.size(); ++j) {
+                if (j == i) {
+                    independent_gradings.push_back(sites[i]->leg);
+                } else {
+                    independent_gradings.push_back(
+                      ElementarySpace::from_trivial_sector(dim_i, all_symmetries[j]));
+                }
+            }
+            auto new_leg = ElementarySpace::from_independent_symmetries(independent_gradings);
+            working.push_back(clone_site_with_leg(*sites[i], new_leg));
+            legs.push_back(working.back()->leg);
+        }
+    } else {
+        throw std::invalid_argument(
+          std::format("Unknown option for symmetry_combine: {}", symmetry_combine));
+    }
+
+    auto pipe = std::make_shared<AbelianLegPipe>(legs, /*is_dual=*/false, /*combine_cstyle=*/true);
+    auto state_labels = combined_state_labels(working, labels, *pipe);
+    return Prepared{ std::move(pipe),   std::move(state_labels),     std::move(working),
+                     std::move(labels), std::move(symmetry_combine), std::move(backend),
+                     std::move(device) };
+}
+
+GroupedSite::GroupedSite(Prepared&& prepared)
+  : Site(prepared.pipe,
+         std::move(prepared.state_labels),
+         {},
+         prepared.backend,
+         prepared.default_device)
+  , n_sites(static_cast<int64>(prepared.working_sites.size()))
+  , sites(std::move(prepared.working_sites))
+  , labels(std::move(prepared.labels))
+  , symmetry_combine(std::move(prepared.symmetry_combine))
+{
+    add_kronecker_onsite_ops();
+    register_embedded_dofs();
+}
+
+GroupedSite::GroupedSite(std::vector<Site::Ptr> sites_,
+                         std::optional<std::vector<std::string>> labels_,
+                         std::string symmetry_combine_)
+  : GroupedSite(prepare(std::move(sites_), std::move(labels_), std::move(symmetry_combine_)))
+{
+}
+
+SymmetricTensorPtr
+GroupedSite::kroneckerproduct(std::vector<SymmetricTensorPtr> ops) const
+{
+    if (static_cast<int64>(ops.size()) != n_sites) {
+        throw std::invalid_argument("kroneckerproduct: need one operator per grouped site");
+    }
+    for (auto& op : ops) {
+        if (std::dynamic_pointer_cast<DiagonalTensor>(op)) {
+            op = op->as_SymmetricTensor();
+        }
+    }
+    TensorPtr tens = ops[0]->copy(/*deep=*/false);
+    tens->relabel({ { "p", "p0" }, { "p*", "p0*" } });
+    for (int64 i = 1; i < n_sites; ++i) {
+        std::map<std::string, std::string> relabel2{
+            { "p", std::format("p{}", i) },
+            { "p*", std::format("p{}*", i) },
+        };
+        tens = outer(tens, ops[static_cast<std::size_t>(i)], std::nullopt, relabel2);
+    }
+    std::vector<LegRef> cod;
+    std::vector<LegRef> dom;
+    cod.reserve(static_cast<std::size_t>(n_sites));
+    dom.reserve(static_cast<std::size_t>(n_sites));
+    for (int64 i = 0; i < n_sites; ++i) {
+        cod.emplace_back(std::format("p{}", i));
+    }
+    // Domain group is right-to-left in `tensor.legs` after `outer` (… p1*, p0*), so reverse
+    // site order. See `combine_legs` docs: first group entry is the right-most product factor.
+    for (int64 i = n_sites - 1; i >= 0; --i) {
+        dom.emplace_back(std::format("p{}*", i));
+    }
+    auto pipe = std::dynamic_pointer_cast<AbelianLegPipe>(leg);
+    if (!pipe) {
+        throw std::logic_error("GroupedSite.leg must be an AbelianLegPipe");
+    }
+    // Pipe dualities {false, true} match Site matrix convention: codomain/domain both store
+    // the non-dual `pipe` (public legs appear as pipe / pipe.dual).
+    auto combined = combine_legs(tens,
+                                 { std::move(cod), std::move(dom) },
+                                 PipeDualities{ std::vector<bool>{ false, true } },
+                                 std::vector<Leg::Ptr>{ pipe, pipe });
+    combined->set_labels(pp_optional_labels());
+    return std::dynamic_pointer_cast<SymmetricTensor>(combined);
+}
+
+void
+GroupedSite::add_kronecker_onsite_ops()
+{
+    std::vector<SymmetricTensorPtr> ids;
+    ids.reserve(static_cast<std::size_t>(n_sites));
+    for (auto const& s : sites) {
+        ids.push_back(s->onsite_operators.at("Id"));
+    }
+    for (int64 i = 0; i < n_sites; ++i) {
+        auto const& site = *sites[static_cast<std::size_t>(i)];
+        for (auto const& [name, op] : site.onsite_operators) {
+            if (name == "Id") {
+                continue;
+            }
+            auto ops = ids;
+            ops[static_cast<std::size_t>(i)] = op;
+            auto kron = kroneckerproduct(ops);
+            std::string new_name = name + labels[static_cast<std::size_t>(i)];
+            std::optional<std::string> hc;
+            auto hc_it = site.hc_ops.find(name);
+            if (hc_it != site.hc_ops.end()) {
+                hc = hc_it->second + labels[static_cast<std::size_t>(i)];
+            }
+            add_onsite_operator(new_name, py::cast(kron), std::nullopt, true, hc);
+        }
+    }
+}
+
+void
+GroupedSite::register_embedded_dofs()
+{
+    std::vector<int64> dims;
+    dims.reserve(static_cast<std::size_t>(n_sites));
+    for (auto const& s : sites) {
+        dims.push_back(static_cast<int64>(s->dim()));
+    }
+    for (int64 i = 0; i < n_sites; ++i) {
+        auto const& site = *sites[static_cast<std::size_t>(i)];
+        auto const& lbl = labels[static_cast<std::size_t>(i)];
+        for (auto const& [dof_name, dof] : site.dofs) {
+            std::string reg = std::format("{}.{}", lbl, dof_name);
+            if (auto spin = std::dynamic_pointer_cast<SpinDOF>(dof)) {
+                auto embedded = kron_embed_stack3(spin->spin_vector, i, dims);
+                set_dof(reg, std::make_shared<SpinDOF>(leg, embedded));
+            } else if (auto clock = std::dynamic_pointer_cast<ClockDOF>(dof)) {
+                auto embedded = kron_embed_stack3(clock->clock_operators, i, dims);
+                set_dof(reg, std::make_shared<ClockDOF>(leg, embedded));
+            } else if (auto anyon = std::dynamic_pointer_cast<AnyonDOF>(dof)) {
+                set_dof(reg, std::make_shared<AnyonDOF>(leg, anyon->sector_names));
+            } else if (auto ferm = std::dynamic_pointer_cast<FermionicDOF>(dof)) {
+                auto creators = kron_embed_stack3(ferm->creators, i, dims);
+                auto annihilators = kron_embed_stack3(ferm->annihilators, i, dims);
+                auto copy =
+                  std::make_shared<FermionicDOF>(leg, creators, annihilators, ferm->species_names);
+                copy->JW = kron_embed_matrix(ferm->JW, i, dims);
+                // partial_JWs: embed each species slice
+                copy->partial_JWs = kron_embed_stack3(ferm->partial_JWs, i, dims);
+                set_dof(reg, std::move(copy));
+            } else if (auto bos = std::dynamic_pointer_cast<BosonicDOF>(dof)) {
+                auto creators = kron_embed_stack3(bos->creators, i, dims);
+                auto annihilators = kron_embed_stack3(bos->annihilators, i, dims);
+                auto copy = std::make_shared<BosonicDOF>(
+                  leg, bos->Nmax, creators, annihilators, bos->species_names);
+                copy->JW = kron_embed_matrix(bos->JW, i, dims);
+                set_dof(reg, std::move(copy));
+            }
+        }
+    }
+}
+
+std::string
+GroupedSite::repr() const
+{
+    return std::format("GroupedSite(n_sites={}, symmetry_combine='{}', labels={})",
+                       n_sites,
+                       symmetry_combine,
+                       labels.size());
+}
+
+std::vector<GroupedSite::Ptr>
+group_sites(std::vector<Site::Ptr> const& sites,
+            int64 n,
+            std::optional<std::vector<std::string>> labels,
+            std::string symmetry_combine)
+{
+    if (n < 1) {
+        throw std::invalid_argument("group_sites: n must be >= 1");
+    }
+    std::vector<GroupedSite::Ptr> out;
+    for (std::size_t start = 0; start < sites.size(); start += static_cast<std::size_t>(n)) {
+        std::size_t stop = std::min(start + static_cast<std::size_t>(n), sites.size());
+        std::vector<Site::Ptr> chunk(sites.begin() + static_cast<std::ptrdiff_t>(start),
+                                     sites.begin() + static_cast<std::ptrdiff_t>(stop));
+        std::optional<std::vector<std::string>> chunk_labels;
+        if (labels) {
+            chunk_labels = std::vector<std::string>(
+              labels->begin(), labels->begin() + static_cast<std::ptrdiff_t>(chunk.size()));
+        }
+        out.push_back(
+          std::make_shared<GroupedSite>(std::move(chunk), chunk_labels, symmetry_combine));
+    }
+    return out;
 }
 
 } // namespace lasyten

@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace lasyten {
 
@@ -351,5 +352,59 @@ class SU2kSpin1Site : public Site
                   TensorBackend::Ptr backend,
                   std::optional<std::string> default_device);
 };
+
+/// Group several sites into one larger local Hilbert space (pipe physical leg).
+///
+/// Onsite operators of constituent site ``i`` are Kronecker-embedded as ``opname + labels[i]``.
+/// Degrees of freedom are registered under ``"{label}.{kind}"`` (e.g. ``"0.spin"``) with dense
+/// arrays embedded into the grouped dimension. Abelian symmetries only (``AbelianLegPipe``).
+///
+/// For ``symmetry_combine='same'``, constituents must already share a compatible symmetry
+/// (call `set_common_symmetry` first if needed). ``'drop'`` / ``'independent'`` clone and remap
+/// legs before piping; the caller's original sites are not mutated.
+class GroupedSite : public Site
+{
+  public:
+    using Ptr = std::shared_ptr<GroupedSite>;
+
+    int64 n_sites{};
+    std::vector<Site::Ptr> sites;
+    std::vector<std::string> labels;
+    std::string symmetry_combine;
+
+    GroupedSite(std::vector<Site::Ptr> sites,
+                std::optional<std::vector<std::string>> labels = std::nullopt,
+                std::string symmetry_combine = "same");
+
+    /// Kronecker product of one operator per ungrouped site (labels ``p``, ``p*``).
+    [[nodiscard]] SymmetricTensorPtr kroneckerproduct(std::vector<SymmetricTensorPtr> ops) const;
+
+    [[nodiscard]] std::string repr() const;
+
+  private:
+    struct Prepared
+    {
+        AbelianLegPipe::Ptr pipe;
+        std::map<std::string, int64> state_labels;
+        std::vector<Site::Ptr> working_sites;
+        std::vector<std::string> labels;
+        std::string symmetry_combine;
+        TensorBackend::Ptr backend;
+        std::string default_device;
+    };
+    static Prepared prepare(std::vector<Site::Ptr> sites,
+                            std::optional<std::vector<std::string>> labels,
+                            std::string symmetry_combine);
+    GroupedSite(Prepared&& prepared);
+    void add_kronecker_onsite_ops();
+    void register_embedded_dofs();
+};
+
+/// Group each ``n`` consecutive sites into a `GroupedSite`.
+[[nodiscard]] std::vector<GroupedSite::Ptr> group_sites(
+  std::vector<Site::Ptr> const& sites,
+  int64 n = 2,
+  std::optional<std::vector<std::string>> labels = std::nullopt,
+  std::string symmetry_combine = "same");
 
 } // namespace lasyten

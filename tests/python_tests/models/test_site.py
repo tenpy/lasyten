@@ -610,3 +610,79 @@ def test_set_common_symmetry_ferm_bos_combo(block_backend):
         npt.assert_equal(bos.onsite_operators[name].to_numpy(understood_braiding=True), op)
     ferm.test_sanity()
     bos.test_sanity()
+
+
+@pytest.mark.parametrize('symmetry_combine', ['same', 'drop', 'independent'])
+def test_grouped_site_spins(block_backend, symmetry_combine):
+    backend = backends.get_backend('abelian', block_backend=block_backend)
+    s0 = sites.SpinSite(0.5, 'Sz', backend=backend)
+    s1 = sites.SpinSite(0.5, 'Sz', backend=backend)
+
+    g = sites.GroupedSite([s0, s1], symmetry_combine=symmetry_combine)
+    g.test_sanity()
+    assert g.n_sites == 2
+    assert g.labels == ['0', '1']
+    assert 'Sz0' in g.onsite_operators
+    assert 'Sz1' in g.onsite_operators
+    assert '0.spin' in g.dofs
+    assert '1.spin' in g.dofs
+    assert g.spin is None
+    assert g.dofs['0.spin'].spin_vector.shape[0] == g.dim
+
+    # Ops match kroneckerproduct of the (possibly remapped) constituent sites.
+    ws = g.sites
+    expected0 = g.kroneckerproduct([ws[0].onsite_operators['Sz'], ws[1].onsite_operators['Id']])
+    expected1 = g.kroneckerproduct([ws[0].onsite_operators['Id'], ws[1].onsite_operators['Sz']])
+    assert lasyten.almost_equal(g.onsite_operators['Sz0'], expected0)
+    assert lasyten.almost_equal(g.onsite_operators['Sz1'], expected1)
+    assert 'up_0 down_1' in g.state_labels or 'down_0 up_1' in g.state_labels
+
+
+def test_group_sites_chunking(block_backend):
+    backend = backends.get_backend('abelian', block_backend=block_backend)
+    chain = [sites.SpinSite(0.5, 'Sz', backend=backend) for _ in range(5)]
+    grouped = sites.group_sites(chain, n=2, symmetry_combine='same')
+    assert len(grouped) == 3
+    assert grouped[0].n_sites == 2
+    assert grouped[1].n_sites == 2
+    assert grouped[2].n_sites == 1
+    for g in grouped:
+        g.test_sanity()
+
+
+def test_grouped_site_dof_coupling(block_backend):
+    from lasyten.models import couplings
+
+    backend = backends.get_backend('abelian', block_backend=block_backend)
+    s0 = sites.SpinSite(0.5, 'None', backend=backend)
+    s1 = sites.SpinSite(0.5, 'None', backend=backend)
+    g = sites.GroupedSite([s0, s1], symmetry_combine='same')
+    # On-site field on first embedded spin of a single grouped site
+    coup = couplings.spin_field_coupling([g], hx=1.0, dof='0.spin')
+    coup.test_sanity()
+    # Two-site heisenberg between two grouped sites' first spins
+    g2 = sites.GroupedSite(
+        [sites.SpinSite(0.5, 'None', backend=backend), sites.SpinSite(0.5, 'None', backend=backend)],
+        symmetry_combine='same',
+    )
+    coup2 = couplings.heisenberg_coupling([g, g2], J=1.0, dof=['0.spin', '0.spin'])
+    coup2.test_sanity()
+
+
+def test_grouped_site_after_set_common_symmetry(block_backend):
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    ferm = sites.SpinHalfFermionSite(conserve_N='N', conserve_S='Sz', backend=backend)
+    spin = sites.SpinSite(0.5, 'Sz', backend=backend)
+    sites.set_common_symmetry([ferm, spin], 'by_name')
+    g = sites.GroupedSite([ferm, spin], labels=['e', 'i'], symmetry_combine='same')
+    g.test_sanity()
+    assert g.n_sites == 2
+    assert 'e.spin' in g.dofs or 'e.occupation' in g.dofs
+
+
+def test_grouped_site_same_rejects_mismatched_symmetry(block_backend):
+    backend = backends.get_backend('abelian', block_backend=block_backend)
+    s0 = sites.SpinSite(0.5, 'Sz', backend=backend)
+    s1 = sites.SpinSite(0.5, 'parity', backend=backend)
+    with pytest.raises(ValueError, match='equivalent symmetries'):
+        sites.GroupedSite([s0, s1], symmetry_combine='same')
