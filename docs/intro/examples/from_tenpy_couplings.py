@@ -35,10 +35,10 @@ np.testing.assert_allclose(lasy.trace(H3).to_numpy(), 0.0, atol=1e-12)
 # --- c^dagger_i c_j as a (non-Hermitian) two-site coupling -----------------
 
 ferm = lasy.models.SpinlessFermionSite(num_species=1, conserve='N')
-Cd = ferm.get_creator_numpy(species=0, include_JW=True)
-C = ferm.get_annihilator_numpy(species=0, include_JW=True)
+Cd = ferm.occupation.get_creator_numpy(species=0, include_JW=True)
+C = ferm.occupation.get_annihilator_numpy(species=0, include_JW=True)
 # Dense axes: p0, p1, p1*, p0*. The left factor carries the on-site JW dressing.
-h_cdag_c = (Cd @ ferm.JW)[:, None, None, :] * C[None, :, :, None]
+h_cdag_c = (Cd @ ferm.occupation.JW)[:, None, None, :] * C[None, :, :, None]
 cdag_c = lasy.Coupling.from_dense_block(h_cdag_c, [ferm, ferm], name='Cd C', understood_braiding=True)
 print(cdag_c)
 assert cdag_c.num_sites == 2
@@ -68,4 +68,4 @@ assert lasy.almost_equal(stretched.factorization[1], Id_middle)
 # For a one-dimensional odd virtual bond, that identity is the local JW
 # operator: crossing an odd fermion line past the physical space yields (-1)^n.
 jw_block = Id_middle.to_numpy(understood_braiding=True)
-np.testing.assert_allclose(jw_block[0, :, 0, :], ferm.JW, atol=1e-12)
+np.testing.assert_allclose(jw_block[0, :, 0, :], ferm.occupation.JW, atol=1e-12)

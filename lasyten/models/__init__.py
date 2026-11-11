@@ -19,7 +19,16 @@ from .couplings import (
     spin_field_coupling,
     spin_spin_coupling,
 )
-from .degrees_of_freedom import AnyonDOF, BosonicDOF, ClockDOF, FermionicDOF, Site, SpinDOF
+from .degrees_of_freedom import (
+    AnyonDOF,
+    BosonicDOF,
+    ClockDOF,
+    DegreeOfFreedom,
+    FermionicDOF,
+    OccupationDOF,
+    Site,
+    SpinDOF,
+)
 from .sites import (
     AnyonSite,
     ClockSite,
@@ -42,10 +51,12 @@ __all__ = [
     'ClockDOF',
     'ClockSite',
     'Coupling',
+    'DegreeOfFreedom',
     'FermionicDOF',
     'FibonacciAnyonSite',
     'GoldenSite',
     'IsingAnyonSite',
+    'OccupationDOF',
     'SU2kSpin1Site',
     'Site',
     'SpinDOF',

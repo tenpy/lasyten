@@ -122,7 +122,7 @@ Overview: [convert_backends.md](convert_backends.md). Branch: `convert_backends`
 
 Branch: `convert_models`. Overview: [convert_models.md](convert_models.md).
 
-- **lasyten/models/degrees_of_freedom.py** — `Site`, DOF classes (`SpinDOF`, `ClockDOF`, `AnyonDOF`, `OccupationDOF`, `BosonicDOF`, `FermionicDOF`), `ALL_SPECIES`. **C++ + monkey-patched** — [convert_Site.md](convert_Site.md).
+- **lasyten/models/degrees_of_freedom.py** — `Site`, `DegreeOfFreedom`, DOF classes (`SpinDOF`, `ClockDOF`, `AnyonDOF`, `OccupationDOF`, `BosonicDOF`, `FermionicDOF`), `ALL_SPECIES`. **C++ + monkey-patched** — [convert_Site.md](convert_Site.md), DOF composition — [convert_SiteDOF.md](convert_SiteDOF.md).
 - **lasyten/models/sites.py** — Concrete sites (`SpinSite`, `SpinlessBosonSite`, `SpinlessFermionSite`, `SpinHalfFermionSite`, anyon sites, …). **C++ + monkey-patched**.
 - **lasyten/models/couplings.py** — `Coupling`, factory functions (`spin_spin_coupling`, `hopping`, …). **C++ + monkey-patched**; `tenpy_models.py` remains Python.
 - **lasyten/models/tenpy_models.py** — TenPy model helpers (~130 lines). **Still Python** (out of scope).

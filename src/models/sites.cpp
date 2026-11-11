@@ -210,12 +210,13 @@ leg_as_product(ElementarySpace::Ptr leg)
 }
 
 void
-add_anyon_projectors(AnyonDOF& site,
+add_anyon_projectors(Site& site,
                      std::vector<std::string> const& names,
                      TensorBackend::Ptr backend,
                      std::optional<std::string> const& default_device)
 {
-    site.sector_names = names;
+    auto anyon = site.require_anyon();
+    anyon->sector_names = names;
     auto const& decomposition = site.leg->sector_decomposition;
     if (names.size() != decomposition.size()) {
         throw std::invalid_argument("sector_names length must match leg.num_sectors.");
@@ -751,8 +752,9 @@ SpinSite::SpinSite(Prepared&& prepared,
                    std::optional<std::string> default_device,
                    bool use_test_su2)
   : Site(prepared.leg, std::move(prepared.state_labels), {}, backend, default_device)
-  , SpinDOF(prepared.leg, std::move(prepared.spin_vector), {}, {}, backend, default_device)
 {
+    auto spin = std::make_shared<SpinDOF>(prepared.leg, std::move(prepared.spin_vector));
+    set_dof(DOF_SPIN, spin);
     this->S = S;
     this->double_total_spin = prepared.two_S;
     this->conserve = std::move(conserve);
@@ -762,40 +764,45 @@ SpinSite::SpinSite(Prepared&& prepared,
     if (!factor_is_su2(factor)) {
         add_onsite_operator(
           "Sz",
-          spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 2)),
+          spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 2)),
           true);
         if (prepared.two_S == 1) {
             add_onsite_operator(
               "Sigmaz",
-              np.attr("multiply")(
-                2.0, spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 2))),
+              np.attr("multiply")(2.0,
+                                  spin->spin_vector.attr("__getitem__")(
+                                    py::make_tuple(py::slice(), py::slice(), 2))),
               true);
         }
     }
     if (factor_is_no_symmetry(factor)) {
         add_onsite_operator(
-          "Sx", spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)));
+          "Sx",
+          spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)));
         add_onsite_operator(
-          "Sy", spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)));
+          "Sy",
+          spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)));
         add_onsite_operator(
           "Sp",
-          spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)) +
+          spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)) +
             py::cast(std::complex(0., 1.)) *
-              spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)));
+              spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)));
         add_onsite_operator(
           "Sm",
-          spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)) -
+          spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)) -
             py::cast(std::complex(0., 1.)) *
-              spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)));
+              spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)));
         if (prepared.two_S == 1) {
-            add_onsite_operator("Sigmax",
-                                np.attr("multiply")(2.0,
-                                                    spin_vector.attr("__getitem__")(py::make_tuple(
-                                                      py::slice(), py::slice(), 0))));
-            add_onsite_operator("Sigmay",
-                                np.attr("multiply")(2.0,
-                                                    spin_vector.attr("__getitem__")(py::make_tuple(
-                                                      py::slice(), py::slice(), 1))));
+            add_onsite_operator(
+              "Sigmax",
+              np.attr("multiply")(2.0,
+                                  spin->spin_vector.attr("__getitem__")(
+                                    py::make_tuple(py::slice(), py::slice(), 0))));
+            add_onsite_operator(
+              "Sigmay",
+              np.attr("multiply")(2.0,
+                                  spin->spin_vector.attr("__getitem__")(
+                                    py::make_tuple(py::slice(), py::slice(), 1))));
         }
     }
 }
@@ -803,10 +810,12 @@ SpinSite::SpinSite(Prepared&& prepared,
 void
 SpinSite::test_sanity()
 {
-    SpinDOF::test_sanity();
+    Site::test_sanity();
+    auto spin = require_spin();
     auto np = numpy_module();
-    auto S_sq = np.attr("tensordot")(
-      spin_vector, spin_vector, py::make_tuple(py::make_tuple(-1, 1), py::make_tuple(-1, 0)));
+    auto S_sq = np.attr("tensordot")(spin->spin_vector,
+                                     spin->spin_vector,
+                                     py::make_tuple(py::make_tuple(-1, 1), py::make_tuple(-1, 0)));
     int64 const two_S = leg_dim(leg) - 1;
     auto eigenvalue = np.attr("multiply")(two_S * (two_S + 2) / 4., np.attr("eye")(two_S + 1));
     if (!np.attr("allclose")(S_sq, eigenvalue).cast<bool>()) {
@@ -839,30 +848,27 @@ SpinlessBosonSite::SpinlessBosonSite(Prepared&& prepared,
                                      TensorBackend::Ptr backend,
                                      std::optional<std::string> default_device)
   : Site(prepared.leg, std::move(prepared.state_labels), {}, backend, default_device)
-  , BosonicDOF(prepared.leg,
-               std::move(prepared.Nmax_arr),
-               std::move(prepared.creators),
-               std::move(prepared.annihilators),
-               {},
-               {},
-               {},
-               backend,
-               default_device)
 {
+    auto occ = std::make_shared<BosonicDOF>(prepared.leg,
+                                            std::move(prepared.Nmax_arr),
+                                            std::move(prepared.creators),
+                                            std::move(prepared.annihilators));
+    set_dof(DOF_OCCUPATION, occ);
     this->conserve = std::move(conserve);
     this->filling = filling;
-    add_individual_occupation_ops();
-    add_total_occupation_ops();
+    occ->add_individual_occupation_ops(*this);
+    occ->add_total_occupation_ops(*this);
     if (filling) {
-        add_filling_ops(*this, n_tot, *filling, prepared.total_dim);
+        add_filling_ops(*this, occ->n_tot, *filling, prepared.total_dim);
     }
 }
 
 std::string
 SpinlessBosonSite::repr() const
 {
+    auto bos = std::dynamic_pointer_cast<BosonicDOF>(require_occupation());
     return std::format("SpinlessBosonSite(Nmax={}, conserve={}, filling={})",
-                       py::str(Nmax).cast<std::string>(),
+                       py::str(bos->Nmax).cast<std::string>(),
                        py::str(conserve).cast<std::string>(),
                        filling ? std::to_string(*filling) : "None");
 }
@@ -888,22 +894,17 @@ SpinlessFermionSite::SpinlessFermionSite(Prepared&& prepared,
                                          TensorBackend::Ptr backend,
                                          std::optional<std::string> default_device)
   : Site(prepared.leg, std::move(prepared.state_labels), {}, backend, default_device)
-  , FermionicDOF(prepared.leg,
-                 std::move(prepared.creators),
-                 std::move(prepared.annihilators),
-                 {},
-                 {},
-                 {},
-                 backend,
-                 default_device)
 {
+    auto occ = std::make_shared<FermionicDOF>(
+      prepared.leg, std::move(prepared.creators), std::move(prepared.annihilators));
+    set_dof(DOF_OCCUPATION, occ);
     this->num_species = num_species;
     this->conserve = std::move(conserve);
     this->filling = filling;
-    add_individual_occupation_ops();
-    add_total_occupation_ops();
+    occ->add_individual_occupation_ops(*this);
+    occ->add_total_occupation_ops(*this);
     if (filling) {
-        add_filling_ops(*this, n_tot, *filling, leg_dim(leg), true);
+        add_filling_ops(*this, occ->n_tot, *filling, leg_dim(leg), true);
     }
 }
 
@@ -940,17 +941,17 @@ SpinHalfFermionSite::SpinHalfFermionSite(Prepared&& prepared,
                                          std::optional<std::string> default_device,
                                          bool use_test_su2)
   : Site(prepared.leg, std::move(prepared.state_labels), {}, backend, default_device)
-  , SpinDOF(prepared.leg, std::move(prepared.spin_vector), {}, {}, backend, default_device)
-  , FermionicDOF(prepared.leg,
-                 std::move(prepared.creators),
-                 std::move(prepared.annihilators),
-                 std::vector<std::optional<std::string>>{ std::optional<std::string>{ "up" },
-                                                          std::optional<std::string>{ "down" } },
-                 {},
-                 {},
-                 backend,
-                 default_device)
 {
+    auto spin = std::make_shared<SpinDOF>(prepared.leg, std::move(prepared.spin_vector));
+    auto occ = std::make_shared<FermionicDOF>(
+      prepared.leg,
+      std::move(prepared.creators),
+      std::move(prepared.annihilators),
+      std::vector<std::optional<std::string>>{ std::optional<std::string>{ "up" },
+                                               std::optional<std::string>{ "down" } });
+    set_dof(DOF_SPIN, spin);
+    set_dof(DOF_OCCUPATION, occ);
+
     this->conserve_N = std::move(conserve_N);
     this->conserve_S = std::move(conserve_S);
     this->filling = filling;
@@ -959,7 +960,7 @@ SpinHalfFermionSite::SpinHalfFermionSite(Prepared&& prepared,
     auto np = numpy_module();
 
     if (!factor_is_su2(sym_S_factor)) {
-        add_individual_occupation_ops();
+        occ->add_individual_occupation_ops(*this);
         if (onsite_operators.contains("N0")) {
             rename_op("N0", "Nup");
         }
@@ -967,58 +968,60 @@ SpinHalfFermionSite::SpinHalfFermionSite(Prepared&& prepared,
             rename_op("N1", "Ndown");
         }
     }
-    add_total_occupation_ops();
+    occ->add_total_occupation_ops(*this);
 
-    auto NtotNtot = np.attr("matmul")(n_tot, n_tot);
-    auto NupNdown = np.attr("multiply")(0.5, NtotNtot - n_tot);
+    auto NtotNtot = np.attr("matmul")(occ->n_tot, occ->n_tot);
+    auto NupNdown = np.attr("multiply")(0.5, NtotNtot - occ->n_tot);
     add_onsite_operator("NupNdown", NupNdown, true);
 
     std::map<std::string, py::object> ops;
     if (!factor_is_su2(sym_S_factor)) {
-        ops["Sz"] = spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 2));
+        ops["Sz"] =
+          spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 2));
         ops["Sigmaz"] = np.attr("multiply")(
-          2.0, spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 2)));
+          2.0, spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 2)));
     }
     if (factor_is_no_symmetry(sym_S_factor)) {
         add_onsite_operator(
           "Sx",
-          spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)),
+          spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)),
           std::nullopt,
           true);
         add_onsite_operator(
           "Sy",
-          spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)),
+          spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)),
           std::nullopt,
           true);
         add_onsite_operator(
           "Sp",
-          spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)) +
+          spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)) +
             py::cast(std::complex(0., 1.)) *
-              spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)),
+              spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)),
           std::nullopt,
           true);
         add_onsite_operator(
           "Sm",
-          spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)) -
+          spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)) -
             py::cast(std::complex(0., 1.)) *
-              spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)),
+              spin->spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1)),
           std::nullopt,
           true);
-        add_onsite_operator(
-          "Sigmax",
-          np.attr("multiply")(
-            2.0, spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0))),
-          std::nullopt,
-          true);
-        add_onsite_operator(
-          "Sigmay",
-          np.attr("multiply")(
-            2.0, spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1))),
-          std::nullopt,
-          true);
+        add_onsite_operator("Sigmax",
+                            np.attr("multiply")(2.0,
+                                                spin->spin_vector.attr("__getitem__")(
+                                                  py::make_tuple(py::slice(), py::slice(), 0))),
+                            std::nullopt,
+                            true);
+        add_onsite_operator("Sigmay",
+                            np.attr("multiply")(2.0,
+                                                spin->spin_vector.attr("__getitem__")(
+                                                  py::make_tuple(py::slice(), py::slice(), 1))),
+                            std::nullopt,
+                            true);
     }
     if (filling) {
-        auto dN_diag = np.attr("diag")(n_tot) - np.attr("multiply")(*filling, np.attr("ones")(4));
+        auto dN_diag =
+          np.attr("diag")(occ->n_tot) - np.attr("multiply")(*filling, np.attr("ones")(4));
         ops["dN"] = np.attr("diag")(dN_diag);
         ops["dNdN"] = np.attr("diag")(np.attr("square")(dN_diag));
     }
@@ -1030,8 +1033,7 @@ SpinHalfFermionSite::SpinHalfFermionSite(Prepared&& prepared,
 void
 SpinHalfFermionSite::test_sanity()
 {
-    SpinDOF::test_sanity();
-    FermionicDOF::test_sanity();
+    Site::test_sanity();
 }
 
 std::string
@@ -1057,21 +1059,26 @@ ClockSite::ClockSite(Prepared&& prepared,
                      TensorBackend::Ptr backend,
                      std::optional<std::string> default_device)
   : Site(prepared.leg, std::move(prepared.state_labels), {}, backend, default_device)
-  , ClockDOF(prepared.leg, std::move(prepared.clock_operators), {}, {}, backend, default_device)
 {
+    auto clock = std::make_shared<ClockDOF>(prepared.leg, std::move(prepared.clock_operators));
+    set_dof(DOF_CLOCK, clock);
+    clock->register_default_ops(*this);
     this->q = q;
     this->conserve = std::move(conserve);
     auto np = numpy_module();
     auto sym = leg_symmetry(leg);
     auto Xhc = np.attr("conj")(
-      clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)).attr("T"));
+      clock->clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0))
+        .attr("T"));
     if (factor_is_no_symmetry(first_factor(sym))) {
         add_onsite_operator(
-          "X", clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)));
+          "X",
+          clock->clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)));
         add_onsite_operator("Xhc", Xhc);
         add_onsite_operator(
           "Xphc",
-          clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)) + Xhc);
+          clock->clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0)) +
+            Xhc);
     }
 }
 
@@ -1094,16 +1101,19 @@ AnyonSite::AnyonSite(ElementarySpace::Ptr leg,
                      TensorBackend::Ptr backend,
                      std::optional<std::string> default_device)
   : Site(leg, {}, {}, backend, default_device)
-  , AnyonDOF(std::move(leg), {}, {}, {}, backend, default_device)
 {
+    auto anyon = std::make_shared<AnyonDOF>(leg);
+    set_dof(DOF_ANYON, anyon);
+    anyon->register_default_ops(*this, backend, default_device);
 }
 
 std::string
 AnyonSite::repr() const
 {
+    auto anyon = require_anyon();
     return std::format("AnyonSite(symmetry={}, sector_names={})",
                        leg_symmetry(leg)->repr(),
-                       format_string_list(sector_names));
+                       format_string_list(anyon->sector_names));
 }
 
 FibonacciAnyonSite::FibonacciAnyonSite(TensorBackend::Ptr backend,
@@ -1115,8 +1125,7 @@ FibonacciAnyonSite::FibonacciAnyonSite(TensorBackend::Ptr backend,
 FibonacciAnyonSite::FibonacciAnyonSite(Prepared&& prepared,
                                        TensorBackend::Ptr backend,
                                        std::optional<std::string> default_device)
-  : Site(prepared.leg, {}, {}, backend, default_device)
-  , AnyonSite(prepared.leg, backend, default_device)
+  : AnyonSite(prepared.leg, backend, default_device)
 {
     add_anyon_projectors(*this, { "vac", "tau" }, backend, default_device);
 }
@@ -1139,8 +1148,7 @@ IsingAnyonSite::IsingAnyonSite(int nu,
 IsingAnyonSite::IsingAnyonSite(Prepared&& prepared,
                                TensorBackend::Ptr backend,
                                std::optional<std::string> default_device)
-  : Site(prepared.leg, {}, {}, backend, default_device)
-  , AnyonSite(prepared.leg, backend, default_device)
+  : AnyonSite(prepared.leg, backend, default_device)
 {
     add_anyon_projectors(*this, { "vac", "sigma", "psi" }, backend, default_device);
 }
@@ -1163,8 +1171,10 @@ GoldenSite::GoldenSite(ElementarySpace::Ptr leg,
                        TensorBackend::Ptr backend,
                        std::optional<std::string> default_device)
   : Site(leg, {}, {}, backend, default_device)
-  , AnyonDOF(std::move(leg), {}, {}, {}, backend, default_device)
 {
+    auto anyon = std::make_shared<AnyonDOF>(leg);
+    set_dof(DOF_ANYON, anyon);
+    anyon->register_default_ops(*this, backend, default_device);
 }
 
 std::string
@@ -1187,8 +1197,10 @@ SU2kSpin1Site::SU2kSpin1Site(ElementarySpace::Ptr leg,
                              TensorBackend::Ptr backend,
                              std::optional<std::string> default_device)
   : Site(leg, {}, {}, backend, default_device)
-  , AnyonDOF(std::move(leg), {}, {}, {}, backend, default_device)
 {
+    auto anyon = std::make_shared<AnyonDOF>(leg);
+    set_dof(DOF_ANYON, anyon);
+    anyon->register_default_ops(*this, backend, default_device);
     this->k = k;
 }
 
@@ -1236,7 +1248,8 @@ py::dict
 SpinlessBosonSite::hdf5_init_kwargs() const
 {
     py::dict d = hdf5_backend_kwargs();
-    d["Nmax"] = Nmax;
+    auto bos = std::dynamic_pointer_cast<BosonicDOF>(require_occupation());
+    d["Nmax"] = bos->Nmax;
     d["conserve"] = conserve;
     d["filling"] = optional_float_to_py(filling);
     return d;

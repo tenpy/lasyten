@@ -204,7 +204,8 @@ occupation_jw(OccupationDOF::Ptr const& occ)
     if (auto ferm = std::dynamic_pointer_cast<FermionicDOF>(occ)) {
         return ferm->JW;
     }
-    return numpy().attr("diag")(numpy().attr("ones")(site_dim(occ)));
+    auto d = occ->number_operators.attr("shape").attr("__getitem__")(0).cast<int64>();
+    return numpy().attr("diag")(numpy().attr("ones")(d));
 }
 
 Symmetry::Ptr
@@ -239,13 +240,13 @@ quadratic_coupling_numpy(std::vector<Site::Ptr> const& sites,
                          bool add_hc = true)
 {
     check_site_count(sites, 2);
-    auto occ_i = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
-    auto occ_j = std::dynamic_pointer_cast<OccupationDOF>(sites[1]);
+    auto occ_i = sites[0]->get_occupation();
+    auto occ_j = sites[1]->get_occupation();
     if (!occ_i || !occ_j) {
         throw std::invalid_argument("Expected occupation sites");
     }
-    bool boson_i = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[0]));
-    bool boson_j = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[1]));
+    bool boson_i = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(occ_i));
+    bool boson_j = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(occ_j));
     if (boson_i != boson_j) {
         throw SymmetryError("Bosonic and fermionic sites are incompatible and cannot be combined "
                             "for constructing couplings.");
@@ -272,14 +273,14 @@ quadratic_coupling_numpy(std::vector<Site::Ptr> const& sites,
     if (species_i.empty() || species_j.empty()) {
         auto np = numpy();
         return np
-          .attr("zeros")(
-            py::make_tuple(site_dim(occ_i), site_dim(occ_j), site_dim(occ_j), site_dim(occ_i)))
+          .attr("zeros")(py::make_tuple(
+            site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1]), site_dim(sites[0])))
           .cast<py::array>();
     }
 
     auto np = numpy();
-    py::object h = np.attr("zeros")(
-      py::make_tuple(site_dim(occ_i), site_dim(occ_j), site_dim(occ_j), site_dim(occ_i)));
+    py::object h = np.attr("zeros")(py::make_tuple(
+      site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1]), site_dim(sites[0])));
     py::object jw = occupation_jw(occ_i);
     for (py::ssize_t idx = 0; idx < py::len(species_i); ++idx) {
         py::object k_i = species_i[py::int_(idx)];
@@ -944,14 +945,14 @@ spin_spin_coupling(std::vector<Site::Ptr> sites,
                    complex128 Jmm)
 {
     check_site_count(sites, 2);
-    auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
-    auto spin1 = std::dynamic_pointer_cast<SpinDOF>(sites[1]);
+    auto spin0 = sites[0]->get_spin();
+    auto spin1 = sites[1]->get_spin();
     if (!spin0 || !spin1) {
         throw std::invalid_argument("spin_spin_coupling requires SpinDOF sites");
     }
     auto np = numpy();
-    py::object h = np.attr("zeros")(
-      py::make_tuple(site_dim(spin0), site_dim(spin0), site_dim(spin1), site_dim(spin1)));
+    py::object h = np.attr("zeros")(py::make_tuple(
+      site_dim(sites[0]), site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1])));
     for (int axis = 0; axis < 3; ++axis) {
         float64 pref = axis == 0 ? Jx : (axis == 1 ? Jy : Jz);
         if (pref == 0.) {
@@ -999,12 +1000,12 @@ spin_field_coupling(std::vector<Site::Ptr> sites,
                     std::optional<std::string> name)
 {
     check_site_count(sites, 1);
-    auto spin = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
+    auto spin = sites[0]->get_spin();
     if (!spin) {
         throw std::invalid_argument("spin_field_coupling requires SpinDOF sites");
     }
     auto np = numpy();
-    py::object h = np.attr("zeros")(py::make_tuple(site_dim(spin), site_dim(spin)));
+    py::object h = np.attr("zeros")(py::make_tuple(site_dim(sites[0]), site_dim(sites[0])));
     if (hx != 0.) {
         h = np_add(h,
                    np_multiply(py::float_(hx),
@@ -1030,8 +1031,8 @@ Coupling
 aklt_coupling(std::vector<Site::Ptr> sites, float64 J, std::optional<std::string> name)
 {
     check_site_count(sites, 2);
-    auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
-    auto spin1 = std::dynamic_pointer_cast<SpinDOF>(sites[1]);
+    auto spin0 = sites[0]->get_spin();
+    auto spin1 = sites[1]->get_spin();
     if (!spin0 || !spin1) {
         throw std::invalid_argument("aklt_coupling requires SpinDOF sites");
     }
@@ -1058,9 +1059,9 @@ Coupling
 chiral_3spin_coupling(std::vector<Site::Ptr> sites, float64 chi, std::optional<std::string> name)
 {
     check_site_count(sites, 3);
-    auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
-    auto spin1 = std::dynamic_pointer_cast<SpinDOF>(sites[1]);
-    auto spin2 = std::dynamic_pointer_cast<SpinDOF>(sites[2]);
+    auto spin0 = sites[0]->get_spin();
+    auto spin1 = sites[1]->get_spin();
+    auto spin2 = sites[2]->get_spin();
     if (!spin0 || !spin1 || !spin2) {
         throw std::invalid_argument("chiral_3spin_coupling requires SpinDOF sites");
     }
@@ -1084,7 +1085,7 @@ chemical_potential(std::vector<Site::Ptr> sites,
                    std::optional<std::string> name)
 {
     check_site_count(sites, 1);
-    auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
+    auto occ = sites[0]->get_occupation();
     if (!occ) {
         throw std::invalid_argument("chemical_potential requires bosonic or fermionic sites");
     }
@@ -1100,7 +1101,7 @@ onsite_interaction(std::vector<Site::Ptr> sites,
                    std::optional<std::string> name)
 {
     check_site_count(sites, 1);
-    auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
+    auto occ = sites[0]->get_occupation();
     if (!occ) {
         throw std::invalid_argument("onsite_interaction requires bosonic or fermionic sites");
     }
@@ -1119,14 +1120,16 @@ density_density_interaction(std::vector<Site::Ptr> sites,
                             std::optional<std::string> name)
 {
     check_site_count(sites, 2);
-    auto occ0 = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
-    auto occ1 = std::dynamic_pointer_cast<OccupationDOF>(sites[1]);
+    auto occ0 = sites[0]->get_occupation();
+    auto occ1 = sites[1]->get_occupation();
     if (!occ0 || !occ1) {
         throw std::invalid_argument(
           "density_density_interaction requires bosonic or fermionic sites");
     }
-    bool boson0 = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[0]));
-    bool boson1 = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[1]));
+    bool boson0 =
+      static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[0]->get_occupation()));
+    bool boson1 =
+      static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[1]->get_occupation()));
     if (boson0 != boson1) {
         throw SymmetryError("Bosonic and fermionic sites are incompatible and cannot be combined "
                             "for constructing couplings.");
@@ -1182,7 +1185,7 @@ onsite_pairing(std::vector<Site::Ptr> sites,
                std::optional<std::string> name)
 {
     check_site_count(sites, 1);
-    auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
+    auto occ = sites[0]->get_occupation();
     if (!occ) {
         throw std::invalid_argument("onsite_pairing requires bosonic or fermionic sites");
     }
@@ -1206,7 +1209,7 @@ onsite_pairing(std::vector<Site::Ptr> sites,
     }
 
     auto np = numpy();
-    py::object h = np.attr("zeros")(py::make_tuple(site_dim(occ), site_dim(occ)));
+    py::object h = np.attr("zeros")(py::make_tuple(site_dim(sites[0]), site_dim(sites[0])));
     for (py::ssize_t i = 0; i < py::len(species_1); ++i) {
         py::object k1 = species_1[py::int_(i)];
         py::object k2 = species_2[py::int_(i)];
@@ -1227,8 +1230,8 @@ clock_clock_coupling(std::vector<Site::Ptr> sites,
                      std::optional<std::string> name)
 {
     check_site_count(sites, 2);
-    auto clock0 = std::dynamic_pointer_cast<ClockDOF>(sites[0]);
-    auto clock1 = std::dynamic_pointer_cast<ClockDOF>(sites[1]);
+    auto clock0 = sites[0]->get_clock();
+    auto clock1 = sites[1]->get_clock();
     if (!clock0 || !clock1) {
         throw std::invalid_argument("clock_clock_coupling requires ClockDOF sites");
     }
@@ -1241,8 +1244,8 @@ clock_clock_coupling(std::vector<Site::Ptr> sites,
       clock1->clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0));
     py::object Z_j =
       clock1->clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1));
-    py::object h = np.attr("zeros")(
-      py::make_tuple(site_dim(clock0), site_dim(clock1), site_dim(clock1), site_dim(clock0)));
+    py::object h = np.attr("zeros")(py::make_tuple(
+      site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1]), site_dim(sites[0])));
     if (Jx != 0.) {
         h = np_add(h,
                    np_multiply(
@@ -1276,7 +1279,7 @@ clock_field_coupling(std::vector<Site::Ptr> sites,
                      std::optional<std::string> name)
 {
     check_site_count(sites, 1);
-    auto clock = std::dynamic_pointer_cast<ClockDOF>(sites[0]);
+    auto clock = sites[0]->get_clock();
     if (!clock) {
         throw std::invalid_argument("clock_field_coupling requires ClockDOF sites");
     }

@@ -139,7 +139,7 @@ def test_spin_site(any_backend, spin):
         site = sites.SpinSite(spin, conserve, backend=any_backend, use_test_su2=(conserve == 'SU(2)'))
         site.test_sanity()
 
-        sz = site.spin_vector[:, :, 2]
+        sz = site.spin.spin_vector[:, :, 2]
         down = site.state_labels['down']
         up = site.state_labels['up']
         npt.assert_almost_equal(sz[down, down], -1 * spin)
@@ -267,10 +267,10 @@ def test_spinless_boson_site(any_backend, np_random, Nmax):
         site.test_sanity()
 
         vac = site.state_labels['vac']
-        npt.assert_almost_equal(site.n_tot[vac, vac], 0)
+        npt.assert_almost_equal(site.occupation.n_tot[vac, vac], 0)
         for i in range(Nmax):
             state = site.state_labels[str(i)]
-            npt.assert_almost_equal(site.n_tot[state, state], i)
+            npt.assert_almost_equal(site.occupation.n_tot[state, state], i)
 
         expect_ops = dict(Id=True, N0=True, N=True, Ntot=True)
         expect_ops.update(N0N0=True, NN=True, NtotNtot=True)
@@ -308,12 +308,12 @@ def test_spinless_boson_site(any_backend, np_random, Nmax):
         site.test_sanity()
 
         vac = site.state_labels['vac']
-        npt.assert_almost_equal(site.n_tot[vac, vac], 0)
+        npt.assert_almost_equal(site.occupation.n_tot[vac, vac], 0)
         for i in range(Nmax):
             for j in range(Nmax2):
                 state = site.state_labels[f'({i}, {j})']
-                npt.assert_almost_equal(site.number_operators[state, state, 0], i)
-                npt.assert_almost_equal(site.number_operators[state, state, 1], j)
+                npt.assert_almost_equal(site.occupation.number_operators[state, state, 0], i)
+                npt.assert_almost_equal(site.occupation.number_operators[state, state, 1], j)
 
         expect_ops = dict(Id=True, N0=True, N1=True, Ntot=True)
         expect_ops.update(N0N0=True, N1N1=True, NtotNtot=True)
@@ -341,17 +341,17 @@ def test_spinless_fermion_site(block_backend, np_random, num_species):
 
         vac = site.state_labels['vac']
         assert site.state_labels['empty'] == vac
-        npt.assert_almost_equal(site.n_tot[vac, vac], 0)
+        npt.assert_almost_equal(site.occupation.n_tot[vac, vac], 0)
         if num_species == 1:
             assert site.state_labels['0'] == vac
             state = site.state_labels['1']
             assert site.state_labels['full'] == state
-            npt.assert_almost_equal(site.n_tot[state, state], 1)
+            npt.assert_almost_equal(site.occupation.n_tot[state, state], 1)
         else:
             for occupations in it.product([0, 1], repeat=num_species):
                 state = site.state_labels[str(occupations)]
                 for k in range(num_species):
-                    npt.assert_almost_equal(site.number_operators[state, state, k], occupations[k])
+                    npt.assert_almost_equal(site.occupation.number_operators[state, state, k], occupations[k])
 
         expect_ops = {f'N{k}': True for k in range(num_species)}
         expect_ops.update(Id=True, Ntot=True, Ptot=True, NtotNtot=True)
@@ -392,9 +392,9 @@ def test_spin_half_fermion_site(block_backend, np_random):
         assert site.state_labels['full'] == site.state_labels['(1, 1)']
         for occupations in it.product([0, 1], repeat=2):
             state = site.state_labels[str(occupations)]
-            npt.assert_almost_equal(site.number_operators[state, state, 0], occupations[0])  # spin up
-            npt.assert_almost_equal(site.number_operators[state, state, 1], occupations[1])  # spin down
-            npt.assert_almost_equal(site.spin_vector[state, state, 2], 0.5 * (occupations[0] - occupations[1]))
+            npt.assert_almost_equal(site.occupation.number_operators[state, state, 0], occupations[0])  # spin up
+            npt.assert_almost_equal(site.occupation.number_operators[state, state, 1], occupations[1])  # spin down
+            npt.assert_almost_equal(site.spin.spin_vector[state, state, 2], 0.5 * (occupations[0] - occupations[1]))
             npt.assert_almost_equal(
                 site.get_op('NupNdown').to_numpy(understood_braiding=True)[state, state],
                 occupations[0] * occupations[1],
@@ -444,7 +444,7 @@ def test_clock_site(any_backend, q):
         site = sites.ClockSite(q=q, conserve=conserve, backend=any_backend)
         site.test_sanity()
 
-        z = site.clock_operators[:, :, 1]
+        z = site.clock.clock_operators[:, :, 1]
         up = site.state_labels['up']
         npt.assert_almost_equal(z[up, up], 1)
         if q % 2 == 0:
@@ -465,3 +465,18 @@ def test_clock_site(any_backend, q):
 
         site_list.append(site)
     check_same_operators(site_list)
+
+
+def test_site_dofs_registry_allows_multiple_spins(block_backend):
+    """Named DOF registry can hold multiple SpinDOFs (grouping / valley foreshadowing)."""
+    backend = backends.get_backend('no_symmetry', block_backend=block_backend)
+    site_a = sites.SpinSite(S=0.5, conserve='None', backend=backend)
+    site_b = sites.SpinSite(S=1.0, conserve='None', backend=backend)
+    combined = degrees_of_freedom.Site(leg=site_a.leg, backend=backend)
+    combined.set_dof('0.spin', site_a.spin)
+    combined.set_dof('1.spin', site_b.spin)
+    assert '0.spin' in combined.dofs
+    assert '1.spin' in combined.dofs
+    assert combined.spin is None  # conventional key unused
+    assert combined.dofs['0.spin'] is site_a.spin
+    assert combined.dofs['1.spin'].spin_vector.shape[-1] == 3

@@ -127,22 +127,52 @@ compose_sym(SymmetricTensorPtr a, SymmetricTensorPtr b)
 std::string
 site_class_name(Site const& site)
 {
-    if (dynamic_cast<SpinDOF const*>(&site)) {
+    if (dynamic_cast<SpinSite const*>(&site)) {
+        return "SpinSite";
+    }
+    if (dynamic_cast<SpinHalfFermionSite const*>(&site)) {
+        return "SpinHalfFermionSite";
+    }
+    if (dynamic_cast<SpinlessFermionSite const*>(&site)) {
+        return "SpinlessFermionSite";
+    }
+    if (dynamic_cast<SpinlessBosonSite const*>(&site)) {
+        return "SpinlessBosonSite";
+    }
+    if (dynamic_cast<ClockSite const*>(&site)) {
+        return "ClockSite";
+    }
+    if (dynamic_cast<FibonacciAnyonSite const*>(&site)) {
+        return "FibonacciAnyonSite";
+    }
+    if (dynamic_cast<IsingAnyonSite const*>(&site)) {
+        return "IsingAnyonSite";
+    }
+    if (dynamic_cast<GoldenSite const*>(&site)) {
+        return "GoldenSite";
+    }
+    if (dynamic_cast<SU2kSpin1Site const*>(&site)) {
+        return "SU2kSpin1Site";
+    }
+    if (dynamic_cast<AnyonSite const*>(&site)) {
+        return "AnyonSite";
+    }
+    if (site.get_spin()) {
         return "SpinDOF";
     }
-    if (dynamic_cast<ClockDOF const*>(&site)) {
+    if (site.get_clock()) {
         return "ClockDOF";
     }
-    if (dynamic_cast<AnyonDOF const*>(&site)) {
+    if (site.get_anyon()) {
         return "AnyonDOF";
     }
-    if (dynamic_cast<FermionicDOF const*>(&site)) {
-        return "FermionicDOF";
-    }
-    if (dynamic_cast<BosonicDOF const*>(&site)) {
-        return "BosonicDOF";
-    }
-    if (dynamic_cast<OccupationDOF const*>(&site)) {
+    if (auto occ = site.get_occupation()) {
+        if (std::dynamic_pointer_cast<FermionicDOF>(occ)) {
+            return "FermionicDOF";
+        }
+        if (std::dynamic_pointer_cast<BosonicDOF>(occ)) {
+            return "BosonicDOF";
+        }
         return "OccupationDOF";
     }
     return "Site";
@@ -339,11 +369,13 @@ Site::Site(ElementarySpace::Ptr leg,
            std::map<std::string, int64> state_labels,
            std::map<std::string, SymmetricTensorPtr> onsite_operators,
            TensorBackend::Ptr backend,
-           std::optional<std::string> default_device)
+           std::optional<std::string> default_device,
+           std::map<std::string, DegreeOfFreedom::Ptr> dofs)
   : leg(std::move(leg))
   , state_labels(std::move(state_labels))
   , backend(backend ? std::move(backend) : get_backend(leg_symmetry(this->leg)))
   , default_device(default_device.value_or("cpu"))
+  , dofs(std::move(dofs))
 {
     check_state_labels(
       this->state_labels, static_cast<int64>(dim()), this->symmetry()->can_be_dropped());
@@ -353,6 +385,63 @@ Site::Site(ElementarySpace::Ptr leg,
                         py::cast(Identity::from_eye(
                           this->leg, this->backend, pp_labels(), id_dtype, this->default_device)));
     add_onsite_operators_from_map(*this, onsite_operators);
+}
+
+void
+Site::set_dof(std::string const& name, DegreeOfFreedom::Ptr dof)
+{
+    if (!dof) {
+        throw std::invalid_argument(std::format("Cannot register null DOF under name '{}'", name));
+    }
+    dofs[name] = std::move(dof);
+}
+
+SpinDOF::Ptr
+Site::get_spin(std::string const& name) const
+{
+    return get_dof<SpinDOF>(name);
+}
+
+SpinDOF::Ptr
+Site::require_spin(std::string const& name) const
+{
+    return require_dof<SpinDOF>(name);
+}
+
+OccupationDOF::Ptr
+Site::get_occupation(std::string const& name) const
+{
+    return get_dof<OccupationDOF>(name);
+}
+
+OccupationDOF::Ptr
+Site::require_occupation(std::string const& name) const
+{
+    return require_dof<OccupationDOF>(name);
+}
+
+ClockDOF::Ptr
+Site::get_clock(std::string const& name) const
+{
+    return get_dof<ClockDOF>(name);
+}
+
+ClockDOF::Ptr
+Site::require_clock(std::string const& name) const
+{
+    return require_dof<ClockDOF>(name);
+}
+
+AnyonDOF::Ptr
+Site::get_anyon(std::string const& name) const
+{
+    return get_dof<AnyonDOF>(name);
+}
+
+AnyonDOF::Ptr
+Site::require_anyon(std::string const& name) const
+{
+    return require_dof<AnyonDOF>(name);
 }
 
 void
@@ -394,6 +483,13 @@ Site::test_sanity()
             throw std::invalid_argument(
               std::format("operator '{}' is not the hermitian conjugate of '{}'", hc_name, name));
         }
+    }
+
+    for (auto const& [name, dof] : dofs) {
+        if (!dof) {
+            throw std::invalid_argument(std::format("dofs['{}'] is null", name));
+        }
+        dof->test_sanity();
     }
 }
 
@@ -821,25 +917,17 @@ Site::from_hdf5(py::object cls,
     return obj;
 }
 
-SpinDOF::SpinDOF(ElementarySpace::Ptr leg,
-                 py::array spin_vector,
-                 std::map<std::string, int64> state_labels,
-                 std::map<std::string, SymmetricTensorPtr> onsite_operators,
-                 TensorBackend::Ptr backend,
-                 std::optional<std::string> default_device)
-  : Site(leg, state_labels, {}, backend, default_device)
+SpinDOF::SpinDOF(ElementarySpace::Ptr leg, py::array spin_vector)
 {
     auto buf = spin_vector.request();
     auto const d = static_cast<py::ssize_t>(leg_dim(leg));
     check_buffer_shape_3d(buf, d, d, 3, "spin_vector");
     this->spin_vector = as_immutable_array(spin_vector);
-    add_onsite_operators_from_map(*this, onsite_operators);
 }
 
 void
 SpinDOF::test_sanity()
 {
-    Site::test_sanity();
     auto np = numpy();
     py::array Sx = spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0));
     py::array Sy = spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1));
@@ -921,32 +1009,28 @@ SpinDOF::conservation_law_to_symmetry(std::optional<std::string> conserve, bool 
     throw std::invalid_argument(std::format("Invalid `conserve`: {}", *conserve));
 }
 
-ClockDOF::ClockDOF(ElementarySpace::Ptr leg,
-                   py::array clock_operators,
-                   std::map<std::string, int64> state_labels,
-                   std::map<std::string, SymmetricTensorPtr> onsite_operators,
-                   TensorBackend::Ptr backend,
-                   std::optional<std::string> default_device)
-  : Site(leg, state_labels, {}, backend, default_device)
+ClockDOF::ClockDOF(ElementarySpace::Ptr leg, py::array clock_operators)
 {
     auto buf = clock_operators.request();
     auto const d = static_cast<py::ssize_t>(leg_dim(leg));
     check_buffer_shape_3d(buf, d, d, 2, "clock_operators");
     this->clock_operators = as_immutable_array(clock_operators);
-    add_onsite_operators_from_map(*this, onsite_operators);
+}
 
+void
+ClockDOF::register_default_ops(Site& site) const
+{
     auto np = numpy();
     py::array Z = clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1));
     py::array Zhc = np.attr("conj")(Z.attr("T"));
-    add_onsite_operator("Z", Z, true);
-    add_onsite_operator("Zhc", Zhc, true);
-    add_onsite_operator("Zphc", Z + Zhc, true);
+    site.add_onsite_operator("Z", Z, true);
+    site.add_onsite_operator("Zhc", Zhc, true);
+    site.add_onsite_operator("Zphc", Z + Zhc, true);
 }
 
 void
 ClockDOF::test_sanity()
 {
-    Site::test_sanity();
     auto np = numpy();
     py::array X = clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0));
     py::array Z = clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1));
@@ -969,13 +1053,7 @@ ClockDOF::conservation_law_to_symmetry(std::optional<std::string> conserve, bool
     return SpinDOF::conservation_law_to_symmetry(conserve, use_test_su2);
 }
 
-AnyonDOF::AnyonDOF(ElementarySpace::Ptr leg,
-                   std::vector<std::string> sector_names,
-                   std::map<std::string, int64> state_labels,
-                   std::map<std::string, SymmetricTensorPtr> onsite_operators,
-                   TensorBackend::Ptr backend,
-                   std::optional<std::string> default_device)
-  : Site(leg, state_labels, {}, backend, default_device)
+AnyonDOF::AnyonDOF(ElementarySpace::Ptr leg, std::vector<std::string> sector_names)
 {
     if (sector_names.empty()) {
         sector_names.assign(static_cast<std::size_t>(leg->num_sectors), std::string{});
@@ -986,40 +1064,43 @@ AnyonDOF::AnyonDOF(ElementarySpace::Ptr leg,
                       sector_names.size(),
                       leg->num_sectors));
     }
-    this->sector_names = sector_names;
+    this->sector_names = std::move(sector_names);
+}
 
-    std::map<std::string, SymmetricTensorPtr> ops = onsite_operators;
-    auto tp = product_of_leg(leg);
-    for (std::size_t i = 0; i < leg->sector_decomposition.size(); ++i) {
+void
+AnyonDOF::register_default_ops(Site& site,
+                               TensorBackend::Ptr backend,
+                               std::optional<std::string> default_device) const
+{
+    auto tp = product_of_leg(site.leg);
+    for (std::size_t i = 0; i < site.leg->sector_decomposition.size(); ++i) {
         if (sector_names[i].empty()) {
             continue;
         }
-        auto P_sec = SymmetricTensor::from_sector_projection(
-          tp, leg->sector_decomposition[i], backend, pp_labels(), std::nullopt, default_device);
-        ops[std::format("P_{}", sector_names[i])] = P_sec;
+        auto P_sec = SymmetricTensor::from_sector_projection(tp,
+                                                             site.leg->sector_decomposition[i],
+                                                             backend,
+                                                             pp_labels(),
+                                                             std::nullopt,
+                                                             default_device);
+        site.add_onsite_operator(std::format("P_{}", sector_names[i]), py::cast(P_sec));
     }
-    add_onsite_operators_from_map(*this, ops);
 }
 
 void
 AnyonDOF::test_sanity()
 {
-    Site::test_sanity();
 }
 
 OccupationDOF::OccupationDOF(ElementarySpace::Ptr leg,
                              py::array creators,
                              py::array annihilators,
                              int64 anti_commute_sign,
-                             std::vector<std::optional<std::string>> species_names,
-                             std::map<std::string, int64> state_labels,
-                             std::map<std::string, SymmetricTensorPtr> onsite_operators,
-                             TensorBackend::Ptr backend,
-                             std::optional<std::string> default_device)
-  : Site(leg, state_labels, {}, backend, default_device)
+                             std::vector<std::optional<std::string>> species_names)
+  : leg_(std::move(leg))
 {
     num_species = py_object_to_int64(creators.attr("shape").attr("__getitem__")(2));
-    auto const d = leg_dim(leg);
+    auto const d = leg_dim(leg_);
     auto creators_buf = creators.request();
     auto annihilators_buf = annihilators.request();
     auto const ns = static_cast<py::ssize_t>(num_species);
@@ -1060,16 +1141,13 @@ OccupationDOF::OccupationDOF(ElementarySpace::Ptr leg,
                           py::arg("axis2") = 3);
     number_operators = as_immutable_array(n_ops);
     n_tot = as_immutable_array(np.attr("sum")(number_operators, py::arg("axis") = 2));
-
-    add_onsite_operators_from_map(*this, onsite_operators);
 }
 
 void
 OccupationDOF::test_sanity()
 {
-    Site::test_sanity();
     auto np = numpy();
-    auto const d = leg_dim(leg);
+    auto const d = leg_dim(leg_);
     for (int64 k = 0; k < num_species; ++k) {
         py::array n_k =
           number_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), k));
@@ -1110,46 +1188,46 @@ OccupationDOF::test_sanity()
 }
 
 void
-OccupationDOF::add_individual_occupation_ops()
+OccupationDOF::add_individual_occupation_ops(Site& site) const
 {
     for (int64 k = 0; k < num_species; ++k) {
         py::array N_k =
           number_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), k));
-        add_onsite_operator(std::format("N{}", k), N_k, true);
+        site.add_onsite_operator(std::format("N{}", k), N_k, true);
     }
     if (num_species == 1) {
-        add_onsite_operator("N", py::cast(onsite_operators.at("N0")));
+        site.add_onsite_operator("N", py::cast(site.onsite_operators.at("N0")));
     }
 }
 
 void
-BosonicDOF::add_individual_occupation_ops()
+BosonicDOF::add_individual_occupation_ops(Site& site) const
 {
-    OccupationDOF::add_individual_occupation_ops();
+    OccupationDOF::add_individual_occupation_ops(site);
     auto np = numpy();
     for (int64 k = 0; k < num_species; ++k) {
         py::array N_k =
           number_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), k));
-        add_onsite_operator(std::format("N{}N{}", k, k), np.attr("matmul")(N_k, N_k), true);
+        site.add_onsite_operator(std::format("N{}N{}", k, k), np.attr("matmul")(N_k, N_k), true);
         py::array P_k = np.attr("diag")(py::float_(1.0) -
                                         py::float_(2.0) * np.attr("mod")(np.attr("diag")(N_k), 2));
-        add_onsite_operator(std::format("P{}", k), P_k, true);
+        site.add_onsite_operator(std::format("P{}", k), P_k, true);
     }
     if (num_species == 1) {
-        add_onsite_operator("NN", py::cast(onsite_operators.at("N0N0")));
-        add_onsite_operator("P", py::cast(onsite_operators.at("P0")));
+        site.add_onsite_operator("NN", py::cast(site.onsite_operators.at("N0N0")));
+        site.add_onsite_operator("P", py::cast(site.onsite_operators.at("P0")));
     }
 }
 
 void
-OccupationDOF::add_total_occupation_ops()
+OccupationDOF::add_total_occupation_ops(Site& site) const
 {
     auto np = numpy();
-    add_onsite_operator("Ntot", n_tot, true);
-    add_onsite_operator("NtotNtot", np.attr("matmul")(n_tot, n_tot), true);
+    site.add_onsite_operator("Ntot", n_tot, true);
+    site.add_onsite_operator("NtotNtot", np.attr("matmul")(n_tot, n_tot), true);
     py::array P_tot = np.attr("diag")(py::float_(1.0) -
                                       py::float_(2.0) * np.attr("mod")(np.attr("diag")(n_tot), 2));
-    add_onsite_operator("Ptot", P_tot, true);
+    site.add_onsite_operator("Ptot", P_tot, true);
 }
 
 py::array
@@ -1202,26 +1280,13 @@ BosonicDOF::BosonicDOF(ElementarySpace::Ptr leg,
                        py::array /*Nmax_param*/,
                        py::array creators,
                        py::array annihilators,
-                       std::vector<std::optional<std::string>> species_names,
-                       std::map<std::string, int64> state_labels,
-                       std::map<std::string, SymmetricTensorPtr> onsite_operators,
-                       TensorBackend::Ptr backend,
-                       std::optional<std::string> default_device)
-  : Site(leg, state_labels, {}, backend, default_device)
-  , OccupationDOF(leg,
-                  creators,
-                  annihilators,
+                       std::vector<std::optional<std::string>> species_names)
+  : OccupationDOF(std::move(leg),
+                  std::move(creators),
+                  std::move(annihilators),
                   +1,
-                  species_names,
-                  state_labels,
-                  {},
-                  backend,
-                  default_device)
+                  std::move(species_names))
 {
-    if (dynamic_cast<FermionicDOF*>(this)) {
-        throw SymmetryError("FermionicDOF and BosonicDOF are incompatible.");
-    }
-
     auto np = numpy();
     py::list Nmax_list;
     for (int64 k = 0; k < num_species; ++k) {
@@ -1232,7 +1297,7 @@ BosonicDOF::BosonicDOF(ElementarySpace::Ptr leg,
         if (std::abs(N_k_max - N_k_max_) >= 1e-9) {
             throw std::invalid_argument("occupation eigenvalues must be integer");
         }
-        if (leg_dim(leg) % (N_k_max + 1) != 0) {
+        if (leg_dim(leg_) % (N_k_max + 1) != 0) {
             throw std::invalid_argument(
               "leg dimension must be a multiple of (N_k_max + 1) for each species");
         }
@@ -1242,9 +1307,7 @@ BosonicDOF::BosonicDOF(ElementarySpace::Ptr leg,
     if (py_object_to_int64(np.attr("min")(Nmax)) <= 0) {
         throw std::invalid_argument("Nmax must be positive for every species");
     }
-    JW = as_immutable_array(np.attr("diag")(np.attr("ones")(leg_dim(leg))));
-
-    add_onsite_operators_from_map(*this, onsite_operators);
+    JW = as_immutable_array(np.attr("diag")(np.attr("ones")(leg_dim(leg_))));
 }
 
 void
@@ -1400,24 +1463,15 @@ BosonicDOF::creation_annihilation_ops(int64 num_species, py::array Nmax, int64 d
 FermionicDOF::FermionicDOF(ElementarySpace::Ptr leg,
                            py::array creators,
                            py::array annihilators,
-                           std::vector<std::optional<std::string>> species_names,
-                           std::map<std::string, int64> state_labels,
-                           std::map<std::string, SymmetricTensorPtr> onsite_operators,
-                           TensorBackend::Ptr backend,
-                           std::optional<std::string> default_device)
-  : Site(leg, state_labels, {}, backend, default_device)
-  , OccupationDOF(leg,
-                  creators,
-                  annihilators,
+                           std::vector<std::optional<std::string>> species_names)
+  : OccupationDOF(std::move(leg),
+                  std::move(creators),
+                  std::move(annihilators),
                   -1,
-                  species_names,
-                  state_labels,
-                  {},
-                  backend,
-                  default_device)
+                  std::move(species_names))
 {
     int64 fermion_factor_count = 0;
-    for (auto const& factor : leg_symmetry(leg)->factors) {
+    for (auto const& factor : leg_symmetry(leg_)->factors) {
         if (dynamic_cast<FermionParity const*>(factor.get()) ||
             dynamic_cast<FermionNumber const*>(factor.get())) {
             ++fermion_factor_count;
@@ -1428,12 +1482,8 @@ FermionicDOF::FermionicDOF(ElementarySpace::Ptr leg,
           "FermionicDOF requires a symmetry with exactly one fermionic factor");
     }
 
-    if (dynamic_cast<BosonicDOF*>(this)) {
-        throw SymmetryError("FermionicDOF and BosonicDOF are incompatible.");
-    }
-
     auto np = numpy();
-    auto d = leg_dim(leg);
+    auto d = leg_dim(leg_);
     py::array n_diag = number_operators.attr("__getitem__")(
       py::make_tuple(np.attr("arange")(d), np.attr("arange")(d), py::slice()));
     n_diag.attr("__setitem__")(
@@ -1462,8 +1512,6 @@ FermionicDOF::FermionicDOF(ElementarySpace::Ptr leg,
             throw std::invalid_argument("FermionicDOF occupation numbers must be 0 or 1");
         }
     }
-
-    add_onsite_operators_from_map(*this, onsite_operators);
 }
 
 void
