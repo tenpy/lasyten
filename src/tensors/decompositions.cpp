@@ -75,10 +75,11 @@ py_eq(py::object a, py::object b)
 [[nodiscard]] Space::Ptr
 as_space_leg(py::object leg)
 {
-    if (py::isinstance<LegPipe>(leg)) {
+    auto space = leg.cast<Space::Ptr>();
+    if (auto es = std::dynamic_pointer_cast<ElementarySpace>(space); es && es->is_pipe()) {
         throw std::invalid_argument("DiagonalTensor / Mask is not defined on LegPipes.");
     }
-    return leg.cast<Space::Ptr>();
+    return space;
 }
 
 py::object
@@ -493,13 +494,13 @@ eigh_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object 
         std::string cod_lab =
           tensor.attr("codomain_labels").attr("__getitem__")(0).cast<std::string>();
         auto leg_sp = as_space_leg(tensor.attr("leg"));
-        auto V =
-          py::cast(SymmetricTensor::from_eye(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
-                                               std::dynamic_pointer_cast<Leg>(leg_sp) }),
-                                             tensor.attr("backend").cast<TensorBackend::Ptr>(),
-                                             LegLabelList{ cod_lab, a },
-                                             tensor.attr("dtype").cast<Dtype>(),
-                                             tensor.attr("device").cast<std::string>()));
+        auto V = py::cast(
+          SymmetricTensor::from_eye(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
+                                      Leg{ std::dynamic_pointer_cast<ElementarySpace>(leg_sp) } }),
+                                    tensor.attr("backend").cast<TensorBackend::Ptr>(),
+                                    LegLabelList{ cod_lab, a },
+                                    tensor.attr("dtype").cast<Dtype>(),
+                                    tensor.attr("device").cast<std::string>()));
         py::object W = tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true);
         W.attr("labels").attr("set")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
         return { W, V };
@@ -593,13 +594,13 @@ eig_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object s
         std::string cod_lab =
           tensor.attr("codomain_labels").attr("__getitem__")(0).cast<std::string>();
         auto leg_sp = as_space_leg(tensor.attr("leg"));
-        auto V =
-          py::cast(SymmetricTensor::from_eye(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
-                                               std::dynamic_pointer_cast<Leg>(leg_sp) }),
-                                             tensor.attr("backend").cast<TensorBackend::Ptr>(),
-                                             LegLabelList{ cod_lab, a },
-                                             tensor.attr("dtype").cast<Dtype>(),
-                                             tensor.attr("device").cast<std::string>()));
+        auto V = py::cast(
+          SymmetricTensor::from_eye(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
+                                      Leg{ std::dynamic_pointer_cast<ElementarySpace>(leg_sp) } }),
+                                    tensor.attr("backend").cast<TensorBackend::Ptr>(),
+                                    LegLabelList{ cod_lab, a },
+                                    tensor.attr("dtype").cast<Dtype>(),
+                                    tensor.attr("device").cast<std::string>()));
         py::object W = tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true);
         W.attr("labels").attr("set")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
         return { W, V };

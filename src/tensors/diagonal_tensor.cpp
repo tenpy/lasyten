@@ -23,30 +23,44 @@ namespace lasyten {
 
 namespace {
 
-Space::Ptr
-as_space_leg(Space::Ptr leg)
+ElementarySpace::Ptr
+as_elementary_leg(Space::Ptr leg)
 {
     if (!leg) {
         throw std::invalid_argument("Must specify the leg.");
     }
-    if (std::dynamic_pointer_cast<LegPipe>(leg)) {
+    auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
+    if (!es) {
+        throw std::invalid_argument("DiagonalTensor requires an ElementarySpace leg.");
+    }
+    if (es->is_pipe()) {
         throw std::invalid_argument("DiagonalTensor is not defined on LegPipes.");
     }
-    return leg;
+    return es;
+}
+
+Space::Ptr
+as_space_leg(Space::Ptr leg)
+{
+    return as_elementary_leg(std::move(leg));
+}
+
+[[nodiscard]] Leg
+leg_from_space(Space::Ptr const& leg)
+{
+    return Leg{ as_elementary_leg(leg) };
 }
 
 TensorProduct::Ptr
 product_of_leg(Space::Ptr const& leg)
 {
-    auto sp = as_space_leg(leg);
-    return std::make_shared<TensorProduct>(
-      std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(sp) });
+    return std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ leg_from_space(leg) });
 }
 
 BlockBackend::LegCPtr
 as_leg_cptr(Space::Ptr const& leg)
 {
-    return std::dynamic_pointer_cast<Leg const>(as_space_leg(leg));
+    return leg_from_space(leg);
 }
 
 } // namespace
@@ -59,18 +73,16 @@ DiagonalTensor::DiagonalTensor(TensorBackend::DataPtr data_in,
                                Symmetry::Ptr symmetry_in,
                                LegLabelList labels_in)
   : SymmetricTensor(std::move(data_in),
-                    std::make_shared<TensorProduct>(
-                      std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(leg_in) }),
-                    std::make_shared<TensorProduct>(
-                      std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(leg_in) }),
+                    std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
+                      Leg{ std::dynamic_pointer_cast<ElementarySpace>(leg_in) } }),
+                    std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
+                      Leg{ std::dynamic_pointer_cast<ElementarySpace>(leg_in) } }),
                     std::move(backend_in),
                     std::move(symmetry_in),
                     std::move(labels_in),
                     /*check_complex_dtype=*/false)
 {
-    if (std::dynamic_pointer_cast<LegPipe>(leg_in)) {
-        throw std::invalid_argument("DiagonalTensor is not defined on LegPipes.");
-    }
+    as_elementary_leg(leg_in);
 }
 
 std::vector<Dtype> const&
@@ -249,7 +261,7 @@ DiagonalTensor::from_random_normal(Space::Ptr leg,
         if (!leg) {
             leg = mean_leg;
         } else {
-            if (!(*mean_leg == *leg)) {
+            if (!(mean_leg == leg)) {
                 throw std::invalid_argument("mean.leg must match the given leg");
             }
         }
@@ -979,8 +991,8 @@ Identity::Identity(Space::Ptr leg_in,
   : DiagonalTensor(
       // Do not std::move(leg_in)/backend_in in this mem-initializer list: argument
       // evaluation order is unspecified, and eye_data still needs both.
-      backend_in->eye_data(std::make_shared<TensorProduct>(
-                             std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(leg_in) }),
+      backend_in->eye_data(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
+                             Leg{ std::dynamic_pointer_cast<ElementarySpace>(leg_in) } }),
                            dtype_in,
                            device_in),
       leg_in,

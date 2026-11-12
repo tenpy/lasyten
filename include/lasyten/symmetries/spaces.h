@@ -19,6 +19,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -29,129 +30,92 @@ namespace lasyten {
 class TensorBackend;
 class Space;
 class ElementarySpace;
+class LegPipe;
+class DirectSumSpace;
+class AbelianLegPipe;
+class TensorProduct;
 
-/// Common base of `Leg` and `Space`, providing ``shared_from_this``.
+/// Thin value-type handle for a tensor axis: `ElementarySpace` or plain `LegPipe`.
 ///
-/// `ElementarySpace` inherits from both `Space` and `Leg`. They must
-/// therefore share a single ``std::enable_shared_from_this`` base; two independent ones would
-/// be ambiguous, such that ``shared_from_this()`` throws ``std::bad_weak_ptr``.
-/// Not exposed to Python.
-class LegOrSpace : public std::enable_shared_from_this<LegOrSpace>
+/// `AbelianLegPipe` is an `ElementarySpace`, so it is stored in the ES alternative.
+/// Not a polymorphic base; Python exposes `Leg` as an ABC that registers the concrete types.
+class Leg
 {
   public:
-    using Ptr = std::shared_ptr<LegOrSpace>;
+    using Impl = std::variant<std::shared_ptr<ElementarySpace>, std::shared_ptr<LegPipe>>;
+    Impl impl;
 
-    virtual ~LegOrSpace() = default;
-};
+    /// Value semantics; keeps the historical `Leg::Ptr` name for migration.
+    using Ptr = Leg;
+    using CPtr = Leg;
 
-/// Common base class for a single leg of a tensor.
-///
-/// A single leg on a tensor can either be an `ElementarySpace` or, e.g. as the result
-/// of combining legs, a `LegPipe`.
-class Leg : public virtual LegOrSpace
-{
-  public:
-    using Ptr = std::shared_ptr<Leg>;
-    using CPtr = std::shared_ptr<const Leg>;
+    Leg() = default;
+    Leg(std::nullptr_t) noexcept
+      : Leg()
+    {
+    }
+    Leg(std::shared_ptr<ElementarySpace> es);
+    Leg(std::shared_ptr<LegPipe> pipe);
 
-    Symmetry::Ptr symmetry;
-    /// Quantum dimension; integer if ``symmetry->can_be_dropped()``, otherwise may be non-integer.
-    float64 dim = 0.;
-    bool is_dual = false;
+    /// Converting ctor from any `ElementarySpace` subclass (`DirectSumSpace`, `AbelianLegPipe`,
+    /// …).
+    template<typename T,
+             typename = std::enable_if_t<std::is_base_of_v<ElementarySpace, T> &&
+                                         !std::is_same_v<ElementarySpace, T>>>
+    Leg(std::shared_ptr<T> p)
+      : Leg(std::static_pointer_cast<ElementarySpace>(std::move(p)))
+    {
+    }
 
-    Leg(Symmetry::Ptr symmetry,
-        float64 dim,
-        bool is_dual,
-        std::optional<std::vector<int64>> basis_perm = std::nullopt);
-    virtual ~Leg() = default;
+    [[nodiscard]] bool is_pipe() const;
+    [[nodiscard]] bool is_abelian_leg_pipe() const;
+    /// Held `ElementarySpace` (including `AbelianLegPipe`); `nullptr` if plain `LegPipe`.
+    [[nodiscard]] std::shared_ptr<ElementarySpace> as_elementary_space() const;
+    /// Held plain `LegPipe`; `nullptr` if ES / ALP.
+    [[nodiscard]] std::shared_ptr<LegPipe> as_leg_pipe() const;
 
-    /// Perform sanity checks.
-    virtual void test_sanity() const;
+    [[nodiscard]] Symmetry::Ptr symmetry() const;
+    [[nodiscard]] float64 dim() const;
+    [[nodiscard]] bool is_dual() const;
 
-    /// Convert to (an appropriate subclass of) `Space` (MI hook; override `as_space_obj`).
-    std::shared_ptr<Space> as_space() { return as_space_obj(); }
+    void test_sanity() const;
 
-    /// Implement `as_space` for `Leg` subclasses.
-    ///
-    /// Named differently from `Space::as_Space` because `ElementarySpace` inherits both.
-    virtual std::shared_ptr<Space> as_space_obj() = 0;
+    [[nodiscard]] std::shared_ptr<Space> as_space() const;
+    [[nodiscard]] std::shared_ptr<ElementarySpace> as_ElementarySpace(bool is_dual = false) const;
 
-    /// Convert to an isomorphic `ElementarySpace`.
-    virtual std::shared_ptr<ElementarySpace> as_ElementarySpace(bool is_dual = false);
-
-    /// The dual leg (hook for MI; override `dual_leg`).
-    Ptr dual() const { return dual_leg(); }
-
-    /// Implement dual for `Leg` subclasses.
-    virtual Ptr dual_leg() const = 0;
-
-    virtual bool is_trivial() const = 0;
+    [[nodiscard]] Leg dual() const;
+    [[nodiscard]] bool is_trivial() const;
 
     [[nodiscard]] std::vector<int64> basis_perm() const;
-
-    virtual void set_basis_perm(std::optional<std::vector<int64>> basis_perm);
-
-    /// Inverse permutation of `basis_perm`.
+    void set_basis_perm(std::optional<std::vector<int64>> basis_perm);
     [[nodiscard]] std::vector<int64> inverse_basis_perm() const;
+    void set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm);
+    [[nodiscard]] bool has_custom_basis_perm() const;
 
-    virtual void set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm);
+    [[nodiscard]] std::vector<Leg> flat_legs() const;
+    [[nodiscard]] std::vector<Leg> flat_spaces() const;
+    [[nodiscard]] int64 num_flat_legs() const;
+    [[nodiscard]] std::vector<int64> _flat_leg_permutation(int64 offset = 0) const;
+    [[nodiscard]] std::string ascii_arrow() const;
 
-    /// Flatten until there are no more pipes.
-    ///
-    /// flat_spaces : Keeps `AbelianLegPipes` nested.
-    virtual std::vector<Ptr> flat_legs();
+    [[nodiscard]] py::object apply_basis_perm(py::object arr,
+                                              int64 axis = 0,
+                                              bool inverse = false,
+                                              bool pre_compose = false) const;
 
-    /// Flatten until we get spaces.
-    ///
-    /// flat_legs : Also flattens `AbelianLegPipes`.
-    virtual std::vector<Ptr> flat_spaces();
+    bool operator==(Leg const& other) const;
+    bool operator!=(Leg const& other) const { return !(*this == other); }
 
-    /// The number of `flat_legs`.
-    virtual int64 num_flat_legs() const;
+    explicit operator bool() const;
 
-    virtual std::vector<int64> _flat_leg_permutation(int64 offset = 0) const;
-
-    /// A single character arrow, for use in tensor diagrams
-    ///
-    /// Indicates (a) if the leg is a pipe and (b) for ElementarySpaces, the duality
-    virtual std::string ascii_arrow() const;
-
-    virtual bool operator==(Leg const& other) const = 0;
-
-    /// Apply ``basis_perm`` (or its inverse) to ``arr`` (array or index / index array).
-    py::object apply_basis_perm(py::object arr,
-                                int64 axis = 0,
-                                bool inverse = false,
-                                bool pre_compose = false) const;
-
-    [[nodiscard]] bool has_custom_basis_perm() const noexcept { return _basis_perm.has_value(); }
-
-    /// ``shared_from_this()``, downcast to `Leg`.
-    [[nodiscard]] Ptr shared_leg();
-
-  protected:
-    /// For subclasses that inherit `Leg` *virtually*.
-    ///
-    /// A virtual base is initialized by the constructor of the most derived class, which for
-    /// pybind11 trampolines is generated from an inherited constructor and can not pass any
-    /// arguments. Such subclasses therefore leave the `Leg` base default-constructed and
-    /// call `init_leg` in their constructor body instead.
-    Leg() = default;
-
-    /// Set the state of the `Leg` base, see `Leg::Leg`.
-    void init_leg(Symmetry::Ptr symmetry,
-                  float64 dim,
-                  bool is_dual,
-                  std::optional<std::vector<int64>> basis_perm = std::nullopt);
-
-    std::optional<std::vector<int64>> _basis_perm;
-    std::optional<std::vector<int64>> _inverse_basis_perm;
+    bool operator==(std::nullptr_t) const { return !static_cast<bool>(*this); }
+    bool operator!=(std::nullptr_t) const { return static_cast<bool>(*this); }
 };
 
 using SectorMapFn = std::function<SectorArray(SectorArray const&)>;
 
 /// Base class for symmetry spaces, see `ElementarySpace` for the standard case.
-class Space : public virtual LegOrSpace
+class Space : public std::enable_shared_from_this<Space>
 {
   public:
     using Ptr = std::shared_ptr<Space>;
@@ -176,7 +140,6 @@ class Space : public virtual LegOrSpace
           std::optional<std::string> sector_order = std::nullopt);
     virtual ~Space() = default;
 
-    /// Convert to an isomorphic `ElementarySpace`.
     virtual void test_sanity() const;
 
     /// If the space is trivial, i.e. isomorphic to the one-dimensional trivial sector.
@@ -246,56 +209,78 @@ class Space : public virtual LegOrSpace
 };
 
 /// A group of legs, i.e. resulting from `combine_legs`.
-class LegPipe : public virtual Leg
+class LegPipe : public std::enable_shared_from_this<LegPipe>
 {
   public:
     using Ptr = std::shared_ptr<LegPipe>;
     using CPtr = std::shared_ptr<const LegPipe>;
 
-    std::vector<Leg::Ptr> legs;
+    Symmetry::Ptr symmetry;
+    /// Quantum dimension; integer if ``symmetry->can_be_dropped()``, otherwise may be non-integer.
+    float64 dim = 0.;
+    bool is_dual = false;
+
+    std::vector<Leg> legs;
     int64 num_legs = 0;
     bool combine_cstyle = true;
 
-    explicit LegPipe(std::vector<Leg::Ptr> legs, bool is_dual = false, bool combine_cstyle = true);
-    ~LegPipe() override = default;
+    explicit LegPipe(std::vector<Leg> legs, bool is_dual = false, bool combine_cstyle = true);
+    virtual ~LegPipe() = default;
 
-    /// Perform sanity checks.
-    void test_sanity() const override;
+    void test_sanity() const;
 
-    std::shared_ptr<Space> as_space_obj() override;
+    [[nodiscard]] Space::Ptr as_space() const;
 
-    Leg::Ptr dual_leg() const override;
+    [[nodiscard]] Leg dual() const;
 
-    bool is_trivial() const override;
+    [[nodiscard]] bool is_trivial() const;
+
+    [[nodiscard]] std::vector<int64> basis_perm() const;
+    virtual void set_basis_perm(std::optional<std::vector<int64>> basis_perm);
+    [[nodiscard]] std::vector<int64> inverse_basis_perm() const;
+    virtual void set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm);
+    [[nodiscard]] bool has_custom_basis_perm() const noexcept { return _basis_perm.has_value(); }
 
     /// Flatten until there are no more pipes.
     ///
     /// flat_spaces : Keeps `AbelianLegPipes` nested.
-    std::vector<Leg::Ptr> flat_legs() override;
+    [[nodiscard]] std::vector<Leg> flat_legs() const;
 
     /// Flatten until we get spaces.
     ///
     /// flat_legs : Also flattens `AbelianLegPipes`.
-    std::vector<Leg::Ptr> flat_spaces() override;
+    [[nodiscard]] std::vector<Leg> flat_spaces() const;
 
-    /// The number of `flat_legs`.
-    int64 num_flat_legs() const override;
+    [[nodiscard]] int64 num_flat_legs() const;
 
-    std::vector<int64> _flat_leg_permutation(int64 offset = 0) const override;
+    [[nodiscard]] virtual std::vector<int64> _flat_leg_permutation(int64 offset = 0) const;
 
-    void set_basis_perm(std::optional<std::vector<int64>> basis_perm) override;
+    [[nodiscard]] std::string ascii_arrow() const;
 
-    void set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm) override;
+    [[nodiscard]] bool is_pipe() const { return true; }
+    [[nodiscard]] bool is_abelian_leg_pipe() const { return false; }
 
-    std::string ascii_arrow() const override;
+    [[nodiscard]] py::object apply_basis_perm(py::object arr,
+                                              int64 axis = 0,
+                                              bool inverse = false,
+                                              bool pre_compose = false) const;
 
-    bool operator==(Leg const& other) const override;
+    bool operator==(LegPipe const& other) const;
 
-    [[nodiscard]] virtual bool is_abelian_leg_pipe() const { return false; }
-
-    Leg::Ptr operator[](int64 idx) const;
+    [[nodiscard]] Leg operator[](int64 idx) const;
 
     [[nodiscard]] std::string repr(bool show_symmetry = true, bool one_line = false) const;
+
+    [[nodiscard]] Ptr shared_pipe();
+
+  protected:
+    std::optional<std::vector<int64>> _basis_perm;
+    std::optional<std::vector<int64>> _inverse_basis_perm;
+
+    void init_axis(Symmetry::Ptr symmetry,
+                   float64 dim,
+                   bool is_dual,
+                   std::optional<std::vector<int64>> basis_perm = std::nullopt);
 };
 
 /// A `Space` that is defined as (the dual of) a direct sum of sectors.
@@ -319,19 +304,14 @@ class LegPipe : public virtual Leg
 /// needs to lie in one of the sectors of the symmetry. The *internal* basis order that results
 /// from demanding that the sectors are contiguous and sorted may, however, not be the desired
 /// basis order, e.g. for matrix representations.
-///
-/// Note that `Space::symmetry` / `Leg::symmetry` and `Space::dim` /
-/// `Leg::dim` are separate members of the two bases. They are kept in sync; access them
-/// through the `Space` base within this class.
-class ElementarySpace
-  : public Space
-  , public virtual Leg
+class ElementarySpace : public Space
 {
   public:
     using Ptr = std::shared_ptr<ElementarySpace>;
     using CPtr = std::shared_ptr<const ElementarySpace>;
 
     SectorArray defining_sectors;
+    bool is_dual = false;
 
     ElementarySpace(Symmetry::Ptr symmetry,
                     SectorArray defining_sectors,
@@ -382,10 +362,9 @@ class ElementarySpace
 
     [[nodiscard]] std::string repr(bool show_symmetry = true, bool one_line = false) const;
 
-    bool operator==(Leg const& other) const override;
     bool operator==(Space const& other) const override;
 
-    /// Common implementation of both ``operator==`` overloads.
+    /// Common implementation of ``operator==``.
     [[nodiscard]] bool equals_es(ElementarySpace const& other) const;
 
     ElementarySpace::Ptr as_ElementarySpace(bool is_dual = false) override;
@@ -406,7 +385,6 @@ class ElementarySpace
     Space::Ptr drop_symmetry(std::optional<std::vector<int64>> which = std::nullopt) override;
 
     Space::Ptr dual_space() const override;
-    Leg::Ptr dual_leg() const override;
 
     [[nodiscard]] Ptr dual_es() const;
 
@@ -429,11 +407,29 @@ class ElementarySpace
 
     [[nodiscard]] Ptr with_is_dual(bool is_dual) const;
 
-    std::shared_ptr<Space> as_space_obj() override;
-
     bool is_trivial() const override;
 
-    std::string ascii_arrow() const override;
+    [[nodiscard]] virtual std::vector<Leg> flat_legs() const;
+    [[nodiscard]] virtual std::vector<Leg> flat_spaces() const;
+    [[nodiscard]] virtual int64 num_flat_legs() const;
+    [[nodiscard]] virtual std::vector<int64> _flat_leg_permutation(int64 offset = 0) const;
+
+    [[nodiscard]] virtual std::string ascii_arrow() const;
+
+    [[nodiscard]] std::vector<int64> basis_perm() const;
+    virtual void set_basis_perm(std::optional<std::vector<int64>> basis_perm);
+    [[nodiscard]] std::vector<int64> inverse_basis_perm() const;
+    virtual void set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm);
+    [[nodiscard]] bool has_custom_basis_perm() const noexcept { return _basis_perm.has_value(); }
+
+    [[nodiscard]] virtual py::object apply_basis_perm(py::object arr,
+                                                      int64 axis = 0,
+                                                      bool inverse = false,
+                                                      bool pre_compose = false) const;
+
+    /// True for `AbelianLegPipe` (composed pipe structure).
+    [[nodiscard]] virtual bool is_pipe() const { return false; }
+    [[nodiscard]] virtual bool is_abelian_leg_pipe() const { return false; }
 
     void save_hdf5(lasyten::hdf5::Saver& saver,
                    HighFive::Group& h5gr,
@@ -445,6 +441,12 @@ class ElementarySpace
 
     /// If this is a `DirectSumSpace` (default: false).
     [[nodiscard]] virtual bool is_direct_sum_space() const { return false; }
+
+  protected:
+    std::optional<std::vector<int64>> _basis_perm;
+    std::optional<std::vector<int64>> _inverse_basis_perm;
+
+    void init_axis(std::optional<std::vector<int64>> basis_perm = std::nullopt);
 };
 
 /// An `ElementarySpace` that remembers an ordered direct-sum decomposition.
@@ -514,12 +516,9 @@ class DirectSumSpace : public ElementarySpace
     /// Forget the summand structure; return a plain `ElementarySpace` with the
     /// same fused sectors / multiplicities / ``basis_perm``.
     [[nodiscard]] ElementarySpace::Ptr as_plain_ElementarySpace() const;
-
-    std::shared_ptr<Space> as_space_obj() override;
     ElementarySpace::Ptr as_ElementarySpace(bool is_dual = false) override;
 
     Space::Ptr dual_space() const override;
-    Leg::Ptr dual_leg() const override;
     [[nodiscard]] Ptr dual_dss() const;
 
     Space::Ptr change_symmetry(Symmetry::Ptr symmetry,
@@ -534,8 +533,6 @@ class DirectSumSpace : public ElementarySpace
 
     void set_basis_perm(std::optional<std::vector<int64>> basis_perm) override;
     void set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm) override;
-
-    bool operator==(Leg const& other) const override;
     bool operator==(Space const& other) const override;
 
     /// Structural equality: matching duality and elementwise equal summands.
@@ -836,16 +833,21 @@ class TensorProduct : public Space
     TensorProduct(std::vector<Leg::Ptr> factors, Prepared prepared);
 };
 
-/// Special case of a `LegPipe` for abelian group symmetries.
+/// Special case of a pipe for abelian group symmetries.
 ///
-/// Diamond MI: `LegPipe` + `ElementarySpace`, with a single virtual `Leg`.
-class AbelianLegPipe
-  : public LegPipe
-  , public ElementarySpace
+/// Inherits only `ElementarySpace` (no diamond with `LegPipe`). Pipe structure
+/// (`legs`, `combine_cstyle`, fusion maps) is composed as members, analogous to
+/// how `DirectSumSpace` composes ordered summands.
+class AbelianLegPipe : public ElementarySpace
 {
   public:
     using Ptr = std::shared_ptr<AbelianLegPipe>;
     using CPtr = std::shared_ptr<const AbelianLegPipe>;
+
+    /// The individual legs that form this pipe (always `ElementarySpace`s, possibly nested ALPs).
+    std::vector<ElementarySpace::Ptr> legs;
+    int64 num_legs = 0;
+    bool combine_cstyle = true;
 
     /// Strides for ``[leg.num_sectors for leg in legs]`` (C- or F-style).
     std::vector<int64> sector_strides;
@@ -864,26 +866,26 @@ class AbelianLegPipe
     /// Perform sanity checks.
     void test_sanity() const override;
 
-    std::shared_ptr<Space> as_space_obj() override;
-
     ElementarySpace::Ptr as_ElementarySpace(bool is_dual = false) override;
 
     Space::Ptr dual_space() const override;
-    Leg::Ptr dual_leg() const override;
 
     [[nodiscard]] Ptr dual_pipe() const;
 
     bool is_trivial() const override;
 
-    std::vector<Leg::Ptr> flat_spaces() override;
+    std::vector<Leg> flat_legs() const override;
+    std::vector<Leg> flat_spaces() const override;
+    int64 num_flat_legs() const override;
+    std::vector<int64> _flat_leg_permutation(int64 offset = 0) const override;
 
-    /// A filled arrow: unlike its two bases, a pipe that is also a space has its own symbol.
-    ///
-    /// Also resolves the ambiguity between `LegPipe::ascii_arrow` and
-    /// `ElementarySpace::ascii_arrow`.
+    /// A filled arrow for a pipe that is also an `ElementarySpace`.
     std::string ascii_arrow() const override;
 
+    [[nodiscard]] bool is_pipe() const override { return true; }
     [[nodiscard]] bool is_abelian_leg_pipe() const override { return true; }
+
+    Leg::Ptr operator[](int64 idx) const;
 
     /// Create an AbelianLegPipe with multiple independent symmetries.
     ///
@@ -955,8 +957,6 @@ class AbelianLegPipe
     ElementarySpace::Ptr take_slice(py::array blockmask) const override;
 
     ElementarySpace::Ptr with_opposite_duality() const override;
-
-    bool operator==(Leg const& other) const override;
     bool operator==(Space const& other) const override;
 
     /// String representation of this pipe.
@@ -980,16 +980,11 @@ class AbelianLegPipe
                    HighFive::Group& h5gr,
                    std::string const& subpath) const;
 
-    /// Special case of a `LegPipe` for abelian group symmetries.
+    /// Special case of a pipe for abelian group symmetries.
     ///
-    /// This class essentially exists to allow specialized handling of combined legs in the
-    /// `AbelianBackend`. For this backend, we want to treat combined legs, i.e. pipes, exactly
-    /// the same as regular legs. This is why this class also inherits from `ElementarySpace`,
-    /// which are the "uncombined" legs. Crucially, this allows the pipe to have
-    /// `defining_sectors` for the `block_inds`
-    /// to point to, to have a well-behaved `is_dual` attribute and to have a `basis_perm`,
-    /// which can account for the basis permutation that is induced by going from sectors of the
-    /// individual legs to a sorted list of coupled sectors on the pipe.
+    /// Exists so the `AbelianBackend` can treat combined legs like regular
+    /// `ElementarySpace` legs (`defining_sectors`, `is_dual`, fusion `basis_perm`) while still
+    /// remembering how to split them. Pipe metadata is composed (not inherited from `LegPipe`).
     ///
     /// Attributes:
     ///
@@ -1030,7 +1025,7 @@ class AbelianLegPipe
   private:
     struct Prepared
     {
-        std::vector<Leg::Ptr> legs;
+        std::vector<ElementarySpace::Ptr> legs;
         Symmetry::Ptr symmetry;
         SectorArray defining_sectors;
         std::vector<int64> multiplicities;
@@ -1063,7 +1058,7 @@ class AbelianLegPipe
 };
 
 /// Convert a tensor leg to a `Space` (identity if it already is one).
-[[nodiscard]] Space::Ptr as_space(Leg::Ptr const& leg);
+[[nodiscard]] Space::Ptr as_space(Leg const& leg);
 
 /// The swap gate (numpy representation of the braid) between two legs.
 ///
@@ -1120,3 +1115,58 @@ sort_sectors_public(SectorArray const& sectors, std::vector<int64> const& multip
 parse_inputs_drop_symmetry_public(std::optional<std::vector<int64>> which, Symmetry::Ptr symmetry);
 
 } // namespace lasyten
+
+#include <pybind11/cast.h>
+
+namespace pybind11::detail {
+
+/// Accept `ElementarySpace` / `LegPipe` shared_ptrs from Python; unwrap to the held object on
+/// cast.
+///
+/// C++ `Leg` is a value-type handle (not a bound polymorphic class). Python exposes `Leg` as an
+/// ABC that registers the concrete types.
+template<>
+struct type_caster<lasyten::Leg>
+{
+    PYBIND11_TYPE_CASTER(lasyten::Leg, const_name("Leg"));
+
+    bool load(handle src, bool convert)
+    {
+        if (src.is_none()) {
+            value = lasyten::Leg(nullptr);
+            return true;
+        }
+        (void)convert;
+        try {
+            if (isinstance<lasyten::ElementarySpace>(src)) {
+                value = lasyten::Leg(src.cast<std::shared_ptr<lasyten::ElementarySpace>>());
+                return true;
+            }
+            if (isinstance<lasyten::LegPipe>(src)) {
+                value = lasyten::Leg(src.cast<std::shared_ptr<lasyten::LegPipe>>());
+                return true;
+            }
+        } catch (cast_error const&) {
+            return false;
+        } catch (std::exception const&) {
+            return false;
+        }
+        return false;
+    }
+
+    static handle cast(lasyten::Leg const& src, return_value_policy policy, handle parent)
+    {
+        if (!src) {
+            return none().inc_ref();
+        }
+        if (auto es = src.as_elementary_space()) {
+            return pybind11::cast(std::move(es), policy, parent).release();
+        }
+        if (auto pipe = src.as_leg_pipe()) {
+            return pybind11::cast(std::move(pipe), policy, parent).release();
+        }
+        return none().inc_ref();
+    }
+};
+
+} // namespace pybind11::detail

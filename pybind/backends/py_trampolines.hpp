@@ -48,9 +48,9 @@ class PyTensorBackend
     {
         PYBIND11_OVERRIDE_PURE(bool, TensorBackend, is_correct_data_type, data);
     }
-    LegPipe::Ptr make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, LegPipe::Ptr pipe) override
+    Leg::Ptr make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, Leg::Ptr pipe) override
     {
-        PYBIND11_OVERRIDE(LegPipe::Ptr, TensorBackend, make_pipe, legs, is_dual, pipe);
+        PYBIND11_OVERRIDE(Leg::Ptr, TensorBackend, make_pipe, legs, is_dual, pipe);
     }
     TensorBackend::DataPtr act_block_diagonal_square_matrix(
       SymmetricTensorCPtr a,
@@ -100,7 +100,7 @@ class PyTensorBackend
     }
     TensorBackend::DataPtr combine_legs(TensorCPtr tensor,
                                         std::vector<std::vector<int64>> leg_idcs_combine,
-                                        std::vector<LegPipe::Ptr> pipes,
+                                        std::vector<Leg::Ptr> pipes,
                                         TensorProduct::Ptr new_codomain,
                                         TensorProduct::Ptr new_domain) override
     {
@@ -636,7 +636,7 @@ class PyTensorBackend
     }
     py::object state_tensor_product(BlockBackend::BlockPtr state1,
                                     BlockBackend::BlockPtr state2,
-                                    LegPipe::Ptr pipe) override
+                                    Leg::Ptr pipe) override
     {
         PYBIND11_OVERRIDE_PURE(
           py::object, TensorBackend, state_tensor_product, state1, state2, pipe);

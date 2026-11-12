@@ -1655,10 +1655,11 @@ GroupedSite::kroneckerproduct(std::vector<SymmetricTensorPtr> ops) const
     }
     // Pipe dualities {false, true} match Site matrix convention: codomain/domain both store
     // the non-dual `pipe` (public legs appear as pipe / pipe.dual).
+    Leg pipe_leg{ pipe };
     auto combined = combine_legs(tens,
                                  { std::move(cod), std::move(dom) },
                                  PipeDualities{ std::vector<bool>{ false, true } },
-                                 std::vector<Leg::Ptr>{ pipe, pipe });
+                                 std::vector<Leg::Ptr>{ pipe_leg, pipe_leg });
     combined->labels.set(pp_labels());
     return std::dynamic_pointer_cast<SymmetricTensor>(combined);
 }

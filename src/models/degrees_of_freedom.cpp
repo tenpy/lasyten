@@ -110,7 +110,7 @@ leg_labels_are_p_pstar(LegLabelList const& labels)
 bool
 single_leg_matches(Leg::Ptr const& leg, TensorProduct::Ptr const& tp)
 {
-    return tp && tp->num_factors == 1 && tp->factors[0] && leg && tp->factors[0]->operator==(*leg);
+    return tp && tp->num_factors == 1 && tp->factors[0] && leg && (tp->factors[0] == leg);
 }
 
 SymmetricTensorPtr
@@ -383,8 +383,8 @@ Site::Site(ElementarySpace::Ptr leg,
       this->state_labels, static_cast<int64>(dim()), this->symmetry()->can_be_dropped());
     auto const sym = leg_symmetry(this->leg);
     Dtype id_dtype = sym->has_complex_topological_data ? Dtype::Complex128 : Dtype::Float64;
-    // Identity / DiagonalTensor are not defined on LegPipes (e.g. GroupedSite).
-    if (std::dynamic_pointer_cast<LegPipe>(this->leg)) {
+    // Identity / DiagonalTensor are not defined on pipes (e.g. GroupedSite AbelianLegPipe).
+    if (this->leg && this->leg->is_pipe()) {
         auto tp = product_of_leg(this->leg);
         add_onsite_operator("Id",
                             py::cast(SymmetricTensor::from_eye(
@@ -544,7 +544,7 @@ Site::change_leg(ElementarySpace::Ptr new_leg)
 
     auto const sym = leg_symmetry(leg);
     Dtype id_dtype = sym->has_complex_topological_data ? Dtype::Complex128 : Dtype::Float64;
-    if (std::dynamic_pointer_cast<LegPipe>(leg)) {
+    if (leg && leg->is_pipe()) {
         auto tp = product_of_leg(leg);
         add_onsite_operator(
           "Id",

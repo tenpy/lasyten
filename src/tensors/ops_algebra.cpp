@@ -451,7 +451,7 @@ handle_permute_legs_symmetry_error()
 bool
 legs_equal(Leg::Ptr const& a, Leg::Ptr const& b)
 {
-    return a && b && (*a == *b);
+    return a && b && (a == b);
 }
 
 bool
@@ -529,7 +529,7 @@ nested_flat_labels(LegLabelList codomain_labels, LegLabelList domain_labels)
 [[nodiscard]] Space::Ptr
 tp_factor_space(TensorProduct::Ptr const& tp, std::size_t i)
 {
-    return std::dynamic_pointer_cast<Space>(tp->factors.at(i));
+    return as_space(tp->factors.at(i));
 }
 
 [[nodiscard]] TensorProduct::Ptr
@@ -713,12 +713,11 @@ almost_equal(TensorCPtr tensor_1,
             return almost_equal(tensor_2, tensor_1, rtol, atol);
         }
         if (auto c2 = as_Charged(tensor_2)) {
-            if (!(*c1->charge_leg == *c2->charge_leg)) {
+            if (!(c1->charge_leg == c2->charge_leg)) {
                 throw std::invalid_argument("Mismatched charge_leg");
             }
             auto backend = get_same_backend({ tensor_1, tensor_2 });
-            auto charge_space = std::dynamic_pointer_cast<Space const>(c1->charge_leg);
-            if (charge_space && charge_space->dim == 1.) {
+            if (c1->charge_leg.dim() == 1.) {
                 auto bb = backend->block_backend;
                 auto s2 = bb->item(c2->charged_state);
                 auto s1 = bb->item(c1->charged_state);
@@ -771,7 +770,7 @@ enlarge_leg(TensorCPtr tensor, MaskCPtr mask, LegRef leg)
 [[nodiscard]] Space::Ptr
 space_factor0(TensorProduct::Ptr const& tp)
 {
-    return std::dynamic_pointer_cast<Space>(tp->factors.at(0));
+    return as_space(tp->factors.at(0));
 }
 
 [[nodiscard]] TensorPtr
@@ -994,7 +993,7 @@ norm(TensorCPtr tensor)
     }
     if (auto c = as_Charged(tensor)) {
         auto backend = c->backend;
-        if (c->charge_leg->dim == 1.) {
+        if (c->charge_leg.dim() == 1.) {
             auto factor = backend->block_backend->item(c->charged_state).abs();
             return factor * backend->norm(c->invariant_part);
         }
@@ -1114,11 +1113,11 @@ linear_combination(BlockBackend::Scalar const& a,
     }
     if (auto vc = as_Charged(v)) {
         if (auto wc = as_Charged(w)) {
-            if (!(*vc->charge_leg == *wc->charge_leg)) {
+            if (!(vc->charge_leg == wc->charge_leg)) {
                 throw std::invalid_argument(
                   "Can not add ChargedTensors with different dummy legs");
             }
-            if (vc->charge_leg->dim == 1.) {
+            if (vc->charge_leg.dim() == 1.) {
                 auto bb = vc->backend->block_backend;
                 auto factor = bb->item(wc->charged_state) / bb->item(vc->charged_state);
                 SymmetricTensorPtr inv_part = std::dynamic_pointer_cast<SymmetricTensor>(
@@ -1181,13 +1180,20 @@ scale_axis(TensorCPtr tensor, DiagonalTensorCPtr diag, LegRef leg)
         throw SymmetryError("scale_axis requires equivalent symmetries");
     }
     DiagonalTensorCPtr diag_use = diag;
-    auto diag_leg = std::dynamic_pointer_cast<Leg>(diag->leg());
+    auto diag_es = std::dynamic_pointer_cast<ElementarySpace>(diag->leg());
+    if (!diag_es) {
+        throw std::invalid_argument("scale_axis: diagonal leg must be an ElementarySpace");
+    }
+    Leg diag_leg{ diag_es };
     if (legs_equal(tens_leg, diag_leg)) {
         // pass
-    } else if (legs_equal(tens_leg, std::dynamic_pointer_cast<Leg>(diag->leg()->dual_space()))) {
-        diag_use = std::dynamic_pointer_cast<DiagonalTensor const>(transpose(diag));
     } else {
-        throw std::invalid_argument("Incompatible legs");
+        auto dual_es = std::dynamic_pointer_cast<ElementarySpace>(diag->leg()->dual_space());
+        if (dual_es && legs_equal(tens_leg, Leg{ dual_es })) {
+            diag_use = std::dynamic_pointer_cast<DiagonalTensor const>(transpose(diag));
+        } else {
+            throw std::invalid_argument("Incompatible legs");
+        }
     }
 
     if (auto dt = as_Diagonal(tensor)) {
@@ -2112,7 +2118,7 @@ inner(TensorCPtr A, TensorCPtr B, bool do_dagger)
 
     if (auto bc = as_Charged(B)) {
         auto bb = backend->block_backend;
-        auto charge_space = std::dynamic_pointer_cast<Space const>(bc->charge_leg);
+        auto charge_space = as_space(bc->charge_leg);
         if (charge_space &&
             charge_space->sector_multiplicity(charge_space->symmetry->trivial_sector) == 0) {
             Dtype dt = dtype::common({ A->dtype, B->dtype });

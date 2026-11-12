@@ -98,9 +98,8 @@ class TensorBackend : public std::enable_shared_from_this<TensorBackend>
     /// Make a pipe *of the appropriate type* for `combine_legs`.
     ///
     /// If `pipe` is given, try to return it if suitable.
-    virtual LegPipe::Ptr make_pipe(std::vector<Leg::Ptr> legs,
-                                   bool is_dual,
-                                   LegPipe::Ptr pipe = nullptr);
+    /// May return a plain `LegPipe` or an `AbelianLegPipe` (both report `is_pipe()`).
+    virtual Leg::Ptr make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, Leg::Ptr pipe = nullptr);
 
     /// Apply functions like exp() and log() on a (square) block-diagonal `a`.
     ///
@@ -195,7 +194,7 @@ class TensorBackend : public std::enable_shared_from_this<TensorBackend>
     /// @param new_codomain, new_domain The codomain and domain of the resulting tensor
     virtual DataPtr combine_legs(TensorCPtr tensor,
                                  std::vector<std::vector<int64>> leg_idcs_combine,
-                                 std::vector<LegPipe::Ptr> pipes,
+                                 std::vector<Leg::Ptr> pipes,
                                  TensorProduct::Ptr new_codomain,
                                  TensorProduct::Ptr new_domain) = 0;
 
@@ -755,7 +754,7 @@ class TensorBackend : public std::enable_shared_from_this<TensorBackend>
     /// In particular regarding basis orders.
     virtual py::object state_tensor_product(BlockBackend::BlockPtr state1,
                                             BlockBackend::BlockPtr state2,
-                                            LegPipe::Ptr pipe) = 0;
+                                            Leg::Ptr pipe) = 0;
 
     virtual DataPtr to_block_backend(DataPtr data,
                                      std::shared_ptr<BlockBackend> block_backend,

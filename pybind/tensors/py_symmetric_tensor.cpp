@@ -171,7 +171,7 @@ bind_tensors_symmetric_tensor(py::module_& m)
          std::optional<std::string> device,
          std::string label) {
           if (!backend) {
-              backend = get_backend(space->symmetry);
+              backend = get_backend(space.symmetry());
           }
           auto vec = backend->block_backend->as_block(vector, std::nullopt, device);
           return SymmetricTensor::from_dense_block_trivial_sector(

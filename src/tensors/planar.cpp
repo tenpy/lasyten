@@ -2285,7 +2285,7 @@ planar_contraction(TensorCPtr tensor1,
             auto i2 = map2[static_cast<std::size_t>(extra2[k])];
             auto d = tensor1->_as_domain_leg(i1);
             auto c = tensor2->_as_codomain_leg(i2);
-            if (!d || !c || !(*d == *c)) {
+            if (!d || !c || !(d == c)) {
                 extras_match = false;
                 break;
             }

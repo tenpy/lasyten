@@ -97,7 +97,7 @@ ChargedTensor::test_sanity() const
     assert(charged_state);
     backend->block_backend->test_block_sanity(
       charged_state,
-      std::vector<int64>{ static_cast<int64>(charge_leg->dim) },
+      std::vector<int64>{ static_cast<int64>(charge_leg.dim()) },
       std::nullopt,
       device);
     reject_exclamation_in_labels(labels.as_list(), "ChargedTensor");
@@ -129,7 +129,7 @@ ChargedTensor::_parse_inv_domain(TensorProduct::Ptr domain,
     if (!domain) {
         throw std::invalid_argument("domain must be parsed before constructing ChargedTensor");
     }
-    Space::Ptr charge_leg_sp;
+    ElementarySpace::Ptr charge_leg_sp;
     if (auto const* es = std::get_if<ElementarySpace::Ptr>(&charge)) {
         charge_leg_sp = *es;
     } else {
@@ -137,7 +137,7 @@ ChargedTensor::_parse_inv_domain(TensorProduct::Ptr domain,
         charge_leg_sp =
           std::make_shared<ElementarySpace>(domain->symmetry, SectorArray::from_sector(sec));
     }
-    return { domain->left_multiply(std::dynamic_pointer_cast<Leg>(charge_leg_sp)), charge_leg_sp };
+    return { domain->left_multiply(Leg{ charge_leg_sp }), charge_leg_sp };
 }
 
 std::tuple<LegLabelList, LegLabelList>
@@ -247,23 +247,23 @@ ChargedTensor::from_dense_block_single_sector(BlockBackend::BlockPtr vector,
         throw std::invalid_argument("space must be specified");
     }
     if (!backend) {
-        backend = get_backend(space->symmetry);
+        backend = get_backend(space.symmetry());
     }
-    if (space->symmetry->qdim(sector) > 1.) {
+    if (space.symmetry()->qdim(sector) > 1.) {
         throw NotImplemented("from_dense_block_single_sector does not support higher-dim sectors");
     }
     auto charge_leg =
-      std::make_shared<ElementarySpace>(space->symmetry, SectorArray::from_sector(sector));
+      std::make_shared<ElementarySpace>(space.symmetry(), SectorArray::from_sector(sector));
     auto space_as_space = as_space(space);
     auto data =
       backend->inv_part_from_dense_block_single_sector(vector, space_as_space, charge_leg);
     auto codomain =
-      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ space }, space->symmetry);
+      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ space }, space.symmetry());
     auto inv_domain =
-      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ charge_leg }, space->symmetry);
+      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ charge_leg }, space.symmetry());
     LegLabelList inv_labels{ label.value_or(""), std::string(_CHARGE_LEG_LABEL) };
     auto inv_part = std::make_shared<SymmetricTensor>(
-      data, codomain, inv_domain, backend, space->symmetry, std::move(inv_labels));
+      data, codomain, inv_domain, backend, space.symmetry(), std::move(inv_labels));
     auto charged_state =
       backend->block_backend->as_block(py::cast(std::vector<int64>{ 1 }), inv_part->dtype, device);
     return std::make_shared<ChargedTensor>(inv_part, charged_state);
@@ -322,9 +322,9 @@ ChargedTensor::from_two_charge_legs(SymmetricTensor::Ptr invariant_part,
           "from_two_charge_legs: expected SymmetricTensor after combine_legs");
     }
     inv_sym->labels[-1] = _CHARGE_LEG_LABEL;
-    auto pipe = std::dynamic_pointer_cast<LegPipe>(inv_sym->domain->factors[0]);
-    if (!pipe) {
-        throw std::runtime_error("from_two_charge_legs: expected LegPipe charge leg");
+    auto pipe = inv_sym->domain->factors[0];
+    if (!pipe || !pipe.is_pipe()) {
+        throw std::runtime_error("from_two_charge_legs: expected pipe charge leg");
     }
     auto state = invariant_part->backend->state_tensor_product(state1, state2, pipe)
                    .cast<BlockBackend::BlockPtr>();
@@ -386,7 +386,7 @@ ChargedTensor::as_SymmetricTensor(bool /*guarantee_copy*/, std::optional<std::st
         charge_space->sector_decomposition[0] != symmetry->trivial_sector) {
         throw SymmetryError("Not a symmetric tensor");
     }
-    if (charge_leg->dim == 1.) {
+    if (charge_leg.dim() == 1.) {
         auto squeezed = squeeze_legs(invariant_part, std::vector<LegRef>{ int64{ -1 } });
         auto scale = backend->block_backend->item(charged_state);
         auto scaled = std::dynamic_pointer_cast<SymmetricTensor>(squeezed->scaled(scale));
@@ -396,7 +396,7 @@ ChargedTensor::as_SymmetricTensor(bool /*guarantee_copy*/, std::optional<std::st
         return scaled;
     }
     // charge_leg.dual (Python wrote charged_state.dual — treat as charge_leg.dual)
-    auto dual = charge_leg->dual_leg();
+    auto dual = charge_leg.dual();
     auto state_codomain = std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ dual });
     auto state = SymmetricTensor::from_dense_block(
       charged_state,
@@ -511,7 +511,7 @@ ChargedTensor::_repr_header_lines(std::string const& indent, bool use_symm_str) 
     lines.push_back(
       std::format("{}* Charge Leg: dim={} sectors={}",
                   indent,
-                  std::round(charge_leg->dim * 1000.) / 1000.,
+                  std::round(charge_leg.dim() * 1000.) / 1000.,
                   py::str(py::cast(charge_space->sector_decomposition)).cast<std::string>()));
     std::string start = indent + "* Charged State: ";
     auto state_lines = backend->block_backend->_block_repr_lines(

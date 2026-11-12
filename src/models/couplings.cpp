@@ -70,13 +70,13 @@ check_site_count(std::vector<Site::Ptr> const& sites, int64 expected)
 bool
 legs_equal(Leg::Ptr const& a, Leg::Ptr const& b)
 {
-    return a && b && a->operator==(*b);
+    return a && b && (a == b);
 }
 
 Leg::Ptr
 as_leg(ElementarySpace::Ptr space)
 {
-    return std::static_pointer_cast<Leg>(space);
+    return Leg{ std::move(space) };
 }
 
 LevelsSpec
@@ -313,13 +313,11 @@ structural_key(Coupling const& coupling)
         }
         py::list codomain_spaces;
         for (auto const& f : t->codomain->factors) {
-            codomain_spaces.append(
-              freeze(py::cast(space_to_dict(std::dynamic_pointer_cast<ElementarySpace>(f)))));
+            codomain_spaces.append(freeze(py::cast(space_to_dict(f.as_elementary_space()))));
         }
         py::list domain_spaces;
         for (auto const& f : t->domain->factors) {
-            domain_spaces.append(
-              freeze(py::cast(space_to_dict(std::dynamic_pointer_cast<ElementarySpace>(f)))));
+            domain_spaces.append(freeze(py::cast(space_to_dict(f.as_elementary_space()))));
         }
         factor_keys.append(py::make_tuple(py::tuple(shape_list),
                                           py::tuple(labels_list),
@@ -374,7 +372,7 @@ space_to_dict(ElementarySpace::Ptr space)
         { "symmetry", py::str(space->Space::symmetry->repr()) },
         { "sectors", sectors },
         { "multiplicities", multiplicities },
-        { "is_dual", py::bool_(space->Leg::is_dual) },
+        { "is_dual", py::bool_(space->is_dual) },
         { "basis_perm", basis_perm },
     };
 }
@@ -453,7 +451,7 @@ Coupling::test_sanity() const
             throw std::runtime_error("Coupling dual physical leg mismatch");
         }
     }
-    if (!factorization.front()->get_leg("wL")->is_trivial()) {
+    if (!factorization.front()->get_leg("wL").is_trivial()) {
         throw std::runtime_error("Leftmost wL leg must be trivial");
     }
     for (std::size_t i = 0; i + 1 < factorization.size(); ++i) {
@@ -462,7 +460,7 @@ Coupling::test_sanity() const
             throw std::runtime_error("Coupling virtual legs must match between neighbors");
         }
     }
-    if (!factorization.back()->get_leg("wR")->is_trivial()) {
+    if (!factorization.back()->get_leg("wR").is_trivial()) {
         throw std::runtime_error("Rightmost wR leg must be trivial");
     }
 }
@@ -720,7 +718,7 @@ Coupling::stretch_with_identities(std::vector<Site::Ptr> const& all_sites,
             tensor = it->second;
         }
         new_factorization.push_back(tensor);
-        wR_space = std::dynamic_pointer_cast<ElementarySpace>(tensor->get_leg_co_domain("wR"));
+        wR_space = tensor->get_leg_co_domain("wR").as_elementary_space();
     }
 
     std::vector<Site::Ptr> new_sites;
@@ -741,9 +739,8 @@ Coupling::elementary_decomposition() const
     std::vector<std::vector<MaskPtr>> masks_R;
     std::vector<std::vector<MaskPtr>> masks_L;
     for (std::size_t b = 0; b + 1 < n; ++b) {
-        auto leg_R = std::dynamic_pointer_cast<ElementarySpace>(factorization[b]->get_leg("wR"));
-        auto leg_L =
-          std::dynamic_pointer_cast<ElementarySpace>(factorization[b + 1]->get_leg("wL"));
+        auto leg_R = factorization[b]->get_leg("wR").as_elementary_space();
+        auto leg_L = factorization[b + 1]->get_leg("wL").as_elementary_space();
         if (!leg_R || !leg_L) {
             throw std::runtime_error("virtual legs must be ElementarySpaces");
         }

@@ -24,13 +24,13 @@ namespace {
 bool
 legs_equal(Leg::Ptr const& a, Leg::Ptr const& b)
 {
-    return a && b && a->operator==(*b);
+    return a && b && (a == b);
 }
 
 bool
 products_equal(TensorProduct::Ptr const& a, TensorProduct::Ptr const& b)
 {
-    return a && b && a->operator==(*b);
+    return a && b && (a == b);
 }
 
 std::vector<Leg::Ptr>
@@ -278,7 +278,7 @@ zero_like(TensorCPtr tensor)
           diag->leg(), diag->backend, diag->labels.as_list(), diag->dtype, diag->device);
     }
     if (auto charged = std::dynamic_pointer_cast<ChargedTensor const>(tensor)) {
-        auto charge = std::dynamic_pointer_cast<ElementarySpace>(charged->charge_leg);
+        auto charge = charged->charge_leg.as_elementary_space();
         if (!charge) {
             throw std::invalid_argument("zero_like: charge_leg must be an ElementarySpace");
         }
@@ -388,8 +388,8 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
             !factor_slices_equal(factors_slice(op->domain, 0, -1), ref_dom_head)) {
             throw std::runtime_error("inconsistent legs in grid");
         }
-        if (!std::dynamic_pointer_cast<ElementarySpace>((*op->codomain)[0]) ||
-            !std::dynamic_pointer_cast<ElementarySpace>((*op->domain)[-1])) {
+        if (!(*op->codomain)[0].as_elementary_space() ||
+            !(*op->domain)[-1].as_elementary_space()) {
             throw std::runtime_error("stacking legs must be ElementarySpace");
         }
     }
@@ -405,7 +405,7 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
             if (!op) {
                 continue;
             }
-            auto cell_space = std::dynamic_pointer_cast<ElementarySpace>((*op->codomain)[0]);
+            auto cell_space = (*op->codomain)[0].as_elementary_space();
             if (!row_space) {
                 row_space = cell_space;
             } else if (!row_space->equals_es(*cell_space)) {
@@ -431,7 +431,7 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
             if (!op) {
                 continue;
             }
-            auto cell_space = std::dynamic_pointer_cast<ElementarySpace>((*op->domain)[-1]);
+            auto cell_space = (*op->domain)[-1].as_elementary_space();
             if (!col_space) {
                 col_space = cell_space;
             } else if (!col_space->equals_es(*cell_space)) {
@@ -731,8 +731,8 @@ tensor_grid_cell(TensorCPtr tensor,
     // codomain-side view of the stacking leg so apply_mask works for domain legs.
     auto row_space = tensor->get_leg(row_leg);
     auto col_space = tensor->get_leg(col_leg);
-    auto row_dss = std::dynamic_pointer_cast<DirectSumSpace>(row_space);
-    auto col_dss = std::dynamic_pointer_cast<DirectSumSpace>(col_space);
+    auto row_dss = std::dynamic_pointer_cast<DirectSumSpace>(row_space.as_elementary_space());
+    auto col_dss = std::dynamic_pointer_cast<DirectSumSpace>(col_space.as_elementary_space());
 
     TensorPtr cell = std::const_pointer_cast<Tensor>(tensor);
     if (row_dss) {
@@ -777,7 +777,8 @@ tensor_subgrid(TensorCPtr tensor,
     auto select_labels =
       [&](LegRef leg,
           std::vector<DirectSumSpace::SummandRef> const& refs) -> std::optional<LegLabelList> {
-        auto dss = std::dynamic_pointer_cast<DirectSumSpace>(tensor->get_leg(leg));
+        auto dss =
+          std::dynamic_pointer_cast<DirectSumSpace>(tensor->get_leg(leg).as_elementary_space());
         if (!dss) {
             return std::nullopt;
         }
@@ -821,7 +822,8 @@ grid_project(TensorCPtr tensor,
 
     TensorPtr result = std::const_pointer_cast<Tensor>(tensor);
     for (std::size_t i = 0; i < legs.size(); ++i) {
-        auto dss = std::dynamic_pointer_cast<DirectSumSpace>(result->get_leg(legs[i]));
+        auto dss = std::dynamic_pointer_cast<DirectSumSpace>(
+          result->get_leg(legs[i]).as_elementary_space());
         if (!dss) {
             throw std::invalid_argument("grid_project: selected leg is not a DirectSumSpace");
         }

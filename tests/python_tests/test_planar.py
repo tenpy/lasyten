@@ -149,7 +149,7 @@ def test_planar_combine_legs(
                 num_codomain_legs -= 1
             else:
                 num_domain_legs -= 1
-            flat_num = len(T.get_leg(leg)) if isinstance(T.get_leg(leg), lasy.LegPipe) else 1
+            flat_num = len(T.get_leg(leg)) if lasy.is_leg_pipe(T.get_leg(leg)) else 1
             if leg0 < T.num_codomain_legs and leg >= T.num_codomain_legs:
                 num_codomain_flat_legs += flat_num
                 num_domain_flat_legs -= flat_num

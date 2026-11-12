@@ -305,14 +305,14 @@ SymmetricTensor::from_dense_block_trivial_sector(BlockBackend::BlockPtr vector,
         throw std::invalid_argument("space must be specified");
     }
     if (!backend) {
-        backend = get_backend(space->symmetry);
+        backend = get_backend(space.symmetry());
     }
     (void)device;
     auto vec = vector;
     auto space_as_space = as_space(space);
     // Inverse of the permutation applied in to_dense_block_trivial_sector.
-    if (space->has_custom_basis_perm()) {
-        auto i = space_as_space->sector_decomposition_where(space->symmetry->trivial_sector);
+    if (space.has_custom_basis_perm()) {
+        auto i = space_as_space->sector_decomposition_where(space.symmetry()->trivial_sector);
         if (!i.has_value()) {
             throw std::invalid_argument("space does not contain the trivial sector");
         }
@@ -320,7 +320,7 @@ SymmetricTensor::from_dense_block_trivial_sector(BlockBackend::BlockPtr vector,
             throw std::invalid_argument("space is missing sector slices");
         }
         auto const& sl = (*space_as_space->slices)[static_cast<std::size_t>(*i)];
-        auto basis_perm = space->basis_perm();
+        auto basis_perm = space.basis_perm();
         std::vector<int64> segment(basis_perm.begin() + sl[0], basis_perm.begin() + sl[1]);
         std::vector<int64> order(segment.size());
         std::iota(order.begin(), order.end(), 0);
@@ -336,10 +336,10 @@ SymmetricTensor::from_dense_block_trivial_sector(BlockBackend::BlockPtr vector,
     }
     auto data = backend->from_dense_block_trivial_sector(vec, space_as_space);
     auto codomain =
-      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ space }, space->symmetry);
-    auto domain = std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{}, space->symmetry);
+      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ space }, space.symmetry());
+    auto domain = std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{}, space.symmetry());
     return std::make_shared<SymmetricTensor>(
-      data, codomain, domain, backend, space->symmetry, LegLabelList{ std::move(label) });
+      data, codomain, domain, backend, space.symmetry(), LegLabelList{ std::move(label) });
 }
 
 SymmetricTensor::Ptr
@@ -562,10 +562,10 @@ SymmetricTensor::from_tree_pairs(py::object trees_obj,
     X_are_dual.reserve(codomain_tp->factors.size());
     Y_are_dual.reserve(domain_tp->factors.size());
     for (auto const& leg : codomain_tp->factors) {
-        X_are_dual.push_back(leg->is_dual ? 1 : 0);
+        X_are_dual.push_back(leg.is_dual() ? 1 : 0);
     }
     for (auto const& leg : domain_tp->factors) {
-        Y_are_dual.push_back(leg->is_dual ? 1 : 0);
+        Y_are_dual.push_back(leg.is_dual() ? 1 : 0);
     }
 
     std::map<std::pair<FusionTree, FusionTree>, BlockBackend::BlockPtr> block_trees;
@@ -706,15 +706,23 @@ SymmetricTensor::to_backend(TensorBackend::Ptr new_backend,
         std::vector<bool> pipe_dualities;
         int64 flat_leg_counter = 0;
         for (auto const& leg : legs()) {
-            if (auto pipe = std::dynamic_pointer_cast<LegPipe>(leg)) {
-                auto num = pipe->num_legs;
+            if (leg && leg.is_pipe()) {
+                int64 num = 0;
+                if (auto alp =
+                      std::dynamic_pointer_cast<AbelianLegPipe>(leg.as_elementary_space())) {
+                    num = alp->num_legs;
+                } else if (auto pipe = leg.as_leg_pipe()) {
+                    num = pipe->num_legs;
+                } else {
+                    throw std::runtime_error("to_backend: unexpected pipe type");
+                }
                 std::vector<LegRef> group;
                 group.reserve(static_cast<std::size_t>(num));
                 for (int64 i = flat_leg_counter; i < flat_leg_counter + num; ++i) {
                     group.emplace_back(i);
                 }
                 which_legs.push_back(std::move(group));
-                pipe_dualities.push_back(leg->is_dual);
+                pipe_dualities.push_back(leg.is_dual());
                 flat_leg_counter += num;
             } else {
                 flat_leg_counter += 1;
@@ -853,7 +861,7 @@ SymmetricTensor::to_dense_block_trivial_sector() const
     }
     auto space = as_space(codomain->factors[0]);
     auto leg = codomain->factors[0];
-    if (leg->has_custom_basis_perm()) {
+    if (leg.has_custom_basis_perm()) {
         auto i = space->sector_decomposition_where(symmetry->trivial_sector);
         if (!i.has_value()) {
             throw std::invalid_argument("space does not contain the trivial sector");
@@ -862,7 +870,7 @@ SymmetricTensor::to_dense_block_trivial_sector() const
             throw std::invalid_argument("space is missing sector slices");
         }
         auto const& sl = (*space->slices)[static_cast<std::size_t>(*i)];
-        auto basis_perm = leg->basis_perm();
+        auto basis_perm = leg.basis_perm();
         std::vector<int64> segment(basis_perm.begin() + sl[0], basis_perm.begin() + sl[1]);
         // Python: perm = np.argsort(leg.basis_perm[slice(*leg.slices[i])])
         std::vector<int64> order(segment.size());

@@ -40,9 +40,28 @@ py_bool_dtype()
 }
 
 [[nodiscard]] std::pair<int64, int64>
-parse_leg_index(std::shared_ptr<LegOrSpace> const& leg, int64 idx)
+parse_leg_index(ElementarySpace::Ptr const& leg, int64 idx)
+{
+    if (!leg) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return leg->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Space::Ptr const& leg, int64 idx)
 {
     auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
+    if (!es) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return es->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Leg const& leg, int64 idx)
+{
+    auto es = leg.as_elementary_space();
     if (!es) {
         throw std::invalid_argument("parse_index requires an ElementarySpace leg");
     }
@@ -549,13 +568,9 @@ AbelianBackend::test_tensor_sanity(TensorCPtr a, bool is_diagonal)
     assert(a->dtype == data->dtype);
     int64 num_legs = a->num_legs;
     for (int64 n = 0; n < num_legs; ++n) {
-        py::object l = py::cast(a).attr("get_leg_co_domain")(n);
-        try {
-            auto pipe = l.cast<LegPipe::Ptr>();
-            if (pipe && !std::dynamic_pointer_cast<AbelianLegPipe>(pipe))
-                throw std::runtime_error("pipes must be AbelianLegPipe");
-        } catch (py::cast_error const&) {
-        }
+        auto leg = a->get_leg_co_domain(n);
+        if (leg && leg.is_pipe() && !leg.is_abelian_leg_pipe())
+            throw std::runtime_error("pipes must be AbelianLegPipe");
     }
     auto const& bi = data->block_inds;
     assert(bi.nrows() == data->blocks.size());
@@ -624,8 +639,8 @@ AbelianBackend::test_mask_sanity(MaskCPtr a)
     }
 }
 
-LegPipe::Ptr
-AbelianBackend::make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, LegPipe::Ptr pipe)
+Leg::Ptr
+AbelianBackend::make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, Leg::Ptr pipe)
 {
     // --- hints from Python AbelianBackend.make_pipe ---
     // OPTIMIZE rm check
@@ -633,12 +648,12 @@ AbelianBackend::make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, LegPipe::Ptr
     std::vector<ElementarySpace::Ptr> es;
     es.reserve(legs.size());
     for (auto const& l : legs) {
-        auto p = std::dynamic_pointer_cast<ElementarySpace>(l);
+        auto p = l.as_elementary_space();
         if (!p)
             throw std::invalid_argument("make_pipe: legs must be ElementarySpace");
         es.push_back(std::move(p));
     }
-    if (auto ab = std::dynamic_pointer_cast<AbelianLegPipe>(pipe)) {
+    if (auto ab = std::dynamic_pointer_cast<AbelianLegPipe>(pipe.as_elementary_space())) {
         assert(ab->combine_cstyle == !is_dual);
         assert(ab->is_dual == is_dual);
         return ab;
@@ -889,7 +904,7 @@ AbelianBackend::supports_symmetry(Symmetry::Ptr symmetry)
 py::object
 AbelianBackend::state_tensor_product(BlockBackend::BlockPtr /*state1*/,
                                      BlockBackend::BlockPtr /*state2*/,
-                                     LegPipe::Ptr /*pipe*/)
+                                     Leg::Ptr /*pipe*/)
 {
     // --- hints from Python AbelianBackend.state_tensor_product ---
     // clearly define what this should do in tensors.py first!
@@ -1109,7 +1124,7 @@ AbelianBackend::diagonal_transpose(DiagonalTensorCPtr tens)
 TensorBackend::DataPtr
 AbelianBackend::combine_legs(TensorCPtr tensor,
                              std::vector<std::vector<int64>> leg_idcs_combine,
-                             std::vector<LegPipe::Ptr> pipes,
+                             std::vector<Leg::Ptr> pipes,
                              TensorProduct::Ptr new_codomain,
                              TensorProduct::Ptr new_domain)
 {
@@ -1139,7 +1154,7 @@ AbelianBackend::combine_legs(TensorCPtr tensor,
     // which is sorted and thus preserves lexsort( .T)-ing of res_block_inds
     // ---
     for (auto const& p : pipes) {
-        if (!std::dynamic_pointer_cast<AbelianLegPipe>(p))
+        if (!std::dynamic_pointer_cast<AbelianLegPipe>(p.as_elementary_space()))
             throw std::invalid_argument("abelian backend requires AbelianLegPipe");
     }
     auto t_data = data_from_tensor(tensor);
@@ -1156,7 +1171,7 @@ AbelianBackend::combine_legs(TensorCPtr tensor,
     auto const& t_bi = t_data->block_inds;
     for (std::size_t gi = 0; gi < leg_idcs_combine.size(); ++gi) {
         auto const& group = leg_idcs_combine[gi];
-        auto pipe = std::dynamic_pointer_cast<AbelianLegPipe>(pipes[gi]);
+        auto pipe = std::dynamic_pointer_cast<AbelianLegPipe>(pipes[gi].as_elementary_space());
         int64 num_uncombined = group[0] - j;
         if (num_uncombined > 0) {
             std::vector<std::size_t> src_cols(static_cast<std::size_t>(num_uncombined));
@@ -1227,7 +1242,7 @@ AbelianBackend::combine_legs(TensorCPtr tensor,
     j = 0;
     for (std::size_t gi = 0; gi < leg_idcs_combine.size(); ++gi) {
         auto const& group = leg_idcs_combine[gi];
-        auto pipe = std::dynamic_pointer_cast<AbelianLegPipe>(pipes[gi]);
+        auto pipe = std::dynamic_pointer_cast<AbelianLegPipe>(pipes[gi].as_elementary_space());
         auto const& block_ind_map_rows = map_inds[gi];
         int64 num_uncombined = group[0] - j;
         for (int64 u = 0; u < num_uncombined; ++u) {
@@ -2675,15 +2690,13 @@ AbelianBackend::_mask_contract(TensorCPtr tensor, MaskCPtr mask, int64 leg_idx, 
         codomain = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
         auto spaces = tensor->domain->factors;
         spaces[static_cast<std::size_t>(co_domain_idx)] =
-          large_leg ? std::static_pointer_cast<Leg>(mask->small_leg())
-                    : std::static_pointer_cast<Leg>(mask->large_leg());
+          large_leg ? Leg{ mask->small_leg() } : Leg{ mask->large_leg() };
         domain = std::make_shared<TensorProduct>(std::move(spaces), tensor->symmetry);
     } else {
         domain = tensor->domain;
         auto spaces = tensor->codomain->factors;
         spaces[static_cast<std::size_t>(co_domain_idx)] =
-          large_leg ? std::static_pointer_cast<Leg>(mask->small_leg())
-                    : std::static_pointer_cast<Leg>(mask->large_leg());
+          large_leg ? Leg{ mask->small_leg() } : Leg{ mask->large_leg() };
         codomain = std::make_shared<TensorProduct>(std::move(spaces), tensor->symmetry);
     }
     return { wrap(data), codomain, domain };

@@ -36,24 +36,26 @@ py_bool_dtype()
 ElementarySpace::Ptr
 as_elementary_space(Space::Ptr obj)
 {
-    if (std::dynamic_pointer_cast<LegPipe>(obj)) {
-        throw std::invalid_argument("Mask is not defined on LegPipes.");
-    }
     auto es = std::dynamic_pointer_cast<ElementarySpace>(obj);
     if (!es) {
         throw std::invalid_argument("Expected ElementarySpace.");
     }
+    if (es->is_pipe()) {
+        throw std::invalid_argument("Mask is not defined on LegPipes.");
+    }
     return es;
+}
+
+[[nodiscard]] Leg
+leg_from_space(Space::Ptr const& space)
+{
+    return Leg{ as_elementary_space(space) };
 }
 
 BlockBackend::LegCPtr
 as_leg_cptr(Space::Ptr const& space)
 {
-    auto es = std::dynamic_pointer_cast<ElementarySpace>(space);
-    if (!es) {
-        throw std::invalid_argument("Expected ElementarySpace for Mask leg.");
-    }
-    return std::static_pointer_cast<Leg const>(es);
+    return leg_from_space(space);
 }
 
 /// Invert each bool entry of a block (replaces ``operator.invert`` via numpy).
@@ -127,10 +129,8 @@ make_mask(TensorBackend::DataPtr data,
     as_elementary_space(space_in);
     as_elementary_space(space_out);
     auto [codomain, domain, backend_tp, symmetry] = Tensor::_init_parse_args(
-      std::make_shared<TensorProduct>(
-        std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(space_out) }),
-      std::make_shared<TensorProduct>(
-        std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(space_in) }),
+      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ leg_from_space(space_out) }),
+      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ leg_from_space(space_in) }),
       std::move(backend));
     auto labs = Tensor::_init_parse_labels(std::move(labels), codomain, domain);
     auto device_s = backend_tp->get_device_from_data(data);
@@ -163,10 +163,10 @@ Mask::Mask(TensorBackend::DataPtr data_in,
            Symmetry::Ptr symmetry_in,
            LegLabelList labels_in,
            std::string device_in)
-  : Tensor(std::make_shared<TensorProduct>(
-             std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(space_out) }),
+  : Tensor(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
+             Leg{ std::dynamic_pointer_cast<ElementarySpace>(space_out) } }),
            std::make_shared<TensorProduct>(
-             std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(space_in) }),
+             std::vector<Leg::Ptr>{ Leg{ std::dynamic_pointer_cast<ElementarySpace>(space_in) } }),
            std::move(backend_in),
            std::move(symmetry_in),
            std::move(labels_in),
@@ -176,13 +176,13 @@ Mask::Mask(TensorBackend::DataPtr data_in,
   , data(std::move(data_in))
 {
     assert(backend->is_correct_data_type(data));
-    if (py::isinstance<LegPipe>(py::cast(space_in)) ||
-        py::isinstance<LegPipe>(py::cast(space_out))) {
-        throw std::invalid_argument("Mask is not defined on LegPipes.");
-    }
-    if (!std::dynamic_pointer_cast<ElementarySpace>(space_in) ||
-        !std::dynamic_pointer_cast<ElementarySpace>(space_out)) {
+    auto es_in = std::dynamic_pointer_cast<ElementarySpace>(space_in);
+    auto es_out = std::dynamic_pointer_cast<ElementarySpace>(space_out);
+    if (!es_in || !es_out) {
         throw std::invalid_argument("Expected ElementarySpace.");
+    }
+    if (es_in->is_pipe() || es_out->is_pipe()) {
+        throw std::invalid_argument("Mask is not defined on LegPipes.");
     }
     if (is_projection) {
         if (!(space_dim(*space_in) >= space_dim(*space_out))) {
@@ -203,9 +203,7 @@ Mask::Mask(TensorBackend::DataPtr data_in,
               "inclusion mask requires the incoming space to be a subspace of the outgoing space");
         }
     }
-    auto es_out = std::dynamic_pointer_cast<ElementarySpace>(space_out);
-    auto es_in = std::dynamic_pointer_cast<ElementarySpace>(space_in);
-    if (!es_out || !es_in || es_out->is_dual != es_in->is_dual) {
+    if (es_out->is_dual != es_in->is_dual) {
         throw std::invalid_argument("mask legs must have matching duality");
     }
 }
@@ -232,18 +230,18 @@ ElementarySpace::Ptr
 Mask::large_leg() const
 {
     if (is_projection) {
-        return std::dynamic_pointer_cast<ElementarySpace>(domain->factors[0]);
+        return domain->factors[0].as_elementary_space();
     }
-    return std::dynamic_pointer_cast<ElementarySpace>(codomain->factors[0]);
+    return codomain->factors[0].as_elementary_space();
 }
 
 ElementarySpace::Ptr
 Mask::small_leg() const
 {
     if (is_projection) {
-        return std::dynamic_pointer_cast<ElementarySpace>(codomain->factors[0]);
+        return codomain->factors[0].as_elementary_space();
     }
-    return std::dynamic_pointer_cast<ElementarySpace>(domain->factors[0]);
+    return domain->factors[0].as_elementary_space();
 }
 
 void
@@ -257,8 +255,8 @@ Mask::test_sanity() const
     Tensor::test_sanity();
     backend->test_mask_sanity(std::static_pointer_cast<Mask const>(shared_from_this()));
     assert(codomain->num_factors == 1 && domain->num_factors == 1);
-    assert(std::dynamic_pointer_cast<ElementarySpace>(codomain->factors[0]));
-    assert(std::dynamic_pointer_cast<ElementarySpace>(domain->factors[0]));
+    assert(codomain->factors[0].as_elementary_space());
+    assert(domain->factors[0].as_elementary_space());
     auto large = large_leg();
     auto small = small_leg();
     assert(large->is_dual == small->is_dual);
@@ -660,8 +658,8 @@ Mask::copy(bool deep, std::optional<std::string> device_opt, std::optional<Dtype
     auto space_in = is_projection ? large_leg() : small_leg();
     auto space_out = is_projection ? small_leg() : large_leg();
     // domain is space_in, codomain is space_out
-    space_in = std::dynamic_pointer_cast<ElementarySpace>(domain->factors[0]);
-    space_out = std::dynamic_pointer_cast<ElementarySpace>(codomain->factors[0]);
+    space_in = domain->factors[0].as_elementary_space();
+    space_out = codomain->factors[0].as_elementary_space();
     return std::make_shared<Mask>(new_data,
                                   space_in,
                                   space_out,

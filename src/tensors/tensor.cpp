@@ -33,7 +33,7 @@ factor_symmetry(py::handle factor)
         return factor.cast<Space*>()->symmetry;
     }
     if (py::isinstance<Leg>(factor)) {
-        return factor.cast<Leg*>()->symmetry;
+        return factor.cast<Leg>().symmetry();
     }
     return factor.attr("symmetry").cast<Symmetry::Ptr>();
 }
@@ -46,7 +46,7 @@ factor_dim(py::handle factor)
         return factor.cast<Space*>()->dim;
     }
     if (py::isinstance<Leg>(factor)) {
-        return factor.cast<Leg*>()->dim;
+        return factor.cast<Leg>().dim();
     }
     return factor.attr("dim").cast<float64>();
 }
@@ -194,10 +194,10 @@ Tensor::Tensor(TensorProduct::Ptr codomain_,
     shape.clear();
     shape.reserve(static_cast<std::size_t>(codomain->num_factors + domain->num_factors));
     for (auto const& f : codomain->factors) {
-        shape.push_back(f->dim);
+        shape.push_back(f.dim());
     }
     for (auto it = domain->factors.rbegin(); it != domain->factors.rend(); ++it) {
-        shape.push_back((*it)->dim);
+        shape.push_back(it->dim());
     }
 
     if (num_legs != codomain->num_factors + domain->num_factors) {
@@ -505,7 +505,7 @@ Tensor::ascii_diagram() const
     std::vector<std::string> dims;
     dims.reserve(leg_spaces.size());
     for (auto const& l : leg_spaces) {
-        dims.push_back(format_dim(l->dim, DISTANCE, huge_dim, huge_dim_value));
+        dims.push_back(format_dim(l.dim(), DISTANCE, huge_dim, huge_dim_value));
     }
     auto const n_cod = num_codomain_legs();
     std::vector<std::string> codomain_dims(dims.begin(), dims.begin() + n_cod);
@@ -515,10 +515,10 @@ Tensor::ascii_diagram() const
     std::vector<std::string> codomain_arrows;
     std::vector<std::string> domain_arrows;
     for (auto const& f : codomain->factors) {
-        codomain_arrows.push_back(rjust(f->ascii_arrow(), DISTANCE));
+        codomain_arrows.push_back(rjust(f.ascii_arrow(), DISTANCE));
     }
     for (auto const& f : domain->factors) {
-        domain_arrows.push_back(rjust(f->ascii_arrow(), DISTANCE));
+        domain_arrows.push_back(rjust(f.ascii_arrow(), DISTANCE));
     }
 
     auto const c_labs = codomain_labels();
@@ -662,7 +662,7 @@ Tensor::legs() const
         out.push_back(f);
     }
     for (auto it = domain->factors.rbegin(); it != domain->factors.rend(); ++it) {
-        out.push_back((*it)->dual());
+        out.push_back(it->dual());
     }
     return out;
 }
@@ -736,7 +736,7 @@ Tensor::_as_codomain_leg(std::variant<int64, std::string> idx) const
 {
     auto [in_domain, co_domain_idx, _] = _parse_leg_idx(idx);
     if (in_domain) {
-        return domain->factors[static_cast<std::size_t>(co_domain_idx)]->dual();
+        return domain->factors[static_cast<std::size_t>(co_domain_idx)].dual();
     }
     return codomain->factors[static_cast<std::size_t>(co_domain_idx)];
 }
@@ -748,7 +748,7 @@ Tensor::_as_domain_leg(std::variant<int64, std::string> idx) const
     if (in_domain) {
         return domain->factors[static_cast<std::size_t>(co_domain_idx)];
     }
-    return codomain->factors[static_cast<std::size_t>(co_domain_idx)]->dual();
+    return codomain->factors[static_cast<std::size_t>(co_domain_idx)].dual();
 }
 
 void
@@ -851,7 +851,7 @@ Tensor::get_leg(std::variant<int64, std::string> which_leg) const
     // ---
     auto [in_domain, co_domain_idx, _] = _parse_leg_idx(which_leg);
     if (in_domain) {
-        return domain->factors[static_cast<std::size_t>(co_domain_idx)]->dual();
+        return domain->factors[static_cast<std::size_t>(co_domain_idx)].dual();
     }
     return codomain->factors[static_cast<std::size_t>(co_domain_idx)];
 }
@@ -1004,7 +1004,7 @@ Tensor::compatible_with(VectorLike::CPtr other) const
         return false;
     }
     for (std::size_t i = 0; i < legs1.size(); ++i) {
-        if (!(*legs1[i] == *legs2[i])) {
+        if (!(legs1[i] == legs2[i])) {
             return false;
         }
     }

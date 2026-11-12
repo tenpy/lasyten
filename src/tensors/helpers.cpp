@@ -169,11 +169,10 @@ get_block_slice(BlockBackend::BlockPtr const& src, std::initializer_list<BlockIn
     return (*src)[std::span<const BlockIndex>(key.begin(), key.size())];
 }
 
-template<class T>
 void
-check_compatible_impl(std::vector<std::shared_ptr<T>> const& legs1,
-                      std::vector<std::shared_ptr<T>> const& legs2,
-                      bool expect_equal)
+check_compatible_spaces(std::vector<Space::Ptr> const& legs1,
+                        std::vector<Space::Ptr> const& legs2,
+                        bool expect_equal)
 {
     if (legs1.size() != legs2.size()) {
         throw std::invalid_argument("Different number of legs");
@@ -185,9 +184,31 @@ check_compatible_impl(std::vector<std::shared_ptr<T>> const& legs1,
             throw std::invalid_argument("Different symmetries");
         }
         auto rhs = expect_equal ? l2 : l2->dual();
-        // Explicit ``operator==``: C++20 reversed candidates make ``*a == *b`` ambiguous
-        // for TensorProduct / Space.
-        if (!l1->operator==(*rhs)) {
+        // Compare through Space& so virtual Space::operator== runs (shared_ptr == is identity).
+        Space const& a = *l1;
+        Space const& b = *rhs;
+        if (!(a == b)) {
+            throw std::invalid_argument("Incompatible legs.");
+        }
+    }
+}
+
+void
+check_compatible_legs_values(std::vector<Leg::Ptr> const& legs1,
+                             std::vector<Leg::Ptr> const& legs2,
+                             bool expect_equal)
+{
+    if (legs1.size() != legs2.size()) {
+        throw std::invalid_argument("Different number of legs");
+    }
+    for (std::size_t i = 0; i < legs1.size(); ++i) {
+        auto const& l1 = legs1[i];
+        auto const& l2 = legs2[i];
+        if (!l1.symmetry()->is_equivalent_to(*l2.symmetry())) {
+            throw std::invalid_argument("Different symmetries");
+        }
+        auto rhs = expect_equal ? l2 : l2.dual();
+        if (!(l1 == rhs)) {
             throw std::invalid_argument("Incompatible legs.");
         }
     }
@@ -200,7 +221,7 @@ _check_compatible_legs(std::vector<Leg::Ptr> const& legs1,
                        std::vector<Leg::Ptr> const& legs2,
                        bool expect_equal)
 {
-    check_compatible_impl(legs1, legs2, expect_equal);
+    check_compatible_legs_values(legs1, legs2, expect_equal);
 }
 
 void
@@ -208,7 +229,7 @@ _check_compatible_legs(std::vector<Space::Ptr> const& legs1,
                        std::vector<Space::Ptr> const& legs2,
                        bool expect_equal)
 {
-    check_compatible_impl(legs1, legs2, expect_equal);
+    check_compatible_spaces(legs1, legs2, expect_equal);
 }
 
 TensorPtr

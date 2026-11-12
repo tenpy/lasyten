@@ -185,7 +185,7 @@ bind_tensors_charged_tensor(py::module_& m)
          std::optional<std::string> device) {
           auto sp = space.cast<Leg::Ptr>();
           if (!backend) {
-              backend = get_backend(sp->symmetry);
+              backend = get_backend(sp.symmetry());
           }
           auto vec = backend->block_backend->as_block(vector, std::nullopt, device);
           return ChargedTensor::from_dense_block_single_sector(

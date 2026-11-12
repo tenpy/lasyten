@@ -549,10 +549,13 @@ elementary_space_class_name(ElementarySpace const& space)
 char const*
 leg_class_name(Leg const& leg)
 {
-    if (auto const* es = dynamic_cast<ElementarySpace const*>(&leg)) {
+    if (auto es = leg.as_elementary_space()) {
         return elementary_space_class_name(*es);
     }
-    throw std::runtime_error(std::string("hdf5_export: unknown Leg type ") + typeid(leg).name());
+    if (leg.as_leg_pipe()) {
+        return "LegPipe";
+    }
+    throw std::runtime_error("hdf5_export: unknown / null Leg");
 }
 
 } // namespace
@@ -599,24 +602,19 @@ save_leg(lasyten::hdf5::Saver& saver, std::string const& path, Leg::CPtr const& 
         saver.save_none(path);
         return;
     }
-    auto const* cls = leg_class_name(*leg);
-    saver.save_instance(path,
-                        kModule,
-                        cls,
-                        leg.get(),
-                        [&](lasyten::hdf5::Saver& s, HighFive::Group& g, std::string const& sub) {
-                            if (auto es = std::dynamic_pointer_cast<ElementarySpace const>(leg)) {
-                                es->save_hdf5(s, g, sub);
-                                return;
-                            }
-                            throw std::runtime_error("hdf5_export: Leg without save_hdf5");
-                        });
+    if (auto es = leg.as_elementary_space()) {
+        save_elementary_space(saver, path, es);
+        return;
+    }
+    // Plain LegPipe has no native HDF5 schema yet; refuse rather than silently drop structure.
+    throw std::runtime_error(std::string("hdf5_export: cannot save plain LegPipe as Leg (class ") +
+                             leg_class_name(leg) + ")");
 }
 
 Leg::Ptr
 load_leg(lasyten::hdf5::Loader& loader, std::string const& path)
 {
-    return std::static_pointer_cast<Leg>(load_elementary_space(loader, path));
+    return Leg{ load_elementary_space(loader, path) };
 }
 
 void

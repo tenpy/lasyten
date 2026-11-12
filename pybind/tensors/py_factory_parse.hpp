@@ -27,10 +27,15 @@ py_as_space_leg(py::object leg)
     if (leg.is_none()) {
         return nullptr;
     }
+    // Plain LegPipe is not a Space; reject before casting.
     if (py::isinstance<LegPipe>(leg)) {
         throw std::invalid_argument("DiagonalTensor / Mask is not defined on LegPipes.");
     }
-    return leg.cast<Space::Ptr>();
+    auto space = leg.cast<Space::Ptr>();
+    if (auto es = std::dynamic_pointer_cast<ElementarySpace>(space); es && es->is_pipe()) {
+        throw std::invalid_argument("DiagonalTensor / Mask is not defined on LegPipes.");
+    }
+    return space;
 }
 
 inline Tensor::InitParsed

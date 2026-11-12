@@ -144,9 +144,7 @@ class AbelianBackend : public TensorBackend
     void test_tensor_sanity(TensorCPtr a, bool is_diagonal) override;
     void test_mask_sanity(MaskCPtr a) override;
 
-    LegPipe::Ptr make_pipe(std::vector<Leg::Ptr> legs,
-                           bool is_dual,
-                           LegPipe::Ptr pipe = nullptr) override;
+    Leg::Ptr make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, Leg::Ptr pipe = nullptr) override;
 
     DataPtr act_block_diagonal_square_matrix(
       SymmetricTensorCPtr a,
@@ -166,7 +164,7 @@ class AbelianBackend : public TensorBackend
 
     DataPtr combine_legs(TensorCPtr tensor,
                          std::vector<std::vector<int64>> leg_idcs_combine,
-                         std::vector<LegPipe::Ptr> pipes,
+                         std::vector<Leg::Ptr> pipes,
                          TensorProduct::Ptr new_codomain,
                          TensorProduct::Ptr new_domain) override;
 
@@ -375,7 +373,7 @@ class AbelianBackend : public TensorBackend
 
     py::object state_tensor_product(BlockBackend::BlockPtr state1,
                                     BlockBackend::BlockPtr state2,
-                                    LegPipe::Ptr pipe) override;
+                                    Leg::Ptr pipe) override;
 
     DataPtr to_block_backend(DataPtr data,
                              std::shared_ptr<BlockBackend> block_backend,

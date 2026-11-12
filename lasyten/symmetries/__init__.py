@@ -44,6 +44,7 @@ from .spaces import (
     LegPipe,
     Space,
     TensorProduct,
+    is_leg_pipe,
     swap_gate,
     twist_gate,
 )
@@ -89,6 +90,7 @@ __all__ = [
     'assert_sectors_equal',
     'double_semion_category',
     'fusion_trees',
+    'is_leg_pipe',
     'iter_common_sorted_sector_arrays',
     'semion_category',
     'su_n_data_file_path',

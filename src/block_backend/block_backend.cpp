@@ -740,7 +740,7 @@ BlockBackend::apply_basis_perm(const BlockCPtr& block, const std::vector<LegCPtr
         if (!leg) {
             throw std::invalid_argument("apply_basis_perm: leg must not be None");
         }
-        auto const& perm_vec = inv ? leg->inverse_basis_perm() : leg->basis_perm();
+        auto const& perm_vec = inv ? leg.inverse_basis_perm() : leg.basis_perm();
         py::array_t<int64> arr(static_cast<py::ssize_t>(perm_vec.size()));
         auto buf = arr.mutable_unchecked<1>();
         for (std::size_t i = 0; i < perm_vec.size(); ++i) {

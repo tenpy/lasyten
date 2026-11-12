@@ -28,6 +28,7 @@ from lasyten.symmetries import (
     SectorArray,
     SymmetryError,
     TensorProduct,
+    is_leg_pipe,
 )
 from lasyten.tensors import ChargedTensor, DiagonalTensor, HiddenLegTensor, LegLabels, Mask, SymmetricTensor, Tensor
 from lasyten.testing import assert_equivalent_legs, assert_tensors_almost_equal, random_tensor, swap_gate_numpy
@@ -1879,8 +1880,8 @@ def test_combine_split_with_dualities(use_pipes, in_domain, make_compatible_tens
         T_bak = [
             SymmetricTensor.from_dense_block(
                 block=T_np,
-                codomain=[bak.make_pipe(leg, leg.is_dual) if isinstance(leg, LegPipe) else leg for leg in T.codomain],
-                domain=[bak.make_pipe(leg, leg.is_dual) if isinstance(leg, LegPipe) else leg for leg in T.domain],
+                codomain=[bak.make_pipe(leg, leg.is_dual) if is_leg_pipe(leg) else leg for leg in T.codomain],
+                domain=[bak.make_pipe(leg, leg.is_dual) if is_leg_pipe(leg) else leg for leg in T.domain],
                 backend=bak,
                 labels=T.labels,
                 dtype=T.dtype,
@@ -3120,7 +3121,7 @@ def test_partial_compose_after_pipe(in_domain, make_compatible_tensor, make_comp
     A = tensors.combine_legs(A0, pipe_legs)
     expect = tensors.combine_legs(tensors.partial_compose(A0, B, 'y'), pipe_legs)
     pipe_factors = A.domain.factors if in_domain else A.codomain.factors
-    assert isinstance(pipe_factors[0], LegPipe)  # the pipe comes before 'y'
+    assert is_leg_pipe(pipe_factors[0])  # the pipe comes before 'y'
     res = tensors.partial_compose(A, B, 'y')
     res.test_sanity()
     assert res.labels == expect.labels
@@ -3924,7 +3925,7 @@ def test_tdot(
         if cls_A is not DiagonalTensor:
             levels_A = list(np_random.permutation(A.num_legs))
             codomain_A = [i for i in range(A.num_legs) if i not in contr_A]
-            if any([isinstance(leg, LegPipe) for leg in A.legs]):
+            if any(is_leg_pipe(leg) for leg in A.legs):
                 with pytest.raises(RuntimeError, match='iter_tree_blocks can not deal with pipes'):
                     _ = tensors.permute_legs(A, codomain=codomain_A, domain=contr_A, levels=levels_A)
                 pytest.xfail(reason='FTbackend cant deal with pipes yet')
@@ -4819,8 +4820,8 @@ def test_move_hidden_leg_example_and_tdot(make_compatible_tensor, compatible_sym
     assert isinstance(B2, HiddenLegTensor)
     assert A2.labels == ['pA', 'vL', 'vR']
     assert B2.labels == ['pB', 'vL', '!charge', 'vR']
-    assert not isinstance(A2.get_leg('vR'), LegPipe)
-    assert not isinstance(B2.get_leg('vL'), LegPipe)
+    assert not is_leg_pipe(A2.get_leg('vR'))
+    assert not is_leg_pipe(B2.get_leg('vL'))
     _assert_tdot_equal(expect, got)
 
 
@@ -4852,8 +4853,8 @@ def test_move_hidden_leg_dim_gt_one_keeps_pipes(make_compatible_tensor, compatib
         pytest.xfail(str(e))
     A2.test_sanity()
     B2.test_sanity()
-    assert isinstance(A2.get_leg('vR'), LegPipe)
-    assert isinstance(B2.get_leg('vL'), LegPipe)
+    assert is_leg_pipe(A2.get_leg('vR'))
+    assert is_leg_pipe(B2.get_leg('vL'))
     assert A2.get_leg('vR') == B2.get_leg('vL').dual
     try:
         _assert_tdot_equal(expect, got)
@@ -4949,8 +4950,8 @@ def test_flatten_pipe_leg(dual_pipes, make_compatible_tensor, make_compatible_sp
         assert T2.labels == T.labels
         for label in ['vL', 'vR']:
             leg, leg2 = T.get_leg(label), T2.get_leg(label)
-            assert isinstance(leg, LegPipe)
-            assert isinstance(leg2, ElementarySpace) and not isinstance(leg2, LegPipe)
+            assert is_leg_pipe(leg)
+            assert isinstance(leg2, ElementarySpace) and not is_leg_pipe(leg2)
             assert leg2.is_dual == leg.is_dual
             leg_flat = leg.as_ElementarySpace(leg.is_dual)
             npt.assert_array_equal(leg2.sector_decomposition, leg_flat.sector_decomposition)

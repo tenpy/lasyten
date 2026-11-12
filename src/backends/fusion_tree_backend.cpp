@@ -51,9 +51,28 @@ py_bool_dtype()
 }
 
 [[nodiscard]] std::pair<int64, int64>
-parse_leg_index(std::shared_ptr<LegOrSpace> const& leg, int64 idx)
+parse_leg_index(ElementarySpace::Ptr const& leg, int64 idx)
+{
+    if (!leg) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return leg->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Space::Ptr const& leg, int64 idx)
 {
     auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
+    if (!es) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return es->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Leg const& leg, int64 idx)
+{
+    auto es = leg.as_elementary_space();
     if (!es) {
         throw std::invalid_argument("parse_index requires an ElementarySpace leg");
     }
@@ -423,9 +442,9 @@ legs_flat_leg_permutation(py::object legs)
     int64 offset = 0;
     for (py::handle h : legs) {
         auto leg = h.cast<Leg::Ptr>();
-        auto part_perm = leg->_flat_leg_permutation(offset);
+        auto part_perm = leg._flat_leg_permutation(offset);
         out.insert(out.end(), part_perm.begin(), part_perm.end());
-        offset += leg->num_flat_legs();
+        offset += leg.num_flat_legs();
     }
     return out;
 }
@@ -473,7 +492,7 @@ flat_are_dual(TensorProduct::Ptr tp)
 {
     std::vector<std::uint8_t> out;
     for (auto const& leg : tp->flat_legs())
-        out.push_back(static_cast<std::uint8_t>(leg->is_dual));
+        out.push_back(static_cast<std::uint8_t>(leg.is_dual()));
     return out;
 }
 
@@ -716,8 +735,8 @@ plan_key_put_product(std::string& k, TensorProduct::Ptr const& tp)
     auto const legs = tp->flat_legs();
     plan_key_put(k, static_cast<std::int64_t>(legs.size()));
     for (auto const& leg : legs) {
-        plan_key_put(k, leg->is_dual ? 1 : 0);
-        auto const space = leg->as_space();
+        plan_key_put(k, leg.is_dual() ? 1 : 0);
+        auto const space = leg.as_space();
         plan_key_put(k, static_cast<std::int64_t>(space->sector_decomposition.size()));
         for (Sector const& s : space->sector_decomposition) {
             plan_key_put_sector(k, s);
@@ -991,7 +1010,7 @@ FusionTreeBackend::apply_mask_to_DiagonalTensor(DiagonalTensorCPtr tensor, MaskC
 TensorBackend::DataPtr
 FusionTreeBackend::combine_legs(TensorCPtr tensor,
                                 std::vector<std::vector<int64>> leg_idcs_combine,
-                                std::vector<LegPipe::Ptr> pipes,
+                                std::vector<Leg::Ptr> pipes,
                                 TensorProduct::Ptr new_codomain,
                                 TensorProduct::Ptr new_domain)
 {
@@ -1456,7 +1475,7 @@ FusionTreeBackend::inv_part_to_dense_block_single_sector(SymmetricTensorCPtr ten
 py::object
 FusionTreeBackend::state_tensor_product(BlockBackend::BlockPtr /*state1*/,
                                         BlockBackend::BlockPtr /*state2*/,
-                                        LegPipe::Ptr /*pipe*/)
+                                        Leg::Ptr /*pipe*/)
 {
     // --- hints from Python FusionTreeBackend.state_tensor_product ---
     // TODO clearly define what this should do in tensors.py first!
@@ -2038,7 +2057,7 @@ FusionTreeBackend::from_dense_block(BlockBackend::BlockPtr a,
         for (auto const& f : codomain->factors)
             legs.append(py::cast(f));
         for (auto it = domain->factors.rbegin(); it != domain->factors.rend(); ++it)
-            legs.append(py::cast((*it)->dual()));
+            legs.append(py::cast(it->dual()));
         auto axes_perm = legs_flat_leg_permutation(legs);
         int64 perm_idx = 0;
         for (py::ssize_t n = 0; n < legs.size(); ++n) {
@@ -2204,9 +2223,9 @@ FusionTreeBackend::to_dense_block(TensorCPtr a)
       { a_data->dtype, py::cast(a->symmetry).attr("fusion_tensor_dtype").cast<Dtype>() });
     std::vector<int64> shape;
     for (auto const& leg : codomain->flat_legs())
-        shape.push_back(leg->dim);
+        shape.push_back(leg.dim());
     for (auto const& leg : domain->flat_legs())
-        shape.push_back(leg->dim);
+        shape.push_back(leg.dim());
     auto res = block_backend->zeros(shape, dt);
     auto const& bi = a_data->block_inds;
     for (std::size_t row = 0; row < bi.nrows(); ++row) {
@@ -3169,7 +3188,7 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
     // (pipes are transparent). Index of the contracted leg among the flat legs of `iter_space`:
     int64 flat_leg_idx = 0;
     for (int64 i = 0; i < leg_idx; ++i)
-        flat_leg_idx += iter_space->factors[static_cast<std::size_t>(i)]->num_flat_legs();
+        flat_leg_idx += iter_space->factors[static_cast<std::size_t>(i)].num_flat_legs();
     py::list new_block_inds_rows;
     std::vector<BlockBackend::BlockPtr> new_blocks;
     // Python builds a cache keyed by ``vertex_labels``, but the key expression is a generator
@@ -3703,8 +3722,8 @@ FusionTreeBackend::get_element(SymmetricTensorCPtr a, std::vector<int64> idcs)
     auto legs = a->legs();
     for (std::size_t li = 0; li < legs.size(); ++li) {
         std::vector<int64> dims;
-        for (auto const& fl : legs[li]->flat_legs())
-            dims.push_back(static_cast<int64>(fl->dim));
+        for (auto const& fl : legs[li].flat_legs())
+            dims.push_back(static_cast<int64>(fl.dim()));
         auto strides = make_stride(dims, /*cstyle=*/true);
         int64 rem = idcs[li];
         std::vector<int64> unr(dims.size());
@@ -4320,10 +4339,11 @@ FusionTreeBackend::mask_from_block(BlockBackend::BlockPtr a, Space::Ptr large_le
         auto multis = large_leg_obj.attr("multiplicities")
                         .attr("__getitem__")(perm)
                         .cast<std::vector<int64>>();
-        auto leg_ptr = std::dynamic_pointer_cast<Leg>(large_leg);
-        if (!leg_ptr) {
-            throw std::invalid_argument("mask_from_block: large_leg must also be a Leg");
+        auto large_es = std::dynamic_pointer_cast<ElementarySpace>(large_leg);
+        if (!large_es) {
+            throw std::invalid_argument("mask_from_block: large_leg must be an ElementarySpace");
         }
+        auto leg_ptr = Leg{ large_es };
         domain = py::cast(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ leg_ptr },
                                                           large_leg->symmetry,
                                                           std::move(sorted_duals),

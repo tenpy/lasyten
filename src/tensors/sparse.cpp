@@ -27,7 +27,7 @@ same_legs(std::vector<Leg::Ptr> const& legs1, std::vector<Leg::Ptr> const& legs2
         return false;
     }
     for (std::size_t i = 0; i < legs1.size(); ++i) {
-        if (!(*legs1[i] == *legs2[i])) {
+        if (!(legs1[i] == legs2[i])) {
             return false;
         }
     }
@@ -82,8 +82,8 @@ TensorLinearOperator::TensorLinearOperator(SymmetricTensorPtr tensor,
     this->other_leg = 1 - this->which_leg;
 
     auto legs = this->tensor->legs();
-    auto expected = legs[other_leg]->dual();
-    if (!(*legs[which_leg] == *expected)) {
+    auto expected = legs[other_leg].dual();
+    if (!(legs[which_leg] == expected)) {
         throw std::invalid_argument("Expected contractible legs");
     }
 
@@ -250,7 +250,7 @@ TensorPtr
 ShiftedLinearOperator::to_tensor(TensorBackend::Ptr backend)
 {
     auto res = original_operator->to_tensor(backend);
-    auto sym = vector_legs.empty() ? nullptr : vector_legs[0]->symmetry;
+    auto sym = vector_legs.empty() ? nullptr : vector_legs[0].symmetry();
     auto tp = std::make_shared<TensorProduct>(vector_legs, sym);
     auto identity =
       SymmetricTensor::from_eye(tp, res->backend, vector_labels, res->dtype, res->device);

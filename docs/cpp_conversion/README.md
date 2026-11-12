@@ -99,7 +99,7 @@ Skip `block_backends/torch.py` per scope.
 - **lasyten/symmetries/_symmetries.py** — Large (~2.6k lines). Convert in order: exceptions → enums → `BaseSymmetry` (virtual API on `Sector` / `SectorArray`) → `SymmetryFactor` / concrete factors → product `Symmetry` → free functions.
 - **lasyten/symmetries/_su2data.py** — SU2 data (small).
 - **lasyten/symmetries/trees.py** — `FusionTree`, `fusion_trees` (~1k lines).
-- **lasyten/symmetries/spaces.py** — `ElementarySpace`, `Leg`, `LegPipe`, `Space`, `TensorProduct`, `AbelianLegPipe` (~2.2k lines). Depends on symmetries and trees.
+- **lasyten/symmetries/spaces.py** — `ElementarySpace`, `Leg`, `LegPipe`, `Space`, `TensorProduct`, `AbelianLegPipe` (~2.2k lines). Depends on symmetries and trees. MI removed — [convert_spaces_MI.md](convert_spaces_MI.md).
 
 ### Layer 3 — Backends
 
