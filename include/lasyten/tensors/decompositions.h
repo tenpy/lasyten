@@ -72,7 +72,7 @@ namespace lasyten {
 /// @returns `(W, V)`: real eigenvalues and orthonormal eigenvectors.
 [[nodiscard]] std::tuple<DiagonalTensorPtr, TensorPtr> eigh(
   TensorCPtr tensor,
-  OptionalLabels new_labels,
+  LegLabelList new_labels,
   bool new_leg_dual = false,
   std::optional<std::string> sort = std::nullopt);
 
@@ -97,7 +97,7 @@ namespace lasyten {
 /// @returns `(W, V)`: eigenvalues and right eigenvectors.
 [[nodiscard]] std::tuple<DiagonalTensorPtr, TensorPtr> eig(
   TensorCPtr tensor,
-  OptionalLabels new_labels,
+  LegLabelList new_labels,
   bool new_leg_dual = false,
   std::optional<std::string> sort = std::nullopt);
 
@@ -114,7 +114,7 @@ namespace lasyten {
 ///     details. Defaults to `nullopt`, which is the same as `"<"`.
 /// @returns `W`: real eigenvalues as a `DiagonalTensor`.
 [[nodiscard]] DiagonalTensorPtr eigvalsh(TensorCPtr tensor,
-                                         OptionalLabels new_labels,
+                                         LegLabelList new_labels,
                                          bool new_leg_dual = false,
                                          std::optional<std::string> sort = std::nullopt);
 
@@ -130,7 +130,7 @@ namespace lasyten {
 ///     details. Defaults to `nullopt`, which leaves the backend default order (unsorted).
 /// @returns `W`: (generally complex) eigenvalues as a `DiagonalTensor`.
 [[nodiscard]] DiagonalTensorPtr eigvals(TensorCPtr tensor,
-                                        OptionalLabels new_labels,
+                                        LegLabelList new_labels,
                                         bool new_leg_dual = false,
                                         std::optional<std::string> sort = std::nullopt);
 
@@ -188,7 +188,7 @@ namespace lasyten {
 /// @returns `(L, Q)`.
 [[nodiscard]] std::tuple<TensorPtr, TensorPtr> lq(
   TensorCPtr tensor,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   bool new_leg_dual = false,
   bool charge_leg_top = true);
 
@@ -224,7 +224,7 @@ namespace lasyten {
 /// @returns `(Q, R)`.
 [[nodiscard]] std::tuple<TensorPtr, TensorPtr> qr(
   TensorCPtr tensor,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   bool new_leg_dual = false,
   bool charge_leg_top = true);
 
@@ -274,7 +274,7 @@ namespace lasyten {
 /// @returns `(U, S, Vh)`.
 [[nodiscard]] std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr> svd(
   TensorCPtr tensor,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   bool new_leg_dual = false,
   bool charge_leg_top = true,
   std::optional<std::string> algorithm = std::nullopt);
@@ -337,7 +337,7 @@ svd_apply_mask(TensorCPtr U, DiagonalTensorCPtr S, TensorCPtr Vh, MaskCPtr mask)
   float64 trunc_cut = 0.,
   float64 svd_min = 0.,
   bool minimize_error = true,
-  std::optional<OptionalLabels> mask_labels = std::nullopt);
+  std::optional<LegLabelList> mask_labels = std::nullopt);
 
 /// Truncated version of `svd`.
 ///
@@ -373,7 +373,7 @@ svd_apply_mask(TensorCPtr U, DiagonalTensorCPtr S, TensorCPtr Vh, MaskCPtr mask)
 /// See also: `svd`.
 [[nodiscard]] std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr, float64, float64> truncated_svd(
   TensorCPtr tensor,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   bool new_leg_dual = false,
   bool charge_leg_top = true,
   std::optional<std::string> algorithm = std::nullopt,

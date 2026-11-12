@@ -2,8 +2,12 @@
 
 #include <lasyten/symmetries/topo_ones.h>
 
+#include <cstdint>
+#include <format>
 #include <lasyten/tools/hdf5.h>
 #include <limits>
+#include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -98,6 +102,43 @@ std::vector<float64>
 FermionNumber::batch_qdim(SectorArray const& a) const
 {
     return std::vector<float64>(a.size(), 1.0);
+}
+
+Sector
+FermionNumber::get_sector(std::string const& s) const
+{
+    auto const start = s.find_first_not_of(" \t\n\r");
+    if (start == std::string::npos) {
+        throw std::invalid_argument("get_sector: empty string");
+    }
+    auto const end = s.find_last_not_of(" \t\n\r");
+    auto t = s.substr(start, end - start + 1);
+    if (t.size() >= 2 && t.front() == '[' && t.back() == ']') {
+        auto const inner = std::string_view(t).substr(1, t.size() - 2);
+        auto const i0 = inner.find_first_not_of(" \t\n\r");
+        if (i0 == std::string_view::npos) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        auto const i1 = inner.find_last_not_of(" \t\n\r");
+        t = std::string(inner.substr(i0, i1 - i0 + 1));
+    }
+    std::size_t idx = 0;
+    long value = 0;
+    try {
+        value = std::stol(t, &idx, 10);
+    } catch (std::exception const&) {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    if (idx != t.size() || value < static_cast<long>(std::numeric_limits<int16_t>::min()) ||
+        value > static_cast<long>(std::numeric_limits<int16_t>::max())) {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    Sector const a{ static_cast<int16_t>(value) };
+    if (!is_valid_sector(a)) {
+        throw std::invalid_argument(std::format("get_sector: '{}' is not a valid sector", s));
+    }
+    return a;
 }
 
 bool

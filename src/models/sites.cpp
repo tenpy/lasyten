@@ -233,7 +233,7 @@ add_anyon_projectors(Site& site,
           SymmetricTensor::from_sector_projection(leg_tp,
                                                   decomposition[i],
                                                   backend,
-                                                  std::optional<OptionalLabels>{ { "p", "p*" } },
+                                                  std::optional<LegLabelList>{ { "p", "p*" } },
                                                   std::nullopt,
                                                   default_device);
         site.onsite_operators["P_" + names[i]] = std::move(op);
@@ -1345,10 +1345,10 @@ as_es(Space::Ptr space)
 
 std::vector<std::variant<int64, std::string>> const kPpLabels{ "p", "p*" };
 
-OptionalLabels
-pp_optional_labels()
+LegLabelList
+pp_labels()
 {
-    return OptionalLabels{ "p", "p*" };
+    return LegLabelList{ "p", "p*" };
 }
 
 Site::Ptr
@@ -1629,7 +1629,7 @@ GroupedSite::kroneckerproduct(std::vector<SymmetricTensorPtr> ops) const
         }
     }
     TensorPtr tens = ops[0]->copy(/*deep=*/false);
-    tens->relabel({ { "p", "p0" }, { "p*", "p0*" } });
+    tens->labels.update({ { "p", "p0" }, { "p*", "p0*" } });
     for (int64 i = 1; i < n_sites; ++i) {
         std::map<std::string, std::string> relabel2{
             { "p", std::format("p{}", i) },
@@ -1659,7 +1659,7 @@ GroupedSite::kroneckerproduct(std::vector<SymmetricTensorPtr> ops) const
                                  { std::move(cod), std::move(dom) },
                                  PipeDualities{ std::vector<bool>{ false, true } },
                                  std::vector<Leg::Ptr>{ pipe, pipe });
-    combined->set_labels(pp_optional_labels());
+    combined->labels.set(pp_labels());
     return std::dynamic_pointer_cast<SymmetricTensor>(combined);
 }
 

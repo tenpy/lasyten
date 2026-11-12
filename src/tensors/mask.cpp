@@ -122,7 +122,7 @@ make_mask(TensorBackend::DataPtr data,
           Space::Ptr space_out,
           bool is_projection,
           TensorBackend::Ptr backend,
-          std::optional<OptionalLabels> labels)
+          std::optional<LegLabelList> labels)
 {
     as_elementary_space(space_in);
     as_elementary_space(space_out);
@@ -161,7 +161,7 @@ Mask::Mask(TensorBackend::DataPtr data_in,
            bool is_projection_in,
            TensorBackend::Ptr backend_in,
            Symmetry::Ptr symmetry_in,
-           OptionalLabels labels_in,
+           LegLabelList labels_in,
            std::string device_in)
   : Tensor(std::make_shared<TensorProduct>(
              std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(space_out) }),
@@ -311,7 +311,7 @@ Mask::Ptr
 Mask::from_eye(Space::Ptr leg,
                bool is_projection_flag,
                TensorBackend::Ptr backend,
-               std::optional<OptionalLabels> labels,
+               std::optional<LegLabelList> labels,
                std::optional<std::string> device)
 {
     auto diag = DiagonalTensor::from_eye(std::move(leg), backend, labels, Dtype::Bool, device);
@@ -326,7 +326,7 @@ Mask::Ptr
 Mask::from_block_mask(BlockBackend::BlockPtr block_mask,
                       Space::Ptr large_leg,
                       TensorBackend::Ptr backend,
-                      std::optional<OptionalLabels> labels,
+                      std::optional<LegLabelList> labels,
                       std::optional<std::string> device)
 {
     if (!large_leg->symmetry->can_be_dropped()) {
@@ -358,7 +358,7 @@ Mask::from_DiagonalTensor(DiagonalTensorCPtr diag)
                                   true,
                                   diag->backend,
                                   diag->symmetry,
-                                  diag->labels(),
+                                  diag->labels.as_list(),
                                   diag->device);
 }
 
@@ -366,7 +366,7 @@ Mask::Ptr
 Mask::from_indices(py::object indices,
                    Space::Ptr large_leg,
                    TensorBackend::Ptr backend,
-                   std::optional<OptionalLabels> labels,
+                   std::optional<LegLabelList> labels,
                    std::optional<std::string> device)
 {
     backend = resolve_backend(std::move(backend), large_leg);
@@ -394,7 +394,7 @@ Mask::from_random(Space::Ptr large_leg_in,
                   TensorBackend::Ptr backend,
                   float64 p_keep,
                   int64 min_keep,
-                  std::optional<OptionalLabels> labels,
+                  std::optional<LegLabelList> labels,
                   std::optional<std::string> device,
                   py::object np_random)
 {
@@ -511,7 +511,7 @@ Mask::from_random(Space::Ptr large_leg_in,
 Mask::Ptr
 Mask::from_zero(Space::Ptr large_leg,
                 TensorBackend::Ptr backend,
-                std::optional<OptionalLabels> labels,
+                std::optional<LegLabelList> labels,
                 std::optional<std::string> device)
 {
     backend = resolve_backend(std::move(backend), large_leg);
@@ -545,7 +545,7 @@ Mask::as_DiagonalTensor(Dtype out_dtype)
       large_leg(),
       backend,
       symmetry,
-      labels());
+      labels.as_list());
 }
 
 SymmetricTensorPtr
@@ -580,7 +580,7 @@ Mask::as_SymmetricTensor(bool /*guarantee_copy*/,
     auto new_data = backend->full_data_from_mask(
       std::static_pointer_cast<Mask const>(shared_from_this()), out_dtype);
     return std::make_shared<SymmetricTensor>(
-      new_data, codomain, domain, backend, symmetry, labels());
+      new_data, codomain, domain, backend, symmetry, labels.as_list());
 }
 
 Mask::Ptr
@@ -618,7 +618,7 @@ Mask::_binary_operand(MaskCPtr other, BlockBinaryFn func, std::string const& ope
     }
     auto [data_out, small] = same->mask_binary_operand(
       std::static_pointer_cast<Mask const>(shared_from_this()), other, std::move(func));
-    auto labs = _get_matching_labels(labels(), other->labels());
+    auto labs = _get_matching_labels(labels.as_list(), other->labels.as_list());
     return make_mask(data_out, large_leg(), small, is_projection, same, labs);
 }
 
@@ -638,7 +638,7 @@ Mask::_unary_operand(BlockUnaryFn func)
 
     auto [data_out, small] =
       backend->mask_unary_operand(std::static_pointer_cast<Mask const>(shared_from_this()), func);
-    return make_mask(data_out, large_leg(), small, true, backend, labels());
+    return make_mask(data_out, large_leg(), small, true, backend, labels.as_list());
 }
 
 Tensor::Ptr
@@ -668,15 +668,15 @@ Mask::copy(bool deep, std::optional<std::string> device_opt, std::optional<Dtype
                                   is_projection,
                                   backend,
                                   symmetry,
-                                  labels(),
+                                  labels.as_list(),
                                   backend->get_device_from_data(new_data));
 }
 
 Tensor::Ptr
 Mask::dagger() const
 {
-    auto labs = labels();
-    OptionalLabels dual_rev;
+    auto labs = labels.as_list();
+    LegLabelList dual_rev;
     dual_rev.reserve(labs.size());
     for (auto it = labs.rbegin(); it != labs.rend(); ++it) {
         dual_rev.push_back(_dual_leg_label(*it));
@@ -800,7 +800,7 @@ Mask::to_backend(TensorBackend::Ptr new_backend,
                                   is_projection,
                                   new_backend,
                                   symmetry,
-                                  labels(),
+                                  labels.as_list(),
                                   device_s);
 }
 
@@ -858,7 +858,7 @@ Mask::to_dense_block(std::optional<std::vector<std::variant<int64, std::string>>
         }
     }
     if (leg_order.has_value()) {
-        auto idcs = get_leg_idcs(*leg_order);
+        auto idcs = labels.indices(*leg_order);
         res = bb->permute_axes(res, idcs);
     }
     return res;
@@ -896,7 +896,7 @@ Mask::save_hdf5(lasyten::hdf5::Saver& saver,
     hdf5_io::h5_set_attr(h5gr.getId(), "num_legs", static_cast<std::int64_t>(num_legs));
     hdf5_export::save_f64_vector(saver, subpath + "shape", shape);
     hdf5_io::h5_set_attr(h5gr.getId(), "is_projection", is_projection);
-    hdf5_export::save_optional_labels(saver, subpath + "labels", _labels);
+    hdf5_export::save_leg_labels(saver, subpath + "labels", labels.as_list());
 }
 
 Mask::Ptr
@@ -919,11 +919,11 @@ Mask::from_hdf5(lasyten::hdf5::Loader& loader, HighFive::Group& h5gr, std::strin
         proj = space_dim(*space_in) >= space_dim(*space_out);
     }
 
-    OptionalLabels labels_in(2, std::nullopt);
+    LegLabelList labels_in(2, "");
     if (hdf5_io::h5_contains(loader.root(), subpath + "labels")) {
-        labels_in = hdf5_export::load_optional_labels(loader, subpath + "labels");
+        labels_in = hdf5_export::load_leg_labels(loader, subpath + "labels");
         if (labels_in.empty()) {
-            labels_in.assign(2, std::nullopt);
+            labels_in.assign(2, "");
         }
     }
 

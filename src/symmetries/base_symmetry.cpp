@@ -5,10 +5,12 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <format>
 #include <limits>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace lasyten {
@@ -337,6 +339,41 @@ BaseSymmetry::sector_str(Sector a) const
     }
     oss << ']';
     return oss.str();
+}
+
+namespace {
+
+std::string
+trim_ws(std::string_view s)
+{
+    auto const start = s.find_first_not_of(" \t\n\r");
+    if (start == std::string_view::npos) {
+        return {};
+    }
+    auto const end = s.find_last_not_of(" \t\n\r");
+    return std::string(s.substr(start, end - start + 1));
+}
+
+} // namespace
+
+Sector
+BaseSymmetry::get_sector(std::string const& s) const
+{
+    auto const t = trim_ws(s);
+    if (t.empty()) {
+        throw std::invalid_argument("get_sector: empty string");
+    }
+    if (!std::isfinite(num_sectors)) {
+        throw std::invalid_argument(
+          "get_sector: infinitely many sectors; this symmetry must implement get_sector");
+    }
+    auto const sectors = all_sectors();
+    for (std::size_t i = 0; i < sectors.size(); ++i) {
+        if (sector_str(sectors[i]) == t) {
+            return sectors[i];
+        }
+    }
+    throw std::invalid_argument(std::format("get_sector: unknown sector '{}'", t));
 }
 
 SectorArray

@@ -190,8 +190,12 @@ def test_not_allowed_channels_and_weights(su2_dir, tmp_path):
             sym.f_symbol(_sec(1), _sec(1), _sec(1), _sec(1), _sec(1), _sec(1))
         with pytest.raises(SymmetryError):
             sym.r_symbol(_sec(1), _sec(1), _sec(1))
-    with pytest.raises(ValueError, match='higher weight'):
+    with pytest.raises(ValueError, match='highest weight 6') as exc:
         sym.f_symbol(_sec(7), _sec(0), _sec(0), _sec(7), _sec(0), _sec(7))
+    msg = str(exc.value)
+    assert os.path.basename(sym.Fpath) in msg
+    assert 'irrep of weight 7' in msg
+    assert 'Recalculate' in msg and 'larger highest weight' in msg
 
 
 def test_unsupported_layout_is_rejected(su2_dir, tmp_path):

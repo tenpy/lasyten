@@ -16,7 +16,7 @@
 
 namespace lasyten {
 
-using VectorLabels = std::optional<OptionalLabels>;
+using VectorLabels = std::optional<LegLabelList>;
 inline constexpr float64 kGramSchmidtDefaultRcond = 1.0e-14;
 
 bool same_legs(std::vector<Leg::Ptr> const& legs1, std::vector<Leg::Ptr> const& legs2);
@@ -27,8 +27,9 @@ bool same_legs(std::vector<Leg::Ptr> const& legs1, std::vector<Leg::Ptr> const& 
 ///
 /// vector_legs : list of Space
 ///     The legs of tensors that this operator can act on.
-/// vector_labels : list of str or None
-///     Labels of the vectors that this operator can act on, or ``None``.
+/// vector_labels : list of str, or unset
+///     Labels of the vectors that this operator can act on (empty string = unset label),
+///     or unset for the whole list.
 /// dtype : Dtype
 ///     The dtype of a full representation of the operator
 /// acts_on : list of str

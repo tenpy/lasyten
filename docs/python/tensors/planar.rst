@@ -62,6 +62,8 @@ Functions
 
 .. autofunction:: lasyten.tensors.planar.planar_contraction
 
+.. autofunction:: lasyten.tensors.planar.planar_contract_mask
+
 .. autofunction:: lasyten.tensors.planar.planar_decomposition
 
 .. autofunction:: lasyten.tensors.planar.planar_eigh

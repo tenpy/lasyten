@@ -81,9 +81,9 @@ int64
 py_leg_idx(TensorCPtr const& tensor, py::object key)
 {
     if (py::isinstance<py::str>(key)) {
-        return tensor->get_leg_idcs(key.cast<std::string>())[0];
+        return tensor->labels.index(key.cast<std::string>());
     }
-    return tensor->get_leg_idcs(key.cast<int64>())[0];
+    return tensor->labels.index(key.cast<int64>());
 }
 
 std::optional<LevelsSpec>

@@ -45,7 +45,7 @@ SymmetricTensor::SymmetricTensor(TensorBackend::DataPtr data_in,
                                  TensorProduct::Ptr domain_in,
                                  TensorBackend::Ptr backend_in,
                                  Symmetry::Ptr symmetry_in,
-                                 OptionalLabels labels_in,
+                                 LegLabelList labels_in,
                                  bool check_complex_dtype)
   : Tensor(std::move(codomain_in),
            std::move(domain_in),
@@ -59,8 +59,8 @@ SymmetricTensor::SymmetricTensor(TensorBackend::DataPtr data_in,
     assert(backend->is_correct_data_type(data));
     // Allow the ChargedTensor charge-leg marker "!" as the last label on bare
     // SymmetricTensors that are used as invariant parts (tests / factories).
-    auto const labs = labels();
-    if (!labs.empty() && labs.back() && *labs.back() == "!") {
+    auto const labs = labels.as_list();
+    if (!labs.empty() && labs.back() == "!") {
         allow_charge_leg_label = true;
     }
     if (check_complex_dtype) {
@@ -89,19 +89,19 @@ SymmetricTensor::test_sanity() const
     // HiddenLegTensor validates `!` itself; ChargedTensor invariant parts set
     // allow_charge_leg_label. All other SymmetricTensors must not contain `!`.
     if (dynamic_cast<HiddenLegTensor const*>(this) == nullptr && !allow_charge_leg_label) {
-        reject_exclamation_in_labels(labels(), "SymmetricTensor");
+        reject_exclamation_in_labels(labels.as_list(), "SymmetricTensor");
     } else if (allow_charge_leg_label) {
-        auto labs = labels();
+        auto labs = labels.as_list();
         for (std::size_t i = 0; i < labs.size(); ++i) {
-            if (!labs[i] || !label_contains_exclamation(labs[i])) {
+            if (labs[i].empty() || !label_contains_exclamation(labs[i])) {
                 continue;
             }
             // Only the charge leg (last label, starts with '!') is allowed.
-            if (i + 1 != labs.size() || !labs[i]->starts_with('!')) {
+            if (i + 1 != labs.size() || !labs[i].starts_with('!')) {
                 throw std::invalid_argument(std::format(
                   "ChargedTensor invariant_part: only the last label may contain '!', got '{}' "
                   "at position {}",
-                  *labs[i],
+                  labs[i],
                   i));
             }
         }
@@ -148,7 +148,7 @@ SymmetricTensor::Ptr
 SymmetricTensor::from_zero(TensorProduct::Ptr codomain,
                            TensorProduct::Ptr domain,
                            TensorBackend::Ptr backend,
-                           std::optional<OptionalLabels> labels,
+                           std::optional<LegLabelList> labels,
                            Dtype dtype,
                            std::optional<std::string> device)
 {
@@ -170,7 +170,7 @@ SymmetricTensor::from_zero(TensorProduct::Ptr codomain,
 SymmetricTensor::Ptr
 SymmetricTensor::from_eye(TensorProduct::Ptr co_domain,
                           TensorBackend::Ptr backend,
-                          std::optional<OptionalLabels> labels,
+                          std::optional<LegLabelList> labels,
                           Dtype dtype,
                           std::optional<std::string> device)
 {
@@ -192,7 +192,7 @@ SymmetricTensor::from_block_func(BlockFactoryFn func,
                                  TensorProduct::Ptr codomain,
                                  TensorProduct::Ptr domain,
                                  TensorBackend::Ptr backend,
-                                 std::optional<OptionalLabels> labels,
+                                 std::optional<LegLabelList> labels,
                                  std::optional<Dtype> dtype,
                                  std::optional<std::string> device)
 {
@@ -227,7 +227,7 @@ SymmetricTensor::from_sector_block_func(SectorBlockFactoryFn func,
                                         TensorProduct::Ptr codomain,
                                         TensorProduct::Ptr domain,
                                         TensorBackend::Ptr backend,
-                                        std::optional<OptionalLabels> labels,
+                                        std::optional<LegLabelList> labels,
                                         std::optional<Dtype> dtype,
                                         std::optional<std::string> device)
 {
@@ -254,7 +254,7 @@ SymmetricTensor::from_dense_block(BlockBackend::BlockPtr block,
                                   TensorProduct::Ptr codomain,
                                   TensorProduct::Ptr domain,
                                   TensorBackend::Ptr backend,
-                                  std::optional<OptionalLabels> labels,
+                                  std::optional<LegLabelList> labels,
                                   std::optional<Dtype> dtype,
                                   std::optional<std::string> device,
                                   float64 tol,
@@ -299,7 +299,7 @@ SymmetricTensor::from_dense_block_trivial_sector(BlockBackend::BlockPtr vector,
                                                  Leg::Ptr space,
                                                  TensorBackend::Ptr backend,
                                                  std::optional<std::string> device,
-                                                 OptionalLabel label)
+                                                 std::string label)
 {
     if (!space) {
         throw std::invalid_argument("space must be specified");
@@ -339,7 +339,7 @@ SymmetricTensor::from_dense_block_trivial_sector(BlockBackend::BlockPtr vector,
       std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ space }, space->symmetry);
     auto domain = std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{}, space->symmetry);
     return std::make_shared<SymmetricTensor>(
-      data, codomain, domain, backend, space->symmetry, OptionalLabels{ std::move(label) });
+      data, codomain, domain, backend, space->symmetry, LegLabelList{ std::move(label) });
 }
 
 SymmetricTensor::Ptr
@@ -348,7 +348,7 @@ SymmetricTensor::from_random_normal(TensorProduct::Ptr codomain,
                                     TensorCPtr mean,
                                     float64 sigma,
                                     TensorBackend::Ptr backend,
-                                    std::optional<OptionalLabels> labels,
+                                    std::optional<LegLabelList> labels,
                                     std::optional<Dtype> dtype,
                                     std::optional<std::string> device)
 {
@@ -388,9 +388,9 @@ SymmetricTensor::from_random_normal(TensorProduct::Ptr codomain,
         backend_tp = std::move(b);
         symmetry = std::move(s);
         if (!labels.has_value()) {
-            labels = mean->labels();
+            labels = mean->labels.as_list();
         } else {
-            if (mean->labels() != _init_parse_labels(labels, codomain_tp, domain_tp)) {
+            if (mean->labels.as_list() != _init_parse_labels(labels, codomain_tp, domain_tp)) {
                 throw std::invalid_argument("mean.labels must match the given labels");
             }
         }
@@ -435,8 +435,12 @@ SymmetricTensor::from_random_normal(TensorProduct::Ptr codomain,
     if (mean) {
         auto one = backend_tp->block_backend->as_scalar(1.0);
         auto new_data = backend_tp->linear_combination(one, mean, one, with_zero_mean);
-        return std::make_shared<SymmetricTensor>(
-          new_data, codomain_tp, domain_tp, backend_tp, symmetry, with_zero_mean->labels());
+        return std::make_shared<SymmetricTensor>(new_data,
+                                                 codomain_tp,
+                                                 domain_tp,
+                                                 backend_tp,
+                                                 symmetry,
+                                                 with_zero_mean->labels.as_list());
     }
     return with_zero_mean;
 }
@@ -445,7 +449,7 @@ SymmetricTensor::Ptr
 SymmetricTensor::from_random_uniform(TensorProduct::Ptr codomain,
                                      TensorProduct::Ptr domain,
                                      TensorBackend::Ptr backend,
-                                     std::optional<OptionalLabels> labels,
+                                     std::optional<LegLabelList> labels,
                                      Dtype dtype,
                                      std::optional<std::string> device)
 {
@@ -471,7 +475,7 @@ SymmetricTensor::Ptr
 SymmetricTensor::from_sector_projection(TensorProduct::Ptr co_domain,
                                         Sector sector,
                                         TensorBackend::Ptr backend,
-                                        std::optional<OptionalLabels> labels,
+                                        std::optional<LegLabelList> labels,
                                         std::optional<Dtype> dtype,
                                         std::optional<std::string> device)
 {
@@ -519,7 +523,7 @@ SymmetricTensor::from_tree_pairs(py::object trees_obj,
                                  TensorProduct::Ptr codomain,
                                  TensorProduct::Ptr domain,
                                  TensorBackend::Ptr backend,
-                                 std::optional<OptionalLabels> labels,
+                                 std::optional<LegLabelList> labels,
                                  std::optional<Dtype> dtype,
                                  std::optional<std::string> device)
 {
@@ -615,7 +619,7 @@ SymmetricTensor::as_dtype(Dtype new_dtype)
     }
     auto new_data = backend->to_dtype(shared_from_this(), new_dtype);
     return std::make_shared<SymmetricTensor>(
-      new_data, codomain, domain, backend, symmetry, labels());
+      new_data, codomain, domain, backend, symmetry, labels.as_list());
 }
 
 SymmetricTensorPtr
@@ -647,7 +651,7 @@ SymmetricTensor::copy(bool deep,
         new_data = data;
     }
     return std::make_shared<SymmetricTensor>(
-      new_data, codomain, domain, backend, symmetry, labels());
+      new_data, codomain, domain, backend, symmetry, labels.as_list());
 }
 
 DiagonalTensorPtr
@@ -787,7 +791,7 @@ SymmetricTensor::to_backend(TensorBackend::Ptr new_backend,
     }
 
     return std::make_shared<SymmetricTensor>(
-      new_data, codomain, domain, new_backend, symmetry, labels());
+      new_data, codomain, domain, new_backend, symmetry, labels.as_list());
 }
 
 BlockBackend::BlockPtr
@@ -814,8 +818,8 @@ SymmetricTensor::to_dense_block(
         block = backend->block_backend->to_dtype(block, *dtype_opt);
     }
     if (leg_order.has_value()) {
-        auto idcs = get_leg_idcs(*leg_order);
-        auto const labs = labels();
+        auto idcs = labels.indices(*leg_order);
+        auto const labs = labels.as_list();
         std::vector<int64> hidden;
         for (int64 i = 0; i < num_legs; ++i) {
             if (HiddenLegTensor::is_hidden_leg_label(labs[static_cast<std::size_t>(i)])) {
@@ -887,7 +891,7 @@ SymmetricTensor::save_hdf5(lasyten::hdf5::Saver& saver,
     hdf5_io::h5_set_attr(h5gr.getId(), "num_legs", static_cast<std::int64_t>(num_legs));
     hdf5_export::save_f64_vector(saver, subpath + "shape", shape);
     hdf5_io::h5_set_attr(h5gr.getId(), "cls", class_name());
-    hdf5_export::save_optional_labels(saver, subpath + "labels", _labels);
+    hdf5_export::save_leg_labels(saver, subpath + "labels", labels.as_list());
 }
 
 SymmetricTensor::Ptr
@@ -907,10 +911,10 @@ SymmetricTensor::from_hdf5(lasyten::hdf5::Loader& loader,
     }
     auto dt = hdf5_export::load_dtype_string(loader, subpath + "dtype");
     auto shape = hdf5_export::load_f64_vector(loader, subpath + "shape");
-    auto labels = hdf5_export::load_optional_labels(loader, subpath + "labels");
+    auto labels = hdf5_export::load_leg_labels(loader, subpath + "labels");
     int64 nlegs = codomain->num_factors + domain->num_factors;
     if (labels.empty() && nlegs > 0) {
-        labels.assign(static_cast<std::size_t>(nlegs), std::nullopt);
+        labels.assign(static_cast<std::size_t>(nlegs), "");
     }
 
     auto obj = std::make_shared<SymmetricTensor>(

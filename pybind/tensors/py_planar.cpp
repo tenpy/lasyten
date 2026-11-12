@@ -1,5 +1,6 @@
 #include <lasyten/tensors/planar.h>
 
+#include <lasyten/tensors/mask.h>
 #include <lasyten/tensors/ops_legs.h>
 #include <lasyten/tensors/sparse.h>
 #include <lasyten/tensors/tensor.h>
@@ -87,13 +88,13 @@ eval_result_to_py(PlanarResult const& v)
     return py_from_tensor_or_scalar(v);
 }
 
-OptionalLabels
+LegLabelList
 py_leg_labels(py::object seq)
 {
-    OptionalLabels out;
+    LegLabelList out;
     for (auto item : py::reinterpret_borrow<py::iterable>(seq)) {
         if (item.is_none()) {
-            out.push_back(std::nullopt);
+            out.push_back("");
         } else {
             out.push_back(item.cast<std::string>());
         }
@@ -101,7 +102,7 @@ py_leg_labels(py::object seq)
     return out;
 }
 
-std::optional<OptionalLabels>
+std::optional<LegLabelList>
 py_opt_labels(py::object obj)
 {
     if (obj.is_none()) {
@@ -427,8 +428,7 @@ labels_as_strings(py::object labels)
 void
 bind_tensors_planar(py::module_& m)
 {
-    py::class_<TensorPlaceholder, LabelledLegs, py::smart_holder> tensor_placeholder(
-      m, "TensorPlaceholder");
+    py::class_<TensorPlaceholder, py::smart_holder> tensor_placeholder(m, "TensorPlaceholder");
     tensor_placeholder.doc() = DOC(lasyten, TensorPlaceholder);
 
     tensor_placeholder
@@ -444,9 +444,23 @@ bind_tensors_planar(py::module_& m)
            py::arg("labels"),
            py::arg("dims") = py::none(),
            py::arg("cost_to_make") = py::none())
+      .def_property(
+        "labels",
+        py::cpp_function([](TensorPlaceholder& self) -> LegLabels& { return self.labels; },
+                         py::return_value_policy::reference_internal),
+        py::cpp_function([](TensorPlaceholder& self, py::object value) {
+            if (py::isinstance<LegLabels>(value)) {
+                self.labels.set(value.cast<LegLabels const&>().as_list());
+            } else {
+                self.labels.set(value.cast<LegLabelList>());
+            }
+            self.num_legs = self.labels.num_legs();
+        }))
+      .def_readwrite("num_legs", &TensorPlaceholder::num_legs)
       .def_readwrite("dims", &TensorPlaceholder::dims)
       .def_readwrite("cost_to_make", &TensorPlaceholder::cost_to_make)
       .def("copy", &TensorPlaceholder::copy, py::arg("deep") = true)
+      .def("string_labels", &TensorPlaceholder::string_labels)
       .def("__repr__", &TensorPlaceholder::__repr__);
 
     py::class_<ContractionTreeNode, py::smart_holder> contraction_tree_node(m,
@@ -737,6 +751,29 @@ bind_tensors_planar(py::module_& m)
       py::arg("relabel1") = std::map<std::string, std::string>{},
       py::arg("relabel2") = std::map<std::string, std::string>{},
       DOC(lasyten, planar_contraction));
+
+    m.def(
+      "planar_contract_mask",
+      [](TensorCPtr tensor1,
+         MaskCPtr mask2,
+         py::object legs1,
+         py::object legs2,
+         py::object relabel1,
+         py::object relabel2) {
+          return planar_contract_mask(std::move(tensor1),
+                                      std::move(mask2),
+                                      py_as_leg_refs(legs1),
+                                      py_as_leg_refs(legs2),
+                                      py_relabel_map(relabel1),
+                                      py_relabel_map(relabel2));
+      },
+      py::arg("tensor1"),
+      py::arg("mask2"),
+      py::arg("legs1"),
+      py::arg("legs2"),
+      py::arg("relabel1") = std::map<std::string, std::string>{},
+      py::arg("relabel2") = std::map<std::string, std::string>{},
+      DOC(lasyten, planar_contract_mask));
 
     m.def(
       "planar_partial_trace",

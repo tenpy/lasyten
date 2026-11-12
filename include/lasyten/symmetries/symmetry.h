@@ -119,6 +119,11 @@ class Symmetry : public BaseSymmetry
     float64 qdim(Sector a) const override;
     /// Short and readable string for the sector. Is used in __str__ of symmetry-related objects.
     std::string sector_str(Sector a) const override;
+    /// Inverse of `sector_str`.
+    ///
+    /// For a single-factor product, the outer product brackets may be omitted (e.g. ``"odd"``
+    /// instead of ``"[odd]"``). Multi-factor symmetries require the full ``"[..., ...]"`` form.
+    Sector get_sector(std::string const& s) const override;
 
     /// Internal implementation of `f_symbol`. Can assume that inputs are valid.
     FusionSymbol _f_symbol(Sector a, Sector b, Sector c, Sector d, Sector e, Sector f)

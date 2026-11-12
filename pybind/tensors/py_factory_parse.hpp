@@ -3,7 +3,7 @@
 /// Python-flexible parsing for tensor factory bindings.
 ///
 /// Sequence-of-spaces (co)domains, nested labels, numpy blocks, and optional tensors stay at
-/// the binding layer. Typed C++ factories receive Ptrs / BlockPtrs / OptionalLabels.
+/// the binding layer. Typed C++ factories receive Ptrs / BlockPtrs / LegLabelList.
 
 #include <lasyten/tensors/charged_tensor.h>
 #include <lasyten/tensors/diagonal_tensor.h>

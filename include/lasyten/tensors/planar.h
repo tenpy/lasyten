@@ -4,6 +4,7 @@
 #include <lasyten/lasyten.h>
 #include <lasyten/tensors/decompositions.h>
 #include <lasyten/tensors/diagonal_tensor.h>
+#include <lasyten/tensors/forward_declare.h>
 #include <lasyten/tensors/labels.h>
 #include <lasyten/tensors/ops_algebra.h>
 #include <lasyten/tensors/ops_legs.h>
@@ -61,9 +62,11 @@ void _assert_cyclic_labels(std::string const& name,
 ///     For each of the legs, an optional symbol to represent its dimension.
 /// cost_to_make : `BigOPolynomial`
 ///     Algorithmic cost of creating the tensor.
-class TensorPlaceholder : public LabelledLegs
+class TensorPlaceholder
 {
   public:
+    LegLabels labels;
+    int64 num_legs = 0;
     std::vector<BigOPolynomial> dims;
     BigOPolynomial cost_to_make;
 
@@ -549,7 +552,7 @@ class PlanarLinearOperator : public LinearOperator
   TensorCPtr tensor,
   int64 codomain_cut,
   int64 domain_cut,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   std::optional<float64> cutoff_singular_values = std::nullopt);
 
 /// Checks if two tensors are equal up to numerical tolerance and planar permutation.
@@ -626,6 +629,13 @@ class PlanarLinearOperator : public LinearOperator
                                               std::vector<LegRef> legs2,
                                               std::map<std::string, std::string> relabel1 = {},
                                               std::map<std::string, std::string> relabel2 = {});
+/// Planarly compose a mask into exactly one leg of a tensor.
+[[nodiscard]] TensorPtr planar_contract_mask(TensorCPtr tensor1,
+                                             MaskCPtr mask2,
+                                             std::vector<LegRef> legs1,
+                                             std::vector<LegRef> legs2,
+                                             std::map<std::string, std::string> relabel1 = {},
+                                             std::map<std::string, std::string> relabel2 = {});
 [[nodiscard]] TensorPlaceholder planar_contraction(TensorPlaceholder const& tensor1,
                                                    TensorPlaceholder const& tensor2,
                                                    std::vector<LegRef> legs1,
@@ -687,7 +697,7 @@ class PlanarLinearOperator : public LinearOperator
   TensorCPtr tensor,
   int64 codomain_cut,
   int64 domain_cut,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   bool new_leg_dual = false,
   std::optional<std::string> sort = std::nullopt);
 
@@ -715,7 +725,7 @@ class PlanarLinearOperator : public LinearOperator
   TensorCPtr tensor,
   int64 codomain_cut,
   int64 domain_cut,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   bool new_leg_dual = false,
   std::optional<std::string> sort = std::nullopt);
 
@@ -733,7 +743,7 @@ class PlanarLinearOperator : public LinearOperator
   TensorCPtr tensor,
   int64 codomain_cut,
   int64 domain_cut,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   bool new_leg_dual = false,
   std::optional<std::string> sort = std::nullopt);
 
@@ -779,7 +789,7 @@ class PlanarLinearOperator : public LinearOperator
   TensorCPtr tensor,
   int64 codomain_cut,
   int64 domain_cut,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   bool new_leg_dual = false);
 
 /// Planar version of `partial_trace`.
@@ -872,7 +882,7 @@ class PlanarLinearOperator : public LinearOperator
   TensorCPtr tensor,
   int64 codomain_cut,
   int64 domain_cut,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   bool new_leg_dual = false);
 
 /// Planar singular value decomposition (SVD) of a tensor.
@@ -932,7 +942,7 @@ class PlanarLinearOperator : public LinearOperator
   TensorCPtr tensor,
   int64 codomain_cut,
   int64 domain_cut,
-  std::optional<OptionalLabels> new_labels = std::nullopt,
+  std::optional<LegLabelList> new_labels = std::nullopt,
   bool new_leg_dual = false,
   std::optional<std::string> algorithm = std::nullopt);
 
@@ -941,7 +951,7 @@ class PlanarLinearOperator : public LinearOperator
 planar_truncated_svd(TensorCPtr tensor,
                      int64 codomain_cut,
                      int64 domain_cut,
-                     std::optional<OptionalLabels> new_labels = std::nullopt,
+                     std::optional<LegLabelList> new_labels = std::nullopt,
                      bool new_leg_dual = false,
                      std::optional<std::string> algorithm = std::nullopt,
                      std::optional<float64> normalize_to = std::nullopt,

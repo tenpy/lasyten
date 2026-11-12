@@ -6,13 +6,16 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <format>
 #include <hdf5_io/constants.h>
 #include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace lasyten {
@@ -533,6 +536,138 @@ Symmetry::sector_str(Sector a) const
     }
     out += "]";
     return out;
+}
+
+namespace {
+
+std::string
+trim_ws(std::string_view s)
+{
+    auto const start = s.find_first_not_of(" \t\n\r");
+    if (start == std::string_view::npos) {
+        return {};
+    }
+    auto const end = s.find_last_not_of(" \t\n\r");
+    return std::string(s.substr(start, end - start + 1));
+}
+
+bool
+matching_outer_brackets(std::string_view s)
+{
+    if (s.size() < 2 || s.front() != '[' || s.back() != ']') {
+        return false;
+    }
+    int depth = 0;
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        char const c = s[i];
+        if (c == '[') {
+            ++depth;
+        } else if (c == ']') {
+            --depth;
+            if (depth == 0) {
+                return i + 1 == s.size();
+            }
+            if (depth < 0) {
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
+std::vector<std::string>
+split_comma_top_level(std::string_view inner)
+{
+    std::vector<std::string> parts;
+    int depth_bracket = 0;
+    int depth_paren = 0;
+    std::size_t start = 0;
+    for (std::size_t i = 0; i < inner.size(); ++i) {
+        char const c = inner[i];
+        if (c == '[') {
+            ++depth_bracket;
+        } else if (c == ']') {
+            --depth_bracket;
+        } else if (c == '(') {
+            ++depth_paren;
+        } else if (c == ')') {
+            --depth_paren;
+        } else if (c == ',' && depth_bracket == 0 && depth_paren == 0) {
+            parts.push_back(trim_ws(inner.substr(start, i - start)));
+            start = i + 1;
+        }
+    }
+    parts.push_back(trim_ws(inner.substr(start)));
+    return parts;
+}
+
+} // namespace
+
+Sector
+Symmetry::get_sector(std::string const& s) const
+{
+    auto const t = trim_ws(s);
+    if (t.empty()) {
+        throw std::invalid_argument("get_sector: empty string");
+    }
+    if (factors.empty()) {
+        throw std::invalid_argument("get_sector: symmetry has no factors");
+    }
+
+    auto concat_factor_sectors = [&](std::vector<Sector> const& secs) -> Sector {
+        std::array<int16_t, max_sector_ind_len> buf{};
+        for (std::size_t i = 0; i < factors.size(); ++i) {
+            auto const begin = sector_slices[i];
+            for (std::uint8_t j = 0; j < secs[i].len(); ++j) {
+                buf[static_cast<std::size_t>(begin) + j] = secs[i].q[j];
+            }
+        }
+        auto out = Sector::from_span(std::span<const int16_t>(buf.data(), sector_ind_len));
+        if (!is_valid_sector(out)) {
+            throw std::invalid_argument("get_sector: parsed sector is not valid");
+        }
+        return out;
+    };
+
+    auto try_factor_parse = [&](std::size_t i, std::string const& cand) -> std::optional<Sector> {
+        try {
+            return factors[i]->get_sector(cand);
+        } catch (std::invalid_argument const&) {
+            return std::nullopt;
+        } catch (SymmetryError const&) {
+            return std::nullopt;
+        }
+    };
+
+    if (factors.size() == 1) {
+        if (auto sec = try_factor_parse(0, t)) {
+            return concat_factor_sectors({ *sec });
+        }
+        if (matching_outer_brackets(t)) {
+            auto const inner = trim_ws(std::string_view(t).substr(1, t.size() - 2));
+            if (auto sec = try_factor_parse(0, inner)) {
+                return concat_factor_sectors({ *sec });
+            }
+        }
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", t));
+    }
+
+    if (!matching_outer_brackets(t)) {
+        throw std::invalid_argument(std::format(
+          "get_sector: multi-factor symmetry requires bracketed sector string, got '{}'", t));
+    }
+    auto const inner = trim_ws(std::string_view(t).substr(1, t.size() - 2));
+    auto const parts = split_comma_top_level(inner);
+    if (parts.size() != factors.size()) {
+        throw std::invalid_argument(std::format(
+          "get_sector: expected {} factor sector(s), got {}", factors.size(), parts.size()));
+    }
+    std::vector<Sector> secs;
+    secs.reserve(factors.size());
+    for (std::size_t i = 0; i < factors.size(); ++i) {
+        secs.push_back(factors[i]->get_sector(parts[i]));
+    }
+    return concat_factor_sectors(secs);
 }
 
 FusionSymbol

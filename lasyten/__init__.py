@@ -105,6 +105,7 @@ from .tensors import (
     pinv,
     # planar
     planar,
+    planar_contract_mask,
     planar_contraction,
     planar_partial_trace,
     planar_permute_legs,
@@ -235,6 +236,7 @@ __all__ = [
     'pinv',
     'planar',
     'planar_combine_legs',
+    'planar_contract_mask',
     'planar_contraction',
     'planar_partial_trace',
     'planar_permute_legs',

@@ -3,10 +3,10 @@ labels.h
 
 Declared in ``include/lasyten/tensors/labels.h``.
 
-lasyten::LabelledLegs
--------------------
+lasyten::LegLabels
+----------------
 
-.. doxygenclass:: lasyten::LabelledLegs
+.. doxygenclass:: lasyten::LegLabels
    :project: lasyten
    :members:
    :undoc-members:

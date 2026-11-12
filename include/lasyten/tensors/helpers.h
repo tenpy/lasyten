@@ -129,14 +129,14 @@ _decomposition_prepare(TensorCPtr tensor, bool new_leg_dual);
 ///
 /// @param new_labels Label sequence for the two new legs.
 /// @returns Pair of leg labels for the decomposition factors.
-[[nodiscard]] std::pair<OptionalLabel, OptionalLabel> _decomposition_labels(
-  OptionalLabels const& new_labels);
+[[nodiscard]] std::pair<std::string, std::string> _decomposition_labels(
+  LegLabelList const& new_labels);
 
-/// Parse labels for `svd`. `nullopt` means all-unlabelled.
+/// Parse labels for `svd`. Outer `nullopt` means all-unlabelled (empty strings).
 ///
-/// @param new_labels Optional label sequence; `nullopt` means all unlabeled.
+/// @param new_labels Optional label sequence; `nullopt` means all unlabeled (`""`).
 /// @returns Four leg labels for the SVD factors.
-[[nodiscard]] std::tuple<OptionalLabel, OptionalLabel, OptionalLabel, OptionalLabel>
-_svd_new_labels(std::optional<OptionalLabels> new_labels);
+[[nodiscard]] std::tuple<std::string, std::string, std::string, std::string> _svd_new_labels(
+  std::optional<LegLabelList> new_labels);
 
 } // namespace lasyten
