@@ -48,7 +48,7 @@ bind_sun(py::module_& m)
     py::class_<SUN, Group, py::smart_holder> cls(m, "SUN", DOC(lasyten, SUN));
 
     cls.def(py::init([](int N,
-                        int64 hweight,
+                        std::optional<int64> hweight,
                         std::optional<int64> cg_hweight,
                         std::optional<int64> f_hweight,
                         std::optional<int64> r_hweight,
@@ -65,7 +65,7 @@ bind_sun(py::module_& m)
                                         std::move(descriptive_name));
             }),
             py::arg("N"),
-            py::arg("hweight"),
+            py::arg("hweight") = py::none(),
             py::kw_only(),
             py::arg("cg_hweight") = py::none(),
             py::arg("f_hweight") = py::none(),

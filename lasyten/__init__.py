@@ -13,6 +13,7 @@ get_config()  # initialize config
 
 # note: order matters!
 from . import (
+    cache,
     config,
     tools,
     block_backends,
@@ -104,6 +105,7 @@ from .tensors import (
     pinv,
     # planar
     planar,
+    planar_contract_mask,
     planar_contraction,
     planar_partial_trace,
     planar_permute_legs,
@@ -193,6 +195,7 @@ __all__ = [
     'backends',
     'bend_legs',
     'block_backends',
+    'cache',
     'combine_legs',
     'combine_to_matrix',
     'complex_conj',
@@ -233,6 +236,7 @@ __all__ = [
     'pinv',
     'planar',
     'planar_combine_legs',
+    'planar_contract_mask',
     'planar_contraction',
     'planar_partial_trace',
     'planar_permute_legs',

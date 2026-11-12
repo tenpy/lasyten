@@ -2,25 +2,38 @@
 
 #include <lasyten/block_backend/numpy.h>
 #include <lasyten/config.h>
+#include <lasyten/symmetries/exceptions.h>
 #include <lasyten/symmetries/fusion_symbol.h>
+#include <lasyten/tools/lru_cache.h>
+#include <lasyten/tools/warn.h>
+
+#include "sun_packed.h"
 
 #include <hdf5_io/h5_ops.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cctype>
 #include <cmath>
+#include <compare>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <lasyten/tools/hdf5.h>
 #include <limits>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string_view>
+#include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace lasyten {
@@ -96,9 +109,25 @@ file_attr_int64(HighFive::File& file, char const* name)
 {
     auto v = hdf5_io::h5_get_attr_int64(file.getId(), name);
     if (!v) {
-        throw std::runtime_error(std::string("SUN HDF5 file missing attribute '") + name + "'");
+        throw std::runtime_error(
+          std::format("SUN HDF5 file '{}' is missing attribute '{}'", file.getName(), name));
     }
     return *v;
+}
+
+[[noreturn]] void
+throw_hweight_too_low(char const* kind, std::string const& path, int64 needed, int64 available)
+{
+    throw std::invalid_argument(std::format(
+      "SU(N) {} data in '{}' only covers highest weight {}, but an irrep of weight {} was "
+      "requested.\n"
+      "Recalculate the SU(N) data with a larger highest weight using the "
+      "clebsch_gordan_coefficients package (or point lasyten at such files via su_n_data_path / "
+      "su_n_hweights).",
+      kind,
+      path,
+      available,
+      needed));
 }
 
 Sector
@@ -394,6 +423,287 @@ SUN::r_root() const
     return file_root(*Rfile_);
 }
 
+// ---------------------------------------------------------------------------------------------
+// RAM cache for the data read from the HDF5 files: F symbols, R symbols and fusion outcomes.
+// One process-wide least-recently-used cache whose size is capped by the config option
+// ``su_n_symbol_cache_mb``. The files are opened read-only and never change while a `SUN` object
+// lives, so everything derived from them can be cached; entries are keyed by an id that is unique
+// per `SUN` object, and entries of destroyed objects simply age out.
+namespace {
+
+/// Fusion outcomes of ``a x b``: labels of all children of the (a, b) group of the CG file (in
+/// file order) and the "Outer Multiplicity" of every irrep c (dataset ``Irrep<c>a1``).
+struct SunOutcomes
+{
+    std::vector<Sector> labels;
+    std::map<Sector, int64> multiplicity;
+};
+
+using SymbolValue = std::variant<FusionSymbol, SunOutcomes>;
+using SymbolCache = ByteLRU<std::string, SymbolValue>;
+
+std::size_t
+symbol_value_bytes(SymbolValue const& value)
+{
+    constexpr std::size_t block_overhead = 16; // allocator header and rounding of one heap block
+    if (auto const* f = std::get_if<FusionSymbol>(&value)) {
+        return sizeof(FusionSymbol) + block_overhead +
+               f->size() * (f->is_real() ? sizeof(float64) : sizeof(complex128));
+    }
+    constexpr std::size_t map_node_bytes = sizeof(Sector) + sizeof(int64) + 48;
+    auto const& o = std::get<SunOutcomes>(value);
+    return sizeof(SunOutcomes) + block_overhead + o.labels.capacity() * sizeof(Sector) +
+           o.multiplicity.size() * map_node_bytes;
+}
+
+SymbolCache&
+symbol_cache()
+{
+    static SymbolCache cache([] { return megabytes_to_bytes(get_config().su_n_symbol_cache_mb); },
+                             [](std::string const& key, SymbolValue const& value) {
+                                 constexpr std::size_t node_overhead =
+                                   112; // list node + hash node + control block
+                                 return 2 * (sizeof(std::string) + key.capacity()) +
+                                        node_overhead + symbol_value_bytes(value);
+                             });
+    return cache;
+}
+
+/// Per-object state: unique id for the cache keys, weights of the three files (read once), and
+/// whether the F file is a legacy file (no ``Gauge_Version`` attribute). Legacy files omit F
+/// blocks that vanish; files from the current generator contain every allowed key.
+struct SunState
+{
+    std::uint64_t id = 0;
+    std::atomic<int64> h_cg{ -1 };
+    std::atomic<int64> h_f{ -1 };
+    std::atomic<int64> h_r{ -1 };
+    bool legacy_f_file = true;
+    // F / R file in the packed layout (null: folder layout)
+    std::shared_ptr<sun_packed::PackedIndex const> f_packed;
+    std::shared_ptr<sun_packed::PackedIndex const> r_packed;
+};
+
+/// Identity of a data file: canonical path (so a symlink or another spelling of the path gives the
+/// same identity), size and modification time (so a file that was replaced is a different one).
+struct FileIdentity
+{
+    std::string path;
+    std::uintmax_t size = 0;
+    std::int64_t mtime = 0;
+    auto operator<=>(FileIdentity const&) const = default;
+};
+
+FileIdentity
+file_identity(std::string const& path)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    auto const canonical = fs::weakly_canonical(path, ec);
+    FileIdentity id;
+    id.path = ec ? path : canonical.string();
+    ec.clear();
+    id.size = fs::file_size(path, ec);
+    ec.clear();
+    id.mtime = static_cast<std::int64_t>(fs::last_write_time(path, ec).time_since_epoch().count());
+    return id;
+}
+
+using SharedStateKey = std::array<FileIdentity, 3>; // CG, F, R
+
+/// The `SunState` of every set of files that is currently in use. `SUN` objects on the same,
+/// unchanged files share it: the validated packed indices (no second index in RAM, no second scan
+/// of a folder file), the weights, and the id under which the symbols are cached. The registry
+/// holds weak pointers only, so a state ends with the last `SUN` that uses it.
+std::mutex&
+shared_state_mutex()
+{
+    static std::mutex m;
+    return m;
+}
+
+std::map<SharedStateKey, std::weak_ptr<SunState>>&
+shared_states()
+{
+    static std::map<SharedStateKey, std::weak_ptr<SunState>> states;
+    return states;
+}
+
+std::shared_ptr<SunState>
+find_shared_state(SharedStateKey const& key)
+{
+    std::lock_guard<std::mutex> lock(shared_state_mutex());
+    auto& states = shared_states();
+    if (auto const it = states.find(key); it != states.end()) {
+        if (auto state = it->second.lock()) {
+            return state;
+        }
+        states.erase(it);
+    }
+    return nullptr;
+}
+
+void
+register_shared_state(SharedStateKey const& key, std::shared_ptr<SunState> const& state)
+{
+    std::lock_guard<std::mutex> lock(shared_state_mutex());
+    auto& states = shared_states();
+    std::erase_if(states, [](auto const& item) { return item.second.expired(); });
+    states[key] = state;
+}
+
+/// Check the group ``F_sym`` / ``R_sym`` of a symbol file in a single pass over its keys: there is
+/// a key for the all-trivial sectors and a key containing the highest weight twice. The number of
+/// F keys grows like weight^5 (110k at weight 12), so this must stay linear: indexing the keys of
+/// an old-style HDF5 group one by one (``H5Lget_name_by_idx``) is quadratic.
+void
+check_symbol_group(HighFive::Group& root, char kind, int64 highest_weight)
+{
+    struct State
+    {
+        std::string prefix;
+        std::string zero_key;
+        std::string h_key;
+        char kind = 'F';
+        int64 highest_weight = 0;
+        bool have_first = false;
+        bool found_h = false;
+    };
+    std::string const group_name = std::string(1, kind) + "_sym";
+    if (!hdf5_io::h5_contains(root, group_name)) {
+        throw std::invalid_argument("HDF5 file does not contain '/" + group_name + "/' group.");
+    }
+    State state;
+    state.kind = kind;
+    state.prefix = std::string(1, kind) + "[";
+    state.highest_weight = highest_weight;
+    auto callback =
+      [](hid_t /*group*/, char const* name, H5L_info2_t const* /*info*/, void* data) {
+          auto& st = *static_cast<State*>(data);
+          std::string_view const key(name);
+          if (!st.have_first && key.starts_with(st.prefix)) {
+              st.have_first = true;
+              auto const num_lists = static_cast<int>(std::ranges::count(key, '['));
+              auto const commas = static_cast<int>(std::ranges::count(key, ','));
+              st.zero_key = std::string(1, st.kind);
+              for (int i = 0; i < num_lists; ++i) {
+                  st.zero_key += "[0";
+                  for (int j = 0; j < commas / num_lists; ++j) {
+                      st.zero_key += ", 0";
+                  }
+                  st.zero_key += "]";
+              }
+              std::string h_bracket = "[" + std::to_string(st.highest_weight);
+              for (int j = 0; j < commas / num_lists; ++j) {
+                  h_bracket += ", 0";
+              }
+              h_bracket += "]";
+              st.h_key = h_bracket + h_bracket;
+          }
+          if (st.have_first && key.find(st.h_key) != std::string_view::npos) {
+              st.found_h = true;
+              return herr_t{ 1 }; // found: stop the iteration
+          }
+          return herr_t{ 0 };
+      };
+    hid_t group = hdf5_io::h5_open(root, group_name);
+    hsize_t position = 0;
+    herr_t const status =
+      H5Literate2(group, H5_INDEX_NAME, H5_ITER_INC, &position, callback, &state);
+    if (status < 0) {
+        H5Idec_ref(group);
+        throw std::runtime_error("SUN: iterating over the keys of '/" + group_name + "/' failed");
+    }
+    bool const has_zero_key = state.have_first && hdf5_io::h5_contains(group, state.zero_key);
+    H5Idec_ref(group);
+    if (!state.have_first) {
+        throw std::invalid_argument(std::string("No valid ") + kind + "-symbol keys found in '/" +
+                                    group_name + "/'.");
+    }
+    if (!has_zero_key) {
+        throw std::invalid_argument(std::string("Missing key for all-trivial-sector ") + kind +
+                                    "-symbol: " + state.zero_key);
+    }
+    if (!state.found_h) {
+        throw std::invalid_argument("No key found containing " + state.h_key + ".");
+    }
+}
+
+void
+append_sector_key(std::string& k, Sector const& s)
+{
+    k.push_back(static_cast<char>(s.len()));
+    for (std::size_t i = 0; i < s.len(); ++i) {
+        k.append(reinterpret_cast<char const*>(&s.q[i]), sizeof(int16_t));
+    }
+}
+
+std::string
+symbol_key(std::uint64_t id, char kind, std::initializer_list<Sector> sectors)
+{
+    std::string k;
+    k.reserve(sizeof(id) + 1 + sectors.size() * (1 + 2 * max_sector_ind_len));
+    k.append(reinterpret_cast<char const*>(&id), sizeof(id));
+    k.push_back(kind);
+    for (Sector const& s : sectors) {
+        append_sector_key(k, s);
+    }
+    return k;
+}
+
+SunOutcomes
+build_outcomes(HighFive::File& CGfile, int N, Sector a, Sector b)
+{
+    auto root = file_root(CGfile);
+    auto key = cg_key(N, a, b);
+    if (!cg_key_usable(CGfile, key)) {
+        key = cg_key(N, b, a);
+    }
+    hid_t grp = hdf5_io::h5_open(root, key);
+    SunOutcomes res;
+    for (auto const& name : hdf5_io::h5_link_names(grp)) {
+        hid_t child = hdf5_io::h5_open(grp, name);
+        Sector lab = read_irrep_label_attr(child);
+        res.labels.push_back(lab);
+        if (name == std::string("Irrep") + sector_concat(lab) + "a1") {
+            auto mult = hdf5_io::h5_get_attr_int64(child, "Outer Multiplicity");
+            if (!mult) {
+                H5Idec_ref(child);
+                H5Idec_ref(grp);
+                throw std::runtime_error("SUN: missing Outer Multiplicity attribute");
+            }
+            res.multiplicity[lab] = *mult;
+        }
+        H5Idec_ref(child);
+    }
+    H5Idec_ref(grp);
+    return res;
+}
+
+std::shared_ptr<SunOutcomes const>
+sun_outcomes(SunState const& state, HighFive::File& CGfile, int N, Sector a, Sector b)
+{
+    auto const entry = symbol_cache().get_or_make(symbol_key(state.id, 'O', { a, b }), [&] {
+        return SymbolValue{ build_outcomes(CGfile, N, a, b) };
+    });
+    // aliasing constructor: keeps the cache entry alive while the outcomes are used
+    return std::shared_ptr<SunOutcomes const>(entry, &std::get<SunOutcomes>(*entry));
+}
+
+} // namespace
+
+CacheStats
+symbol_cache_stats()
+{
+    return symbol_cache().stats();
+}
+
+void
+clear_symbol_cache()
+{
+    symbol_cache().clear();
+}
+
 SUN::SUN(int N_,
          std::string cg_path,
          std::string f_path,
@@ -427,10 +737,85 @@ SUN::SUN(int N_,
     if (N != n_cg || N != n_f || N != n_r) {
         throw std::invalid_argument("Files must contain data for same N!");
     }
-    sanity_check_hdf5(*CGfile_);
-    sanity_check_hdf5(*Ffile_);
-    sanity_check_hdf5(*Rfile_);
+    // Files written by the same generator run carry the same 'CG_Run_Id' and 'Gauge_Version'; F
+    // and R symbols only fit to the CG coefficients they were computed from, and their values
+    // depend on the gauge. The generator writes "unknown" for what a legacy CG file did not
+    // record; "unknown", empty and missing all mean "not recorded". If the CG file records a
+    // gauge, an F or R file that records none or another one is refused; a set without any record
+    // (e.g. the files of
+    // ``external/SUN_symbols``) is accepted. Run ids are compared when both files record one.
+    {
+        auto const recorded = [](std::optional<std::string> const& v) {
+            return v.has_value() && !v->empty() && *v != "unknown";
+        };
+        auto const id_cg = hdf5_io::h5_get_attr_string(CGfile_->getId(), "CG_Run_Id");
+        auto const gauge_cg = hdf5_io::h5_get_attr_string(CGfile_->getId(), "Gauge_Version");
+        auto const show = [&](std::optional<std::string> const& v) {
+            return recorded(v) ? "'" + *v + "'" : std::string("not recorded");
+        };
+        for (auto const& [file, what, path] : { std::tuple{ Ffile_.get(), "F", &Fpath },
+                                                std::tuple{ Rfile_.get(), "R", &Rpath } }) {
+            auto const gauge = hdf5_io::h5_get_attr_string(file->getId(), "Gauge_Version");
+            if (recorded(gauge_cg) && (!recorded(gauge) || *gauge_cg != *gauge)) {
+                throw std::invalid_argument(std::format(
+                  "SUN: the {} file '{}' (Gauge_Version {}) and the CG file '{}' (Gauge_Version "
+                  "{}) "
+                  "are not in the same gauge, so the symbols do not fit the coefficients; "
+                  "regenerate the F and R files from this CG file.",
+                  what,
+                  *path,
+                  show(gauge),
+                  CGpath,
+                  show(gauge_cg)));
+            }
+            auto const id = hdf5_io::h5_get_attr_string(file->getId(), "CG_Run_Id");
+            if (recorded(id_cg) && recorded(id) && *id_cg != *id) {
+                throw std::invalid_argument(std::format(
+                  "SUN: the {} file '{}' and the CG file '{}' come from different generator runs "
+                  "(CG_Run_Id {} vs {}); regenerate them together.",
+                  what,
+                  *path,
+                  CGpath,
+                  *id,
+                  *id_cg));
+            }
+        }
+    }
     fusion_tensor_dtype = Dtype::Float64;
+
+    // The remaining checks and the packed indices are shared by all `SUN` objects on the same
+    // files.
+    SharedStateKey const identity{ file_identity(CGpath),
+                                   file_identity(Fpath),
+                                   file_identity(Rpath) };
+    if (auto shared = find_shared_state(identity)) {
+        state_ = std::move(shared);
+        return;
+    }
+    sanity_check_hdf5(*CGfile_);
+    // F and R files are in the folder layout (one dataset per key) or in the packed layout
+    std::shared_ptr<sun_packed::PackedIndex const> f_packed;
+    std::shared_ptr<sun_packed::PackedIndex const> r_packed;
+    if (sun_packed::is_packed_layout(*Ffile_, Fpath)) {
+        f_packed = sun_packed::PackedIndex::load(Ffile_, Fpath, 'F', N);
+        f_packed->check(file_attr_int64(*Ffile_, "Highest_Weight"));
+    } else {
+        sanity_check_hdf5(*Ffile_);
+    }
+    if (sun_packed::is_packed_layout(*Rfile_, Rpath)) {
+        r_packed = sun_packed::PackedIndex::load(Rfile_, Rpath, 'R', N);
+        r_packed->check(file_attr_int64(*Rfile_, "Highest_Weight"));
+    } else {
+        sanity_check_hdf5(*Rfile_);
+    }
+    static std::atomic<std::uint64_t> next_id{ 1 };
+    auto state = std::make_shared<SunState>();
+    state->id = next_id.fetch_add(1);
+    state->legacy_f_file = H5Aexists(Ffile_->getId(), "Gauge_Version") <= 0;
+    state->f_packed = std::move(f_packed);
+    state->r_packed = std::move(r_packed);
+    register_shared_state(identity, state);
+    state_ = state;
 }
 
 bool
@@ -452,6 +837,79 @@ SUN::is_valid_sector(Sector a) const
     return a.q[a.len() - 1] == 0;
 }
 
+Sector
+SUN::get_sector(std::string const& s) const
+{
+    auto const start = s.find_first_not_of(" \t\n\r");
+    if (start == std::string::npos) {
+        throw std::invalid_argument("get_sector: empty string");
+    }
+    auto const end = s.find_last_not_of(" \t\n\r");
+    auto const t = std::string_view(s).substr(start, end - start + 1);
+    if (t.size() < 2 || t.front() != '[' || t.back() != ']') {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    auto inner = t.substr(1, t.size() - 2);
+    auto const i0 = inner.find_first_not_of(" \t\n\r");
+    if (i0 == std::string_view::npos) {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    auto const i1 = inner.find_last_not_of(" \t\n\r");
+    inner = inner.substr(i0, i1 - i0 + 1);
+
+    std::array<int16_t, max_sector_ind_len> vals{};
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while (pos < inner.size()) {
+        while (pos < inner.size() && (inner[pos] == ' ' || inner[pos] == '\t')) {
+            ++pos;
+        }
+        if (pos >= inner.size()) {
+            break;
+        }
+        auto const tok_start = pos;
+        if (inner[pos] == '+' || inner[pos] == '-') {
+            ++pos;
+        }
+        while (pos < inner.size() && inner[pos] >= '0' && inner[pos] <= '9') {
+            ++pos;
+        }
+        if (pos == tok_start ||
+            (pos == tok_start + 1 && (inner[tok_start] == '+' || inner[tok_start] == '-'))) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        if (count >= static_cast<std::size_t>(N) || count >= max_sector_ind_len) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        auto const tok = inner.substr(tok_start, pos - tok_start);
+        std::size_t idx = 0;
+        long value = 0;
+        try {
+            value = std::stol(std::string(tok), &idx, 10);
+        } catch (std::exception const&) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        if (idx != tok.size() || value < static_cast<long>(std::numeric_limits<int16_t>::min()) ||
+            value > static_cast<long>(std::numeric_limits<int16_t>::max())) {
+            throw std::invalid_argument(
+              std::format("get_sector: cannot parse sector from '{}'", s));
+        }
+        vals[count++] = static_cast<int16_t>(value);
+    }
+    if (count != static_cast<std::size_t>(N)) {
+        throw std::invalid_argument(
+          std::format("get_sector: expected {} components for SU({}), got {}", N, N, count));
+    }
+    auto const a = Sector::from_span(std::span<const int16_t>(vals.data(), count));
+    if (!is_valid_sector(a)) {
+        throw std::invalid_argument(std::format("get_sector: '{}' is not a valid sector", s));
+    }
+    return a;
+}
+
 bool
 SUN::_is_equivalent_factor(SymmetryFactor const& other) const
 {
@@ -465,11 +923,36 @@ int64
 SUN::sector_dim(Sector a) const
 {
     assert(is_valid_sector(a));
-    float64 dim = 1.0;
+    // Weyl dimension formula  prod_{k<k'} (q_k - q_k' + k' - k) / (k' - k)  in exact integer
+    // arithmetic: reduce every factor against the running fraction, so intermediate values stay
+    // small and the result is exact (a float product is off by one for e.g. SU(4) weight >= 4).
+    auto gcd128 = [](__int128 x, __int128 y) {
+        while (y != 0) {
+            auto t = x % y;
+            x = y;
+            y = t;
+        }
+        return x;
+    };
+    __int128 num = 1;
+    __int128 den = 1;
     for (int kp = 2; kp <= N; ++kp) {
         for (int k = 1; k < kp; ++k) {
-            dim *= 1.0 + (static_cast<float64>(a.q[k - 1] - a.q[kp - 1]) / (kp - k));
+            __int128 n = static_cast<__int128>(a.q[k - 1]) - a.q[kp - 1] + (kp - k);
+            __int128 d = kp - k;
+            auto g1 = gcd128(n, den);
+            n /= g1;
+            den /= g1;
+            auto g2 = gcd128(num, d);
+            num /= g2;
+            d /= g2;
+            num *= n;
+            den *= d;
         }
+    }
+    auto const dim = num / den;
+    if (dim > std::numeric_limits<int64>::max()) {
+        throw std::overflow_error("SUN::sector_dim: dimension does not fit into int64");
     }
     return static_cast<int64>(dim);
 }
@@ -498,19 +981,37 @@ SUN::dual_sector(Sector a) const
 int64
 SUN::hweight_from_CG_hdf5() const
 {
-    return file_attr_int64(*CGfile_, "Highest_Weight");
+    auto& state = *static_cast<SunState*>(state_.get());
+    auto v = state.h_cg.load(std::memory_order_relaxed);
+    if (v < 0) {
+        v = file_attr_int64(*CGfile_, "Highest_Weight");
+        state.h_cg.store(v, std::memory_order_relaxed);
+    }
+    return v;
 }
 
 int64
 SUN::hweight_from_F_hdf5() const
 {
-    return file_attr_int64(*Ffile_, "Highest_Weight");
+    auto& state = *static_cast<SunState*>(state_.get());
+    auto v = state.h_f.load(std::memory_order_relaxed);
+    if (v < 0) {
+        v = file_attr_int64(*Ffile_, "Highest_Weight");
+        state.h_f.store(v, std::memory_order_relaxed);
+    }
+    return v;
 }
 
 int64
 SUN::hweight_from_R_hdf5() const
 {
-    return file_attr_int64(*Rfile_, "Highest_Weight");
+    auto& state = *static_cast<SunState*>(state_.get());
+    auto v = state.h_r.load(std::memory_order_relaxed);
+    if (v < 0) {
+        v = file_attr_int64(*Rfile_, "Highest_Weight");
+        state.h_r.store(v, std::memory_order_relaxed);
+    }
+    return v;
 }
 
 bool
@@ -518,53 +1019,21 @@ SUN::can_fuse_to(Sector a, Sector b, Sector c) const
 {
     auto const hmax = hweight_from_CG_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max(a.q[0], b.q[0]), hmax);
     }
     if (c.q[0] > a.q[0] + b.q[0]) {
         return false;
     }
-    auto key = cg_key(N, a, b);
-    if (!cg_key_usable(*CGfile_, key)) {
-        key = cg_key(N, b, a);
-    }
-    auto root = cg_root();
-    hid_t grp = hdf5_io::h5_open(root, key);
-    for (auto const& name : hdf5_io::h5_link_names(grp)) {
-        hid_t child = hdf5_io::h5_open(grp, name);
-        Sector lab = read_irrep_label_attr(child);
-        H5Idec_ref(child);
-        if (lab == c) {
-            H5Idec_ref(grp);
-            return true;
-        }
-    }
-    H5Idec_ref(grp);
-    return false;
+    auto const outcomes = sun_outcomes(*static_cast<SunState*>(state_.get()), *CGfile_, N, a, b);
+    return std::ranges::find(outcomes->labels, c) != outcomes->labels.end();
 }
 
 int64
 SUN::_n_symbol(Sector a, Sector b, Sector c) const
 {
-    auto key = cg_key(N, a, b);
-    if (!cg_key_usable(*CGfile_, key)) {
-        key = cg_key(N, b, a);
-    }
-    auto root = cg_root();
-    auto ckey = std::string("Irrep") + sector_concat(c) + "a1";
-    hid_t grp = hdf5_io::h5_open(root, key);
-    if (!hdf5_io::h5_contains(grp, ckey)) {
-        H5Idec_ref(grp);
-        return 0;
-    }
-    hid_t dset = hdf5_io::h5_open(grp, ckey);
-    auto mult = hdf5_io::h5_get_attr_int64(dset, "Outer Multiplicity");
-    H5Idec_ref(dset);
-    H5Idec_ref(grp);
-    if (!mult) {
-        throw std::runtime_error("SUN: missing Outer Multiplicity attribute");
-    }
-    return *mult;
+    auto const outcomes = sun_outcomes(*static_cast<SunState*>(state_.get()), *CGfile_, N, a, b);
+    auto const it = outcomes->multiplicity.find(c);
+    return it == outcomes->multiplicity.end() ? 0 : it->second;
 }
 
 int64
@@ -593,23 +1062,10 @@ SUN::fusion_outcomes(Sector a, Sector b) const
 {
     auto const hmax = hweight_from_CG_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max(a.q[0], b.q[0]), hmax);
     }
-    auto key = cg_key(N, a, b);
-    if (!cg_key_usable(*CGfile_, key)) {
-        key = cg_key(N, b, a);
-    }
-    auto root = cg_root();
-    hid_t grp = hdf5_io::h5_open(root, key);
-    std::vector<Sector> dec;
-    for (auto const& name : hdf5_io::h5_link_names(grp)) {
-        hid_t child = hdf5_io::h5_open(grp, name);
-        dec.push_back(read_irrep_label_attr(child));
-        H5Idec_ref(child);
-    }
-    H5Idec_ref(grp);
-    return SectorArray(std::move(dec));
+    auto const outcomes = sun_outcomes(*static_cast<SunState*>(state_.get()), *CGfile_, N, a, b);
+    return SectorArray(std::vector<Sector>(outcomes->labels));
 }
 
 std::map<Sector, int64>
@@ -665,8 +1121,7 @@ SUN::clebschgordan(Sector a, int64 q_a, Sector b, int64 q_b, Sector c, int64 q_c
 {
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
     auto key1 = cg_key(N, a, b);
     auto key2 = std::string("Irrep") + sector_concat(c) + "a" + std::to_string(mu);
@@ -694,8 +1149,7 @@ SUN::_fusion_tensor(Sector a, Sector b, Sector c, bool Z_a, bool Z_b) const
     }
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
     auto dim_Sa = static_cast<std::size_t>(sector_dim(a));
     auto dim_Sb = static_cast<std::size_t>(sector_dim(b));
@@ -731,8 +1185,8 @@ SUN::_f_symbol_from_CG(Sector a, Sector b, Sector c, Sector d, Sector e, Sector 
 {
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw || d.q[0] > hw || e.q[0] > hw || f.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low(
+          "CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0], d.q[0], e.q[0], f.q[0] }), hw);
     }
     auto& be = *static_cast<BlockBackend*>(NumpyBlockBackend::from_factory("cpu"));
     auto X1 =
@@ -777,36 +1231,56 @@ SUN::_f_symbol(Sector a, Sector b, Sector c, Sector d, Sector e, Sector f) const
     auto const hmax = hweight_from_F_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax || c.q[0] > hmax || d.q[0] > hmax || e.q[0] > hmax ||
         f.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low(
+          "F", Fpath, std::max({ a.q[0], b.q[0], c.q[0], d.q[0], e.q[0], f.q[0] }), hmax);
     }
-    std::string key = "F";
-    for (Sector const& s : { a, b, c, d, e, f }) {
-        key += sector_bracket(s);
-    }
-    std::string keybar = "F";
-    for (Sector const& s : { a, b, c, d, e, f }) {
-        keybar += sector_bracket(dual_sector(s));
-    }
-    auto root = f_root();
-    auto open_sym = [&](std::string const& k) -> std::optional<FusionSymbol> {
-        if (!hdf5_io::h5_contains(root, std::string("F_sym/") + k)) {
-            return std::nullopt;
-        }
-        hid_t fsym = hdf5_io::h5_open(root, "F_sym");
-        hid_t dset = hdf5_io::h5_open(fsym, k);
-        auto buf = hdf5_io::h5_read_buffer(dset);
-        H5Idec_ref(dset);
-        H5Idec_ref(fsym);
-        return fusion_symbol_from_hdf5_buffer(buf);
-    };
-    if (auto out = open_sym(key)) {
-        return *out;
-    }
-    if (auto out = open_sym(keybar)) {
-        return *out;
-    }
-    return FusionSymbol::zeros(4, FusionSymbol::Shape{ { 1, 1, 1, 1 } }, Dtype::Complex128);
+    auto const& state = *static_cast<SunState*>(state_.get());
+    auto const cached =
+      symbol_cache().get_or_make(symbol_key(state.id, 'F', { a, b, c, d, e, f }), [&] {
+          std::string key = "F";
+          for (Sector const& s : { a, b, c, d, e, f }) {
+              key += sector_bracket(s);
+          }
+          auto root = f_root();
+          if (state.f_packed) {
+              if (auto const i = state.f_packed->find(std::array<Sector, 6>{ a, b, c, d, e, f })) {
+                  return SymbolValue{ state.f_packed->read(*i) };
+              }
+          } else if (hdf5_io::h5_contains(root, std::string("F_sym/") + key)) {
+              hid_t fsym = hdf5_io::h5_open(root, "F_sym");
+              hid_t dset = hdf5_io::h5_open(fsym, key);
+              auto buf = hdf5_io::h5_read_buffer(dset);
+              H5Idec_ref(dset);
+              H5Idec_ref(fsym);
+              return SymbolValue{ fusion_symbol_from_hdf5_buffer(buf) };
+          }
+          // Not stored. The shape of the F symbol is given by the four fusion multiplicities.
+          auto const n1 = _n_symbol(b, c, e);
+          auto const n2 = _n_symbol(a, e, d);
+          auto const n3 = _n_symbol(a, b, f);
+          auto const n4 = _n_symbol(f, c, d);
+          if (n1 == 0 || n2 == 0 || n3 == 0 || n4 == 0) {
+              throw SymmetryError("Sectors are not consistent with fusion rules.");
+          }
+          if (state.legacy_f_file) {
+              // Files without a 'Gauge_Version' attribute omit the F symbols that vanish
+              // identically, so an allowed channel without a dataset is an all-zero block.
+              return SymbolValue{ FusionSymbol::zeros(
+                4,
+                FusionSymbol::Shape{ { static_cast<std::size_t>(n1),
+                                       static_cast<std::size_t>(n2),
+                                       static_cast<std::size_t>(n3),
+                                       static_cast<std::size_t>(n4) } },
+                Dtype::Complex128) };
+          }
+          throw std::runtime_error(std::format(
+            "SUN: the F-symbol file '{}' is incomplete: it has no dataset '{}' although all four "
+            "fusion channels are allowed. Files written by the current generator contain every "
+            "allowed key; please regenerate the file.",
+            Fpath,
+            key));
+      });
+    return std::get<FusionSymbol>(*cached);
 }
 
 FusionSymbol
@@ -814,8 +1288,7 @@ SUN::_r_symbol_from_CG(Sector a, Sector b, Sector c) const
 {
     auto const hw = hweight_from_CG_hdf5();
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
     BlockBackend& be = *NumpyBlockBackend::from_factory("cpu");
     auto X1 = block_from_fusion_symbol(be, fusion_tensor(a, b, c));
@@ -835,23 +1308,38 @@ SUN::_r_symbol(Sector a, Sector b, Sector c) const
 {
     auto const hmax = hweight_from_R_hdf5();
     if (a.q[0] > hmax || b.q[0] > hmax || c.q[0] > hmax) {
-        throw std::invalid_argument(
-          "Input irreps have higher weight than highest weight irrep in HDF5-file");
+        throw_hweight_too_low("R", Rpath, std::max({ a.q[0], b.q[0], c.q[0] }), hmax);
     }
-    std::string key = "R";
-    for (Sector const& s : { a, b, c }) {
-        key += sector_bracket(s);
-    }
-    auto root = r_root();
-    if (!hdf5_io::h5_contains(root, std::string("R_sym/") + key)) {
-        return FusionSymbol::zeros(1, FusionSymbol::Shape{ { 1, 1, 1, 1 } }, Dtype::Complex128);
-    }
-    hid_t rsym = hdf5_io::h5_open(root, "R_sym");
-    hid_t dset = hdf5_io::h5_open(rsym, key);
-    auto buf = hdf5_io::h5_read_buffer(dset);
-    H5Idec_ref(dset);
-    H5Idec_ref(rsym);
-    return fusion_symbol_from_hdf5_buffer(buf);
+    auto const& state = *static_cast<SunState*>(state_.get());
+    auto const cached = symbol_cache().get_or_make(symbol_key(state.id, 'R', { a, b, c }), [&] {
+        std::string key = "R";
+        for (Sector const& s : { a, b, c }) {
+            key += sector_bracket(s);
+        }
+        auto root = r_root();
+        if (state.r_packed) {
+            if (auto const i = state.r_packed->find(std::array<Sector, 3>{ a, b, c })) {
+                return SymbolValue{ state.r_packed->read(*i) };
+            }
+        } else if (hdf5_io::h5_contains(root, std::string("R_sym/") + key)) {
+            hid_t rsym = hdf5_io::h5_open(root, "R_sym");
+            hid_t dset = hdf5_io::h5_open(rsym, key);
+            auto buf = hdf5_io::h5_read_buffer(dset);
+            H5Idec_ref(dset);
+            H5Idec_ref(rsym);
+            return SymbolValue{ fusion_symbol_from_hdf5_buffer(buf) };
+        }
+        if (_n_symbol(a, b, c) == 0) {
+            throw SymmetryError("Sectors are not consistent with fusion rules.");
+        }
+        // R symbols are phases, they never vanish, so a missing allowed key means a broken file.
+        throw std::runtime_error(std::format(
+          "SUN: the R-symbol file '{}' is incomplete: it has no dataset '{}' although the fusion "
+          "channel is allowed. Please regenerate the file.",
+          Rpath,
+          key));
+    });
+    return std::get<FusionSymbol>(*cached);
 }
 
 int64
@@ -900,112 +1388,22 @@ SUN::sanity_check_hdf5(HighFive::File const& file) const
     auto H = file_attr_int64(f, "Highest_Weight");
     auto Nattr = file_attr_int64(f, "N");
     auto root = file_root(f);
+    if (sun_packed::is_packed_layout(f, f.getName())) {
+        // symbol file in the packed layout: check its index (the data is not needed)
+        char const kind = hdf5_io::h5_contains(root, "F_packed") ? 'F' : 'R';
+        std::shared_ptr<HighFive::File> borrowed(&f, [](HighFive::File*) {});
+        sun_packed::PackedIndex::load(borrowed, f.getName(), kind, static_cast<int>(Nattr), false)
+          ->check(H);
+        return;
+    }
     auto keys0 = hdf5_io::h5_link_names(root.getId());
     if (keys0.empty()) {
         throw std::invalid_argument("SUN sanity_check_hdf5: empty HDF5 file");
     }
     char ft = keys0[0].empty() ? '?' : keys0[0][0];
 
-    if (ft == 'F') {
-        if (!hdf5_io::h5_contains(root, "F_sym")) {
-            throw std::invalid_argument("HDF5 file does not contain '/F_sym/' group.");
-        }
-        hid_t fsym = hdf5_io::h5_open(root, "F_sym");
-        auto keys = hdf5_io::h5_link_names(fsym);
-        std::vector<std::string> valid_keys;
-        for (auto const& ks : keys) {
-            if (ks.rfind("F[", 0) == 0) {
-                valid_keys.push_back(ks);
-            }
-        }
-        if (valid_keys.empty()) {
-            H5Idec_ref(fsym);
-            throw std::invalid_argument("No valid F-symbol keys found in '/F_sym/'.");
-        }
-        auto const& first_key = valid_keys[0];
-        auto num_lists = static_cast<int>(std::count(first_key.begin(), first_key.end(), '['));
-        auto commas = static_cast<int>(std::count(first_key.begin(), first_key.end(), ','));
-        std::string zero_key = "F";
-        for (int i = 0; i < num_lists; ++i) {
-            zero_key += "[0";
-            for (int j = 0; j < commas / num_lists; ++j) {
-                zero_key += ", 0";
-            }
-            zero_key += "]";
-        }
-        bool found_zero = std::find(keys.begin(), keys.end(), zero_key) != keys.end();
-        if (!found_zero) {
-            H5Idec_ref(fsym);
-            throw std::invalid_argument("Missing key for all-trivial-sector F-symbol: " +
-                                        zero_key);
-        }
-        std::string h_bracket = "[" + std::to_string(H);
-        for (int j = 0; j < commas / num_lists; ++j) {
-            h_bracket += ", 0";
-        }
-        h_bracket += "]";
-        auto h_key = h_bracket + h_bracket;
-        bool found_h = false;
-        for (auto const& key : keys) {
-            if (key.find(h_key) != std::string::npos) {
-                found_h = true;
-                break;
-            }
-        }
-        H5Idec_ref(fsym);
-        if (!found_h) {
-            throw std::invalid_argument("No key found containing " + h_key + ".");
-        }
-    } else if (ft == 'R') {
-        if (!hdf5_io::h5_contains(root, "R_sym")) {
-            throw std::invalid_argument("HDF5 file does not contain '/R_sym/' group.");
-        }
-        hid_t rsym = hdf5_io::h5_open(root, "R_sym");
-        auto keys = hdf5_io::h5_link_names(rsym);
-        std::vector<std::string> valid_keys;
-        for (auto const& ks : keys) {
-            if (ks.rfind("R[", 0) == 0) {
-                valid_keys.push_back(ks);
-            }
-        }
-        if (valid_keys.empty()) {
-            H5Idec_ref(rsym);
-            throw std::invalid_argument("No valid R-symbol keys found in '/R_sym/'.");
-        }
-        auto const& first_key = valid_keys[0];
-        auto num_lists = static_cast<int>(std::count(first_key.begin(), first_key.end(), '['));
-        auto commas = static_cast<int>(std::count(first_key.begin(), first_key.end(), ','));
-        std::string zero_key = "R";
-        for (int i = 0; i < num_lists; ++i) {
-            zero_key += "[0";
-            for (int j = 0; j < commas / num_lists; ++j) {
-                zero_key += ", 0";
-            }
-            zero_key += "]";
-        }
-        bool found_zero = std::find(keys.begin(), keys.end(), zero_key) != keys.end();
-        if (!found_zero) {
-            H5Idec_ref(rsym);
-            throw std::invalid_argument("Missing key for all-trivial-sector R-symbol: " +
-                                        zero_key);
-        }
-        std::string h_bracket = "[" + std::to_string(H);
-        for (int j = 0; j < commas / num_lists; ++j) {
-            h_bracket += ", 0";
-        }
-        h_bracket += "]";
-        auto h_key = h_bracket + h_bracket;
-        bool found_h = false;
-        for (auto const& key : keys) {
-            if (key.find(h_key) != std::string::npos) {
-                found_h = true;
-                break;
-            }
-        }
-        H5Idec_ref(rsym);
-        if (!found_h) {
-            throw std::invalid_argument("No key found containing " + h_key + ".");
-        }
+    if (ft == 'F' || ft == 'R') {
+        check_symbol_group(root, ft, H);
     } else if (ft == 'N') {
         auto path = std::string("N_") + std::to_string(Nattr);
         if (!hdf5_io::h5_contains(root, path)) {
@@ -1063,9 +1461,120 @@ SUN::from_hdf5(lasyten::hdf5::Loader& loader, HighFive::Group& h5gr, std::string
     return obj;
 }
 
+namespace {
+
+/// Why `path` cannot be used as the data file of weight `h` for SU(N), or nothing if it is a
+/// finished file of that weight. The generator creates its files under a temporary name, but data
+/// from other sources (or an older generator that wrote F/R files under their final name and
+/// ``Highest_Weight`` last) can leave unfinished files with a standard name.
+std::optional<std::string>
+unusable_data_file_reason(std::string const& path, int N, int64 h)
+{
+    try {
+        HighFive::File file(path, HighFive::File::ReadOnly);
+        auto const n = hdf5_io::h5_get_attr_int64(file.getId(), "N");
+        auto const stored = hdf5_io::h5_get_attr_int64(file.getId(), "Highest_Weight");
+        if (!stored) {
+            return "it has no attribute 'Highest_Weight' (a generator run that has not finished "
+                   "or "
+                   "was interrupted)";
+        }
+        if (!n) {
+            return "it has no attribute 'N'";
+        }
+        if (*n != N) {
+            return std::format("it contains data for N={}", *n);
+        }
+        if (*stored != h) {
+            return std::format("its attribute 'Highest_Weight' is {}, not {}", *stored, h);
+        }
+        return std::nullopt;
+    } catch (std::exception const& e) {
+        return std::format("it cannot be opened as an HDF5 file ({})", e.what());
+    }
+}
+
+/// Largest ``H <= limit`` for which a finished ``<base>_N<N>_<kind>_hweight<H>.hdf5`` exists in
+/// `dir`. Candidates are tried from the largest weight down; one that is not a finished file of
+/// its weight (see ``unusable_data_file_reason``) is skipped with a warning that names it.
+std::optional<int64>
+largest_su_n_weight(std::string const& dir,
+                    std::string const& base,
+                    int N,
+                    std::string const& kind,
+                    int64 limit)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) {
+        return std::nullopt;
+    }
+    std::string const prefix = std::format("{}_N{}_{}_hweight", base, N, kind);
+    std::string const suffix = ".hdf5";
+    std::vector<std::pair<int64, std::string>> candidates;
+    for (auto const& entry : fs::directory_iterator(dir, ec)) {
+        auto const name = entry.path().filename().string();
+        if (name.size() <= prefix.size() + suffix.size() || !name.starts_with(prefix) ||
+            !name.ends_with(suffix)) {
+            continue;
+        }
+        auto const digits =
+          name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+        if (digits.size() > 9 ||
+            !std::ranges::all_of(digits, [](unsigned char c) { return std::isdigit(c) != 0; })) {
+            continue;
+        }
+        auto const h = static_cast<int64>(std::stoll(digits));
+        if (h <= limit) {
+            candidates.emplace_back(h, entry.path().string());
+        }
+    }
+    std::ranges::sort(candidates, std::ranges::greater{});
+    for (auto const& [h, path] : candidates) {
+        auto const reason = unusable_data_file_reason(path, N, h);
+        if (!reason) {
+            return h;
+        }
+        warn(std::format("SU({}) data file '{}' is ignored by the automatic detection of the data "
+                         "weights: {}.",
+                         N,
+                         path,
+                         *reason));
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+std::array<std::optional<int64>, 3>
+su_n_detect_hweights(int N,
+                     std::optional<std::string> path,
+                     std::optional<std::string> filename_base,
+                     std::optional<int64> cg_hweight,
+                     std::optional<int64> f_hweight,
+                     std::optional<int64> r_hweight)
+{
+    auto const& config = get_config();
+    auto const dir = expand_user(path.value_or(config.su_n_data_path));
+    auto const& base = filename_base.value_or(config.su_n_data_filename_base);
+    auto const pinned = su_n_pinned_hweights(N);
+    auto pick = [&](std::optional<int64> given, int64 pin, std::string const& kind, int64 limit) {
+        if (given.has_value()) {
+            return given;
+        }
+        if (pin > 0) {
+            return std::optional<int64>(pin);
+        }
+        return largest_su_n_weight(dir, base, N, kind, limit);
+    };
+    auto const cg = pick(cg_hweight, pinned[0], "CG", std::numeric_limits<int64>::max());
+    int64 const limit = cg.value_or(std::numeric_limits<int64>::max());
+    return { cg, pick(f_hweight, pinned[1], "F", limit), pick(r_hweight, pinned[2], "R", limit) };
+}
+
 SUN::Ptr
 SUN::from_config(int N,
-                 int64 hweight,
+                 std::optional<int64> hweight,
                  std::optional<int64> cg_hweight,
                  std::optional<int64> f_hweight,
                  std::optional<int64> r_hweight,
@@ -1073,9 +1582,38 @@ SUN::from_config(int N,
                  std::optional<std::string> filename_base,
                  std::optional<std::string> descriptive_name)
 {
-    const int64 h_cg = cg_hweight.value_or(hweight);
-    const int64 h_f = f_hweight.value_or(hweight);
-    const int64 h_r = r_hweight.value_or(hweight);
+    int64 h_cg = 0;
+    int64 h_f = 0;
+    int64 h_r = 0;
+    if (hweight.has_value()) {
+        h_cg = cg_hweight.value_or(*hweight);
+        h_f = f_hweight.value_or(*hweight);
+        h_r = r_hweight.value_or(*hweight);
+    } else {
+        auto const detected =
+          su_n_detect_hweights(N, path, filename_base, cg_hweight, f_hweight, r_hweight);
+        for (std::size_t i = 0; i < 3; ++i) {
+            if (!detected[i].has_value()) {
+                constexpr std::array<char const*, 3> kinds{ "CG", "F", "R" };
+                std::string const msg =
+                  std::format("No SU({}) {} data file found in '{}' (name pattern "
+                              "'{}_N{}_{}_hweight<H>.hdf5'); pass the "
+                              "weights explicitly, set the config option 'su_n_hweights', or "
+                              "generate the data.",
+                              N,
+                              kinds[i],
+                              expand_user(path.value_or(get_config().su_n_data_path)),
+                              filename_base.value_or(get_config().su_n_data_filename_base),
+                              N,
+                              kinds[i]);
+                PyErr_SetString(PyExc_FileNotFoundError, msg.c_str());
+                throw py::error_already_set();
+            }
+        }
+        h_cg = *detected[0];
+        h_f = *detected[1];
+        h_r = *detected[2];
+    }
     for (auto [h, what] : { std::pair{ h_cg, "cg_hweight" },
                             std::pair{ h_f, "f_hweight" },
                             std::pair{ h_r, "r_hweight" } }) {

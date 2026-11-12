@@ -550,6 +550,10 @@ SpinlessFermionSite::prepare(int64 num_species, py::object conserve)
         state_labels[label] = idx;
     }
     state_labels["vac"] = 0;
+    state_labels["empty"] = 0;
+    if (num_species == 1) {
+        state_labels["full"] = 1;
+    }
     auto ops = FermionicDOF::creation_annihilation_ops(num_species);
     return { leg, ops.first, ops.second, state_labels };
 }
@@ -956,14 +960,18 @@ SpinHalfFermionSite::SpinHalfFermionSite(Prepared&& prepared,
 
     if (!factor_is_su2(sym_S_factor)) {
         add_individual_occupation_ops();
-        if (auto node = onsite_operators.extract("N0")) {
-            onsite_operators["Nup"] = std::move(node.mapped());
+        if (onsite_operators.contains("N0")) {
+            rename_op("N0", "Nup");
         }
-        if (auto node = onsite_operators.extract("N1")) {
-            onsite_operators["Ndown"] = std::move(node.mapped());
+        if (onsite_operators.contains("N1")) {
+            rename_op("N1", "Ndown");
         }
     }
     add_total_occupation_ops();
+
+    auto NtotNtot = np.attr("matmul")(n_tot, n_tot);
+    auto NupNdown = np.attr("multiply")(0.5, NtotNtot - n_tot);
+    add_onsite_operator("NupNdown", NupNdown, true);
 
     std::map<std::string, py::object> ops;
     if (!factor_is_su2(sym_S_factor)) {

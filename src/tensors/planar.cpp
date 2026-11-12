@@ -4,8 +4,10 @@
 #include <lasyten/backends/fusion_tree_backend.h>
 #include <lasyten/symmetries/spaces.h>
 #include <lasyten/tensors/charged_tensor.h>
+#include <lasyten/tensors/helpers.h>
 #include <lasyten/tensors/hidden_leg_tensor.h>
 #include <lasyten/tensors/labels.h>
+#include <lasyten/tensors/mask.h>
 #include <lasyten/tensors/ops_legs.h>
 #include <lasyten/tensors/symmetric_tensor.h>
 #include <lasyten/tools.h>
@@ -1785,6 +1787,9 @@ horizontal_factorization(TensorCPtr tensor,
 bool
 planar_almost_equal(TensorCPtr tensor_1, TensorCPtr tensor_2, float64 rtol, float64 atol)
 {
+    if (!tensor_1 || !tensor_2) {
+        throw std::invalid_argument("planar_almost_equal() requires non-null Tensor arguments");
+    }
     auto labs1 = tensor_1->labels.as_list();
     auto labs2 = tensor_2->labels.as_list();
     if (contains(labs1, "") || contains(labs2, "")) {
@@ -2213,6 +2218,9 @@ planar_contraction(TensorCPtr tensor1,
                    std::map<std::string, std::string> relabel1,
                    std::map<std::string, std::string> relabel2)
 {
+    if (!tensor1 || !tensor2) {
+        throw std::invalid_argument("planar_contraction() requires non-null Tensor arguments");
+    }
     auto legs1_idcs = tensor1->labels.indices(legs1);
     auto legs2_idcs = tensor2->labels.indices(legs2);
     auto num_contr = static_cast<int64>(legs1_idcs.size());
@@ -2505,6 +2513,56 @@ planar_contraction(TensorCPtr tensor1,
             return _wrap_hidden_planar_result(compose(t2, t1, relabel2, relabel1));
         }
     }
+}
+
+TensorPtr
+planar_contract_mask(TensorCPtr tensor1,
+                     MaskCPtr mask2,
+                     std::vector<LegRef> legs1,
+                     std::vector<LegRef> legs2,
+                     std::map<std::string, std::string> relabel1,
+                     std::map<std::string, std::string> relabel2)
+{
+    if (!tensor1 || !mask2) {
+        throw std::invalid_argument(
+          "planar_contract_mask() requires non-null Tensor and Mask arguments");
+    }
+    auto legs1_idcs = tensor1->labels.indices(legs1);
+    auto legs2_idcs = mask2->labels.indices(legs2);
+    if (legs1_idcs.size() != 1 || legs2_idcs.size() != 1) {
+        throw std::invalid_argument("planar_contract_mask() requires exactly one contracted leg");
+    }
+
+    auto tensor_leg_idx = legs1_idcs[0];
+    auto mask_leg_idx = legs2_idcs[0];
+    bool const tensor_leg_in_domain = tensor_leg_idx >= tensor1->num_codomain_legs();
+    bool const mask_leg_in_domain = mask_leg_idx == 1;
+    MaskCPtr mask_use = mask2;
+    if (tensor_leg_in_domain == mask_leg_in_domain) {
+        mask_use = std::dynamic_pointer_cast<Mask const>(transpose(mask2));
+    }
+
+    auto result = _compose_with_Mask(tensor1, mask_use, tensor_leg_idx);
+    auto labels = tensor1->labels.as_list();
+    auto const mask_labels = mask2->labels.as_list();
+    for (std::size_t idx = 0; idx < labels.size(); ++idx) {
+        auto const& relabel =
+          idx == static_cast<std::size_t>(tensor_leg_idx) ? relabel2 : relabel1;
+        std::string label = idx == static_cast<std::size_t>(tensor_leg_idx)
+                              ? mask_labels[static_cast<std::size_t>(1 - mask_leg_idx)]
+                              : labels[idx];
+        if (!label.empty()) {
+            auto it = relabel.find(label);
+            if (it != relabel.end()) {
+                label = it->second;
+            }
+        }
+        labels[idx] = std::move(label);
+    }
+    result->labels.set(std::move(labels));
+
+    std::vector<LegRef> domain{ LegRef{ mask_leg_idx } };
+    return planar_permute_legs(result, std::nullopt, std::move(domain));
 }
 
 TensorPlaceholder

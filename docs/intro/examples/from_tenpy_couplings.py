@@ -48,8 +48,8 @@ assert wR == wL
 # One fermion created on the left and annihilated on the right: bond dimension 1.
 assert wR.dim == 1
 
-# Hamiltonian hopping is the Hermitian combination  -t (c^dagger c + h.c.).
-hop = lasy.models.hopping([ferm, ferm], t=1)
+# Hamiltonian hopping can have independent left and right prefactors.
+hop = lasy.models.hopping([ferm, ferm], t_left=1, t_right=1)
 assert hop.num_sites == 2
 assert lasy.almost_equal(hop.to_tensor().hc, hop.to_tensor())
 

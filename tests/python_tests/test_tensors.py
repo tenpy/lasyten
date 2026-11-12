@@ -1500,6 +1500,26 @@ def test_almost_equal(cls, make_compatible_tensor):
         pytest.xfail(str(e))
 
 
+def test_almost_equal_rejects_none(make_compatible_tensor):
+    T = make_compatible_tensor()
+    with pytest.raises(ValueError, match='non-null'):
+        tensors.almost_equal(T, None)
+    with pytest.raises(ValueError, match='non-null'):
+        tensors.almost_equal(None, T)
+
+
+def test_null_tensor_guards_reject_none(make_compatible_tensor):
+    """None must raise ValueError via shared helpers or entry guards, not segfault."""
+    from lasyten.tensors.planar import planar_almost_equal
+
+    T = make_compatible_tensor()
+    for fn in (tensors.compose, tensors.check_same_legs, planar_almost_equal):
+        with pytest.raises(ValueError, match='non-null'):
+            fn(T, None)
+        with pytest.raises(ValueError, match='non-null'):
+            fn(None, T)
+
+
 @pytest.mark.deselect_invalid_ChargedTensor_cases
 @pytest.mark.parametrize(
     'cls, codomain, domain, which_leg',
@@ -4031,6 +4051,30 @@ def test_tensor_from_grid(cod, dom, row, col, make_compatible_tensor, make_compa
     assert res1.backend.almost_equal(res1, res2, rtol=1e-12, atol=1e-12)
     if T.symmetry.can_be_dropped:
         npt.assert_almost_equal(res1.to_numpy(understood_braiding=True), res2.to_numpy(understood_braiding=True))
+
+
+def test_tensor_from_grid_empty_rows_and_columns(make_compatible_tensor, make_compatible_space):
+    T: SymmetricTensor = make_compatible_tensor([None], [None], cls=SymmetricTensor, use_pipes=False)
+    row_summands = [T.codomain[0], make_compatible_space(is_dual=T.codomain[0].is_dual)]
+    col_summands = [T.domain[-1], make_compatible_space(is_dual=T.domain[-1].is_dual)]
+    grid = [[T, None], [None, None]]
+
+    with pytest.raises(ValueError, match='row_summands'):
+        tensors.tensor_from_grid(grid, col_summands=col_summands)
+    with pytest.raises(ValueError, match='col_summands'):
+        tensors.tensor_from_grid(grid, row_summands=row_summands)
+
+    result = tensors.tensor_from_grid(
+        grid,
+        row_labels=['row0', 'row1'],
+        col_labels=['col0', 'col1'],
+        row_summands=row_summands,
+        col_summands=col_summands,
+    )
+    assert result.codomain[0].spaces == row_summands
+    assert result.domain[-1].spaces == col_summands
+    assert result.codomain[0].summand_labels == ['row0', 'row1']
+    assert result.domain[-1].summand_labels == ['col0', 'col1']
 
 
 def test_tensor_grid_cell_roundtrip(make_compatible_tensor, make_compatible_space):

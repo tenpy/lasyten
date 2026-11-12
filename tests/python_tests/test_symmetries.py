@@ -250,6 +250,10 @@ def common_checks(
     _ = repr(sym)
     _ = str(sym)
 
+    # get_sector is the inverse of sector_str
+    for a in example_sectors:
+        npt.assert_array_equal(sym.get_sector(sym.sector_str(a)).to_numpy(), a)
+
     # defining property of trivial sector
     for a in example_sectors:
         fusion = sym.fusion_outcomes(a, sym.trivial_sector)
@@ -739,6 +743,45 @@ def test_no_symmetry(np_random):
 
     print('checking dual_sectors')
     npt.assert_array_equal(sym.dual_sectors(many_s), many_s)
+
+
+def test_get_sector():
+    # Single-factor FermionParity: brackets optional
+    fp = fermion_parity
+    odd = symmetries.FermionParity.odd
+    even = symmetries.FermionParity.even
+    assert fp.get_sector('odd') == odd
+    assert fp.get_sector('[odd]') == odd
+    assert fp.get_sector('even') == even
+    assert fp.factors[0].get_sector('odd') == odd
+
+    # U1 charge string without brackets
+    assert u1_symmetry.get_sector('1') == symmetries.Sector([1])
+    assert u1_symmetry.get_sector('[1]') == symmetries.Sector([1])
+    assert u1_symmetry.get_sector('-3') == symmetries.Sector([-3])
+
+    # FermionNumber uses default "[n]" sector_str
+    assert fermion_number.get_sector('[2]') == symmetries.Sector([2])
+    assert fermion_number.get_sector('2') == symmetries.Sector([2])
+
+    # Multi-factor product requires brackets
+    product = u1_symmetry * fermion_parity
+    assert product.get_sector('[1, odd]') == symmetries.Sector([1, 1])
+    assert product.get_sector(product.sector_str(symmetries.Sector([1, 1]))) == symmetries.Sector([1, 1])
+    with pytest.raises(ValueError):
+        product.get_sector('odd')
+
+    # Site state labels are not sector names
+    with pytest.raises(ValueError):
+        fp.get_sector('up')
+    with pytest.raises(ValueError):
+        fermion_number.get_sector('empty')
+
+    # _SU2 accepts bare jj or full sector_str
+    su2 = symmetries._SU2().as_Symmetry()
+    assert su2.get_sector('1') == symmetries.Sector([1])
+    assert su2.get_sector('1 (J=1/2)') == symmetries.Sector([1])
+    assert su2.get_sector(su2.sector_str(symmetries.Sector([2]))) == symmetries.Sector([2])
 
 
 # @pytest.mark.xfail(reason='Topological data not implemented.')

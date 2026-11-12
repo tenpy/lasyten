@@ -450,7 +450,8 @@ Space::test_sanity() const
 bool
 Space::is_trivial() const
 {
-    if (num_sectors > 1) {
+    // Null spaces (dim == 0 / num_sectors == 0) are not the trivial 1-d sector.
+    if (num_sectors != 1) {
         return false;
     }
     if (multiplicities[0] > 1) {

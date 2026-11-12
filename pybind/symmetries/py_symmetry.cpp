@@ -173,6 +173,7 @@ bind_symmetry(py::module_& m)
         py::arg("a"),
         DOC(lasyten, Symmetry, batch_qdim))
       .def("sector_str", &Symmetry::sector_str, py::arg("a"), DOC(lasyten, Symmetry, sector_str))
+      .def("get_sector", &Symmetry::get_sector, py::arg("s"), DOC(lasyten, Symmetry, get_sector))
       .def("_f_symbol",
            &Symmetry::_f_symbol,
            py::arg("a"),

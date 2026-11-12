@@ -217,6 +217,9 @@ _compose_with_Mask(TensorCPtr tensor, MaskCPtr mask, int64 leg_idx)
     // --- hints from Python _compose_with_Mask ---
     // deal with other tensor types
     // ---
+    if (!tensor || !mask) {
+        throw std::invalid_argument("_compose_with_Mask() requires non-null Tensor arguments");
+    }
     auto [in_domain, co_domain_idx, parsed_leg_idx] = tensor->_parse_leg_idx(leg_idx);
     leg_idx = parsed_leg_idx;
 

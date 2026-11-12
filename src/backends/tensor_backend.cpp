@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <lasyten/tools/misc.h>
@@ -355,6 +356,12 @@ get_same_backend(const std::vector<py::object>& objs, std::string error_msg)
 {
     if (objs.empty())
         throw std::invalid_argument("Need at least one tensor");
+    for (std::size_t i = 0; i < objs.size(); ++i) {
+        if (objs[i].is_none()) {
+            throw std::invalid_argument(std::format(
+              "get_same_backend() requires non-null Tensor arguments (null at index {})", i));
+        }
+    }
     TensorBackend::Ptr backend = objs[0].attr("backend").cast<TensorBackend::Ptr>();
     for (std::size_t i = 1; i < objs.size(); ++i) {
         TensorBackend::Ptr other = objs[i].attr("backend").cast<TensorBackend::Ptr>();
@@ -369,6 +376,12 @@ get_same_backend(const std::vector<TensorCPtr>& objs, std::string error_msg)
 {
     if (objs.empty())
         throw std::invalid_argument("Need at least one tensor");
+    for (std::size_t i = 0; i < objs.size(); ++i) {
+        if (!objs[i]) {
+            throw std::invalid_argument(std::format(
+              "get_same_backend() requires non-null Tensor arguments (null at index {})", i));
+        }
+    }
     TensorBackend::Ptr backend = objs[0]->backend;
     for (std::size_t i = 1; i < objs.size(); ++i) {
         TensorBackend::Ptr const& other = objs[i]->backend;

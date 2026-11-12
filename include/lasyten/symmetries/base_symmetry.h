@@ -242,6 +242,11 @@ class BaseSymmetry : public std::enable_shared_from_this<BaseSymmetry>
     virtual std::vector<float64> batch_qdim(SectorArray const& a) const;
     /// Short and readable string for the sector. Is used in __str__ of symmetry-related objects.
     virtual std::string sector_str(Sector a) const;
+    /// Inverse of `sector_str`. Throws if `s` does not name a valid sector.
+    ///
+    /// This resolves display names such as ``"odd"`` / ``"vacuum"``, not site state labels
+    /// like ``"up"`` / ``"empty"``.
+    virtual Sector get_sector(std::string const& s) const;
     /// dual_sector for multiple sectors
     ///
     /// subclasses my override this.

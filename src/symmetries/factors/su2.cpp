@@ -5,9 +5,12 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <format>
 #include <iostream>
 #include <lasyten/tools/hdf5.h>
 #include <limits>
+#include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -123,6 +126,42 @@ _SU2::sector_str(Sector a) const
     auto const jj = a.q[0];
     std::string j_str = (jj % 2 == 0) ? std::to_string(jj / 2) : (std::to_string(jj) + "/2");
     return std::to_string(jj) + " (J=" + j_str + ")";
+}
+
+Sector
+_SU2::get_sector(std::string const& s) const
+{
+    auto const start = s.find_first_not_of(" \t\n\r");
+    if (start == std::string::npos) {
+        throw std::invalid_argument("get_sector: empty string");
+    }
+    auto const end = s.find_last_not_of(" \t\n\r");
+    auto const t = s.substr(start, end - start + 1);
+
+    std::size_t idx = 0;
+    long value = 0;
+    try {
+        value = std::stol(t, &idx, 10);
+    } catch (std::exception const&) {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    if (value < 0 || value > static_cast<long>(std::numeric_limits<int16_t>::max())) {
+        throw std::invalid_argument(std::format("get_sector: '{}' is not a valid sector", s));
+    }
+    Sector const a{ static_cast<int16_t>(value) };
+    if (!is_valid_sector(a)) {
+        throw std::invalid_argument(std::format("get_sector: '{}' is not a valid sector", s));
+    }
+
+    auto const rest = std::string_view(t).substr(idx);
+    auto const rest_trim_start = rest.find_first_not_of(" \t\n\r");
+    if (rest_trim_start == std::string_view::npos) {
+        return a;
+    }
+    if (t != sector_str(a)) {
+        throw std::invalid_argument(std::format("get_sector: cannot parse sector from '{}'", s));
+    }
+    return a;
 }
 
 std::string

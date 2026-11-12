@@ -1,6 +1,8 @@
 #include <lasyten/models/degrees_of_freedom.h>
+#include <lasyten/models/sites.h>
 
 #include <lasyten/backends/backend_factory.h>
+#include <lasyten/config.h>
 #include <lasyten/symmetries/exceptions.h>
 #include <lasyten/symmetries/factors/fermion_number.h>
 #include <lasyten/symmetries/factors/fermion_parity.h>
@@ -17,15 +19,19 @@
 #include <lasyten/tensors/symmetric_tensor.h>
 #include <lasyten/tools.h>
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <format>
 #include <functional>
 #include <hdf5_io/constants.h>
 #include <hdf5_io/h5_ops.h>
+#include <initializer_list>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <numeric>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -220,6 +226,47 @@ add_onsite_operators_from_map(Site& site,
     }
 }
 
+bool
+is_known_but_unavailable(Site const& site, std::string const& name)
+{
+    auto one_of = [&name](std::initializer_list<std::string_view> names) {
+        for (auto candidate : names) {
+            if (candidate == name) {
+                return true;
+            }
+        }
+        return false;
+    };
+    auto is_no_symmetry = [](std::optional<std::string> const& conserve) {
+        return !conserve.has_value() || *conserve == "None" || *conserve == "none";
+    };
+    auto is_su2 = [](std::optional<std::string> const& conserve) {
+        return conserve.has_value() &&
+               (*conserve == "SU(2)" || *conserve == "SU2" || *conserve == "Stot");
+    };
+
+    if (auto const* spin = dynamic_cast<SpinSite const*>(&site)) {
+        if (is_su2(spin->conserve) &&
+            (name == "Sz" || (spin->double_total_spin == 1 && name == "Sigmaz"))) {
+            return true;
+        }
+        return !is_no_symmetry(spin->conserve) &&
+               (one_of({ "Sx", "Sy", "Sp", "Sm" }) ||
+                (spin->double_total_spin == 1 && one_of({ "Sigmax", "Sigmay" })));
+    }
+    if (auto const* spin_fermion = dynamic_cast<SpinHalfFermionSite const*>(&site)) {
+        if (is_su2(spin_fermion->conserve_S) && one_of({ "Nup", "Ndown", "Sz", "Sigmaz" })) {
+            return true;
+        }
+        return !is_no_symmetry(spin_fermion->conserve_S) &&
+               one_of({ "Sx", "Sy", "Sp", "Sm", "Sigmax", "Sigmay" });
+    }
+    if (auto const* clock = dynamic_cast<ClockSite const*>(&site)) {
+        return !is_no_symmetry(clock->conserve) && one_of({ "X", "Xhc", "Xphc" });
+    }
+    return false;
+}
+
 } // namespace
 
 py::object&
@@ -327,7 +374,6 @@ Site::test_sanity()
     }
 
     for (auto const& [name, op] : onsite_operators) {
-        (void)name;
         if (!single_leg_matches(leg, op->codomain) || !single_leg_matches(leg, op->domain)) {
             throw std::invalid_argument("onsite operator legs must match the site leg");
         }
@@ -335,6 +381,19 @@ Site::test_sanity()
             throw std::invalid_argument("onsite operator labels must be ('p', 'p*')");
         }
         op->test_sanity();
+    }
+    for (auto const& [name, hc_name] : hc_ops) {
+        auto op = onsite_operators.find(name);
+        auto hc_op = onsite_operators.find(hc_name);
+        auto reverse = hc_ops.find(hc_name);
+        if (op == onsite_operators.end() || hc_op == onsite_operators.end() ||
+            reverse == hc_ops.end() || reverse->second != name) {
+            throw std::invalid_argument("invalid hermitian conjugate operator-name mapping");
+        }
+        if (!almost_equal(dagger(op->second), hc_op->second, 1e-5, 1e-8, true)) {
+            throw std::invalid_argument(
+              std::format("operator '{}' is not the hermitian conjugate of '{}'", hc_name, name));
+        }
     }
 }
 
@@ -354,7 +413,8 @@ void
 Site::add_onsite_operator(std::string const& name,
                           py::object op,
                           std::optional<bool> is_diagonal,
-                          bool understood_braiding)
+                          bool understood_braiding,
+                          std::optional<std::string> hc)
 {
     if (onsite_operators.contains(name)) {
         throw std::invalid_argument(std::format("Operator with name={} already exists.", name));
@@ -404,12 +464,112 @@ Site::add_onsite_operator(std::string const& name,
                                                       understood_braiding);
     }
     onsite_operators[name] = std::move(tensor_op);
+
+    if (!hc.has_value() && !hc_ops.contains(name)) {
+        auto adjoint = dagger(onsite_operators.at(name));
+        if (almost_equal(adjoint, onsite_operators.at(name), 1e-5, 1e-8, true)) {
+            hc = name;
+        } else {
+            for (auto const& [other_name, other_op] : onsite_operators) {
+                if (other_name == name) {
+                    continue;
+                }
+                if (almost_equal(adjoint, other_op, 1e-5, 1e-8, true)) {
+                    hc = other_name;
+                    break;
+                }
+            }
+        }
+    }
+    if (hc.has_value()) {
+        hc_ops[*hc] = name;
+        hc_ops[name] = *hc;
+    }
 }
 
 bool
 Site::valid_opname(std::string const& name) const
 {
     return onsite_operators.contains(name);
+}
+
+void
+Site::test_op(std::string const& opname) const
+{
+    std::istringstream stream(opname);
+    bool found_name = false;
+    for (std::string name; stream >> name;) {
+        found_name = true;
+        if (valid_opname(name)) {
+            continue;
+        }
+        if (is_known_but_unavailable(*this, name)) {
+            throw SymmetryError(
+              std::format("Operator '{}' is known but unavailable for the site's symmetry", name));
+        }
+        throw std::invalid_argument(std::format("unknown operator name: {}", name));
+    }
+    if (!found_name) {
+        throw std::invalid_argument("operator name must not be empty");
+    }
+}
+
+void
+Site::rename_op(std::string const& old_name, std::string const& new_name)
+{
+    if (old_name == new_name) {
+        return;
+    }
+    if (new_name.find(' ') != std::string::npos) {
+        throw std::invalid_argument("operator names are not allowed to feature whitespace");
+    }
+    if (onsite_operators.contains(new_name)) {
+        throw std::invalid_argument("new_name already exists");
+    }
+    auto op = onsite_operators.extract(old_name);
+    if (op.empty()) {
+        throw std::invalid_argument(std::format("unknown operator name: {}", old_name));
+    }
+    op.key() = new_name;
+    onsite_operators.insert(std::move(op));
+
+    auto hc = hc_ops.find(old_name);
+    if (hc == hc_ops.end()) {
+        return;
+    }
+    std::string hc_name = hc->second;
+    hc_ops.erase(old_name);
+    if (hc_name != old_name) {
+        hc_ops.erase(hc_name);
+        hc_ops[new_name] = hc_name;
+        hc_ops[hc_name] = new_name;
+    } else {
+        hc_ops[new_name] = new_name;
+    }
+}
+
+std::string
+Site::get_hc_op_name(std::string const& name) const
+{
+    std::istringstream stream(name);
+    std::vector<std::string> names;
+    for (std::string opname; stream >> opname;) {
+        names.push_back(std::move(opname));
+    }
+
+    std::string result;
+    for (auto it = names.rbegin(); it != names.rend(); ++it) {
+        auto hc = hc_ops.find(*it);
+        if (hc == hc_ops.end()) {
+            throw std::invalid_argument(
+              std::format("hermitian conjugate of operator {} unknown", *it));
+        }
+        if (!result.empty()) {
+            result += ' ';
+        }
+        result += hc->second;
+    }
+    return result;
 }
 
 SymmetricTensorPtr
@@ -709,6 +869,26 @@ SpinDOF::spin_vector_from_Sp(py::array Sz, py::array Sp)
     return np.attr("stack")(py::make_tuple(Sx, Sy, Sz), py::arg("axis") = -1);
 }
 
+namespace {
+
+/// Weights (CG, F, R) of the data files of the production SU(2) symmetry: the config options
+/// ``su2_{cg,f,r}_hweight`` or ``su_n_hweights`` if set, otherwise the largest weights found in
+/// ``su_n_data_path`` (F and R not above the CG weight), otherwise the historic defaults 20 / 6
+/// / 6.
+std::array<int64, 3>
+su2_data_hweights()
+{
+    constexpr int64 default_cg = 20;
+    constexpr int64 default_f = 6;
+    constexpr int64 default_r = 6;
+    auto const detected = su_n_detect_hweights(2);
+    return { detected[0].value_or(default_cg),
+             detected[1].value_or(default_f),
+             detected[2].value_or(default_r) };
+}
+
+} // namespace
+
 Symmetry::Ptr
 SpinDOF::conservation_law_to_symmetry(std::optional<std::string> conserve, bool use_test_su2)
 {
@@ -719,15 +899,14 @@ SpinDOF::conservation_law_to_symmetry(std::optional<std::string> conserve, bool 
         if (use_test_su2) {
             return symmetry_from_factor(std::make_shared<_SU2>("spin"));
         }
-        // Production SU(2): SUN(N=2) with the same default hweights as tests / benchmarks.
-        constexpr int64 k_cg_hweight = 20;
-        constexpr int64 k_f_hweight = 6;
-        constexpr int64 k_r_hweight = 6;
+        // Production SU(2): SUN(N=2) with the data files found in ``su_n_data_path`` (largest
+        // available weights, or the config options ``su2_{cg,f,r}_hweight``).
+        auto const [h_cg, h_f, h_r] = su2_data_hweights();
         return symmetry_from_factor(SUN::from_config(2,
-                                                     k_cg_hweight,
+                                                     h_cg,
                                                      /*cg_hweight=*/std::nullopt,
-                                                     k_f_hweight,
-                                                     k_r_hweight,
+                                                     h_f,
+                                                     h_r,
                                                      /*path=*/std::nullopt,
                                                      /*filename_base=*/std::nullopt,
                                                      "spin"));
