@@ -452,8 +452,9 @@ Tensor::test_sanity() const
     // ---
     domain->test_sanity();   // this checks all legs, and recursively through pipes
     codomain->test_sanity(); // this checks all legs, and recursively through pipes
-    assert(std::find(forbidden_dtypes().begin(), forbidden_dtypes().end(), dtype) ==
-           forbidden_dtypes().end());
+    check(std::find(forbidden_dtypes().begin(), forbidden_dtypes().end(), dtype) ==
+            forbidden_dtypes().end(),
+          "Tensor::test_sanity: forbidden dtype");
     for (auto const& leg : domain->factors) {
         (void)leg;
     }
@@ -700,8 +701,9 @@ Tensor::num_flat_legs() const
 int64
 Tensor::num_parameters() const
 {
-    assert(codomain->sector_order == std::string("sorted") &&
-           domain->sector_order == std::string("sorted"));
+    check(codomain->sector_order == std::string("sorted") &&
+            domain->sector_order == std::string("sorted"),
+          "num_parameters requires sorted sector_order on domain and codomain");
     int64 res = 0;
     SectorArray::iter_common_sorted(codomain->sector_decomposition,
                                     domain->sector_decomposition,

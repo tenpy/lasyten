@@ -359,26 +359,32 @@ FusionTree::test_sanity() const
     // --- hints from Python FusionTree.test_sanity ---
     // otherwise, check fusion rules at every vertex
     // ---
-    assert(symmetry->are_valid_sectors(uncoupled));
-    assert(symmetry->is_valid_sector(coupled));
-    assert(are_dual.size() == num_uncoupled);
-    assert(inner_sectors.size() == num_inner_edges);
-    assert(symmetry->are_valid_sectors(inner_sectors));
-    assert(multiplicities.size() == num_vertices);
+    check(symmetry->are_valid_sectors(uncoupled),
+          "FusionTree::test_sanity: invalid uncoupled sectors");
+    check(symmetry->is_valid_sector(coupled), "FusionTree::test_sanity: invalid coupled sector");
+    check(are_dual.size() == num_uncoupled, "FusionTree::test_sanity: are_dual size mismatch");
+    check(inner_sectors.size() == num_inner_edges,
+          "FusionTree::test_sanity: inner_sectors size mismatch");
+    check(symmetry->are_valid_sectors(inner_sectors),
+          "FusionTree::test_sanity: invalid inner sectors");
+    check(multiplicities.size() == num_vertices,
+          "FusionTree::test_sanity: multiplicities size mismatch");
 
     // special cases: no vertices
     if (num_uncoupled == 0) {
-        assert(coupled == symmetry->trivial_sector);
+        check(coupled == symmetry->trivial_sector,
+              "FusionTree::test_sanity: empty tree must couple to trivial sector");
     }
     if (num_uncoupled == 1) {
-        assert(uncoupled[0] == coupled);
+        check(uncoupled[0] == coupled,
+              "FusionTree::test_sanity: single-leg tree must have uncoupled == coupled");
     }
 
     for (std::size_t n = 0; n < num_vertices; ++n) {
         auto [a, b, mu, c] = vertex_labels(static_cast<int64>(n));
         int64 const N = symmetry->n_symbol(a, b, c);
-        assert(N > 0);
-        assert(mu >= 0 && mu < N);
+        check(N > 0, "FusionTree::test_sanity: fusion vertex not allowed");
+        check(mu >= 0 && mu < N, "FusionTree::test_sanity: multiplicity out of range");
     }
 }
 
@@ -387,7 +393,9 @@ FusionTree::from_abelian_symmetry(Symmetry::Ptr symmetry,
                                   SectorArray const& uncoupled,
                                   std::vector<std::uint8_t> const& are_dual)
 {
-    assert(symmetry->is_abelian());
+    if (!symmetry->is_abelian()) {
+        throw std::invalid_argument("from_abelian_symmetry requires an abelian symmetry");
+    }
 
     if (uncoupled.size() == 0) {
         return from_empty(symmetry);

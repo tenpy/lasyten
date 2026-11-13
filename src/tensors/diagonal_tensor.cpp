@@ -95,8 +95,9 @@ void
 DiagonalTensor::test_sanity() const
 {
     SymmetricTensor::test_sanity();
-    assert(domain->operator==(*codomain));
-    assert(domain->num_factors == 1);
+    check(domain->operator==(*codomain),
+          "DiagonalTensor::test_sanity: domain must equal codomain");
+    check(domain->num_factors == 1, "DiagonalTensor::test_sanity: expected a single factor");
 }
 
 void

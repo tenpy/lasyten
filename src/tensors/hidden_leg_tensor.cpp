@@ -215,7 +215,8 @@ void
 HiddenLegTensor::test_sanity() const
 {
     SymmetricTensor::test_sanity();
-    assert(has_hidden_leg_labels(labels.as_list()));
+    check(has_hidden_leg_labels(labels.as_list()),
+          "HiddenLegTensor::test_sanity: missing hidden-leg labels");
     validate_no_dual_hidden_pair(labels.as_list());
     check_public_labels_no_bang(labels.as_list());
 }

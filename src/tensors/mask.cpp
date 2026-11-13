@@ -175,7 +175,7 @@ Mask::Mask(TensorBackend::DataPtr data_in,
   , is_projection(is_projection_in)
   , data(std::move(data_in))
 {
-    assert(backend->is_correct_data_type(data));
+    check(backend->is_correct_data_type(data), "Mask: incorrect backend data type");
     auto es_in = std::dynamic_pointer_cast<ElementarySpace>(space_in);
     auto es_out = std::dynamic_pointer_cast<ElementarySpace>(space_out);
     if (!es_in || !es_out) {
@@ -254,15 +254,19 @@ Mask::test_sanity() const
     // ---
     Tensor::test_sanity();
     backend->test_mask_sanity(std::static_pointer_cast<Mask const>(shared_from_this()));
-    assert(codomain->num_factors == 1 && domain->num_factors == 1);
-    assert(codomain->factors[0].as_elementary_space());
-    assert(domain->factors[0].as_elementary_space());
+    check(codomain->num_factors == 1 && domain->num_factors == 1,
+          "Mask::test_sanity: expected single-factor domain and codomain");
+    check(static_cast<bool>(codomain->factors[0].as_elementary_space()),
+          "Mask::test_sanity: codomain factor must be ElementarySpace");
+    check(static_cast<bool>(domain->factors[0].as_elementary_space()),
+          "Mask::test_sanity: domain factor must be ElementarySpace");
     auto large = large_leg();
     auto small = small_leg();
-    assert(large->is_dual == small->is_dual);
-    assert(small->is_subspace_of(*large));
-    assert(dtype == Dtype::Bool);
-    assert(device == backend->get_device_from_data(data));
+    check(large->is_dual == small->is_dual, "Mask::test_sanity: large/small dual mismatch");
+    check(small->is_subspace_of(*large),
+          "Mask::test_sanity: small_leg is not a subspace of large_leg");
+    check(dtype == Dtype::Bool, "Mask::test_sanity: dtype must be bool");
+    check(device == backend->get_device_from_data(data), "Mask::test_sanity: device mismatch");
 
     // check consistency of the basis perm of the small leg.
     if (!large->has_custom_basis_perm()) {

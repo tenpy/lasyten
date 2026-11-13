@@ -90,11 +90,13 @@ ChargedTensor::test_sanity() const
 {
     Tensor::test_sanity();
     auto inv_labs = invariant_part->labels.as_list();
-    assert(labels.as_list() == LegLabelList(inv_labs.begin(), inv_labs.end() - 1));
+    check(labels.as_list() == LegLabelList(inv_labs.begin(), inv_labs.end() - 1),
+          "ChargedTensor::test_sanity: labels must match invariant_part without charge leg");
     invariant_part->allow_charge_leg_label = true;
     invariant_part->test_sanity();
-    assert(invariant_part->device == device);
-    assert(charged_state);
+    check(invariant_part->device == device,
+          "ChargedTensor::test_sanity: device mismatch with invariant_part");
+    check(static_cast<bool>(charged_state), "ChargedTensor::test_sanity: missing charged_state");
     backend->block_backend->test_block_sanity(
       charged_state,
       std::vector<int64>{ static_cast<int64>(charge_leg.dim()) },

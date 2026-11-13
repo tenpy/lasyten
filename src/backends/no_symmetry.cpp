@@ -185,7 +185,8 @@ NoSymmetryBackend::test_mask_sanity(MaskCPtr a)
     block_backend->test_block_sanity(
       data, std::vector<int64>{ leg_dim_i64(py::cast(a->large_leg())) }, Dtype::Bool, a->device);
     auto small_dim = static_cast<int64>(py::cast(a->small_leg()).attr("dim").cast<float64>());
-    assert(block_backend->sum_all(data).as_int64() == small_dim);
+    check(block_backend->sum_all(data).as_int64() == small_dim,
+          "test_mask_sanity: mask block sum mismatch");
 }
 
 TensorBackend::DataPtr
@@ -482,7 +483,10 @@ NoSymmetryBackend::from_dense_block_trivial_sector(BlockBackend::BlockPtr block,
     // there are no other sectors, so this is just the unmodified block.
     // ---
     // there are no other sectors, so this is just the unmodified block.
-    assert(block_backend->get_shape(block) == std::vector<int64>{ space_dim_i64(*leg) });
+    if (block_backend->get_shape(block) != std::vector<int64>{ space_dim_i64(*leg) }) {
+        throw std::invalid_argument(
+          "from_dense_block_trivial_sector: block shape does not match leg dim");
+    }
     return wrap(std::move(block));
 }
 
@@ -552,10 +556,14 @@ NoSymmetryBackend::from_tree_pairs(
   Dtype /*dtype*/,
   std::string /*device*/)
 {
-    assert(trees.size() == 1);
+    if (trees.size() != 1) {
+        throw std::invalid_argument("from_tree_map: expected exactly one tree for NoSymmetry");
+    }
     auto block = trees.begin()->second;
     auto expect_shape = dims_from_legs(conventional_leg_order(codomain, domain));
-    assert(block_backend->get_shape(block) == expect_shape);
+    if (block_backend->get_shape(block) != expect_shape) {
+        throw std::invalid_argument("from_tree_map: block shape does not match legs");
+    }
     return wrap(std::move(block));
 }
 

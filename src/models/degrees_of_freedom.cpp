@@ -993,12 +993,15 @@ SpinDOF::test_sanity()
     py::array Sy = spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1));
     py::array Sz = spin_vector.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 2));
     auto imag = py::cast(std::complex<double>{ 0., 1. });
-    assert(
-      np_allclose(np.attr("matmul")(Sx, Sy) - np.attr("matmul")(Sy, Sx), imag * py::object(Sz)));
-    assert(
-      np_allclose(np.attr("matmul")(Sy, Sz) - np.attr("matmul")(Sz, Sy), imag * py::object(Sx)));
-    assert(
-      np_allclose(np.attr("matmul")(Sz, Sx) - np.attr("matmul")(Sx, Sz), imag * py::object(Sy)));
+    check(
+      np_allclose(np.attr("matmul")(Sx, Sy) - np.attr("matmul")(Sy, Sx), imag * py::object(Sz)),
+      "SpinDOF::test_sanity() failed");
+    check(
+      np_allclose(np.attr("matmul")(Sy, Sz) - np.attr("matmul")(Sz, Sy), imag * py::object(Sx)),
+      "SpinDOF::test_sanity() failed");
+    check(
+      np_allclose(np.attr("matmul")(Sz, Sx) - np.attr("matmul")(Sx, Sz), imag * py::object(Sy)),
+      "SpinDOF::test_sanity() failed");
 }
 
 py::array
@@ -1099,12 +1102,15 @@ ClockDOF::test_sanity()
     py::array Zhc = np.attr("conj")(Z.attr("T"));
     auto phase =
       np.attr("exp")(py::cast(std::complex<double>{ 0., 2. * M_PI / static_cast<double>(q) }));
-    assert(np_allclose(np.attr("matmul")(X, Z), py::object(phase) * np.attr("matmul")(Z, X)));
+    check(np_allclose(np.attr("matmul")(X, Z), py::object(phase) * np.attr("matmul")(Z, X)),
+          "ClockDOF::test_sanity() failed");
     auto identity = np.attr("eye")(X.attr("shape").attr("__getitem__")(0));
-    assert(np_allclose(np.attr("linalg").attr("matrix_power")(X, q), identity));
-    assert(np_allclose(np.attr("linalg").attr("matrix_power")(Z, q), identity));
-    assert(np_allclose(np.attr("matmul")(X, Xhc), identity));
-    assert(np_allclose(np.attr("matmul")(Z, Zhc), identity));
+    check(np_allclose(np.attr("linalg").attr("matrix_power")(X, q), identity),
+          "ClockDOF::test_sanity() failed");
+    check(np_allclose(np.attr("linalg").attr("matrix_power")(Z, q), identity),
+          "ClockDOF::test_sanity() failed");
+    check(np_allclose(np.attr("matmul")(X, Xhc), identity), "ClockDOF::test_sanity() failed");
+    check(np_allclose(np.attr("matmul")(Z, Zhc), identity), "ClockDOF::test_sanity() failed");
 }
 
 Symmetry::Ptr
@@ -1214,10 +1220,12 @@ OccupationDOF::test_sanity()
         py::array c_k = creators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), k));
         py::array a_k =
           annihilators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), k));
-        assert(np_allclose(np.attr("matmul")(c_k, a_k), n_k));
-        assert(np_allclose(np.attr("diag")(np.attr("diag")(n_k)), n_k));
-        assert(np_allclose(np.attr("around")(n_k, 0), n_k));
-        assert(np_all(np.attr("greater_equal")(n_k, 0)));
+        check(np_allclose(np.attr("matmul")(c_k, a_k), n_k),
+              "OccupationDOF::test_sanity() failed");
+        check(np_allclose(np.attr("diag")(np.attr("diag")(n_k)), n_k),
+              "OccupationDOF::test_sanity() failed");
+        check(np_allclose(np.attr("around")(n_k, 0), n_k), "OccupationDOF::test_sanity() failed");
+        check(np_all(np.attr("greater_equal")(n_k, 0)), "OccupationDOF::test_sanity() failed");
 
         py::array BBd = np.attr("matmul")(a_k, c_k);
         if (anti_commute_sign == 1) {
@@ -1228,8 +1236,8 @@ OccupationDOF::test_sanity()
                                         py::object(np.attr("diag")(BBd_obj)[mask]) + increment);
             BBd = BBd_obj.cast<py::array>();
         }
-        assert(
-          np_allclose(BBd - py::cast(anti_commute_sign) * py::object(n_k), np.attr("eye")(d)));
+        check(np_allclose(BBd - py::cast(anti_commute_sign) * py::object(n_k), np.attr("eye")(d)),
+              "OccupationDOF::test_sanity() failed");
 
         for (int64 j = 0; j < k; ++j) {
             py::array Bk =
@@ -1240,9 +1248,12 @@ OccupationDOF::test_sanity()
               creators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), j));
             py::array Bdk =
               creators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), k));
-            assert(np_allclose(np.attr("matmul")(Bk, Bdj), np.attr("matmul")(Bdj, Bk)));
-            assert(np_allclose(np.attr("matmul")(Bk, Bj), np.attr("matmul")(Bj, Bk)));
-            assert(np_allclose(np.attr("matmul")(Bdk, Bdj), np.attr("matmul")(Bdj, Bdk)));
+            check(np_allclose(np.attr("matmul")(Bk, Bdj), np.attr("matmul")(Bdj, Bk)),
+                  "OccupationDOF::test_sanity() failed");
+            check(np_allclose(np.attr("matmul")(Bk, Bj), np.attr("matmul")(Bj, Bk)),
+                  "OccupationDOF::test_sanity() failed");
+            check(np_allclose(np.attr("matmul")(Bdk, Bdj), np.attr("matmul")(Bdj, Bdk)),
+                  "OccupationDOF::test_sanity() failed");
         }
     }
 }
@@ -1394,11 +1405,14 @@ BosonicDOF::test_sanity()
         py::array N_k =
           number_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), k));
         py::array N_k_rounded = np.attr("around")(N_k, 0);
-        assert(np_allclose(N_k_rounded, N_k));
-        assert(np_allclose(np.attr("diag")(np.attr("diag")(N_k)), N_k));
-        assert(np.attr("min")(N_k_rounded).cast<double>() == 0.);
-        assert(np.attr("max")(N_k_rounded).cast<double>() ==
-               Nmax.attr("__getitem__")(k).cast<double>());
+        check(np_allclose(N_k_rounded, N_k), "BosonicDOF::test_sanity() failed");
+        check(np_allclose(np.attr("diag")(np.attr("diag")(N_k)), N_k),
+              "BosonicDOF::test_sanity() failed");
+        check(np.attr("min")(N_k_rounded).cast<double>() == 0.,
+              "BosonicDOF::test_sanity() failed");
+        check(np.attr("max")(N_k_rounded).cast<double>() ==
+                Nmax.attr("__getitem__")(k).cast<double>(),
+              "BosonicDOF::test_sanity() failed");
     }
 }
 
@@ -1602,9 +1616,10 @@ FermionicDOF::test_sanity()
           number_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), k));
         py::array CC = np.attr("matmul")(c_k, c_k);
         py::array CdCd = np.attr("matmul")(cd_k, cd_k);
-        assert(np_allclose(CC, np.attr("zeros_like")(CC)));
-        assert(np_allclose(CdCd, np.attr("zeros_like")(CdCd)));
-        assert(np.attr("max")(N_k).cast<double>() <= 1.);
+        check(np_allclose(CC, np.attr("zeros_like")(CC)), "FermionicDOF::test_sanity() failed");
+        check(np_allclose(CdCd, np.attr("zeros_like")(CdCd)),
+              "FermionicDOF::test_sanity() failed");
+        check(np.attr("max")(N_k).cast<double>() <= 1., "FermionicDOF::test_sanity() failed");
     }
 }
 

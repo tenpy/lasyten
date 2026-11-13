@@ -279,8 +279,9 @@ LegLabels::clear_hooks()
 void
 LegLabels::test_sanity() const
 {
-    assert(std::ranges::all_of(labels_, [](auto const& l) { return is_valid_leg_label(l); }));
-    assert(duplicate_leg_labels(labels_).empty());
+    check(std::ranges::all_of(labels_, [](auto const& l) { return is_valid_leg_label(l); }),
+          "LegLabels::test_sanity: invalid leg label");
+    check(duplicate_leg_labels(labels_).empty(), "LegLabels::test_sanity: duplicate leg labels");
 }
 
 bool

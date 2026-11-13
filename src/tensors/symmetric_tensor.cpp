@@ -56,7 +56,7 @@ SymmetricTensor::SymmetricTensor(TensorBackend::DataPtr data_in,
            backend_in->get_device_from_data(data_in))
   , data(std::move(data_in))
 {
-    assert(backend->is_correct_data_type(data));
+    check(backend->is_correct_data_type(data), "SymmetricTensor: incorrect backend data type");
     // Allow the ChargedTensor charge-leg marker "!" as the last label on bare
     // SymmetricTensors that are used as invariant parts (tests / factories).
     auto const labs = labels.as_list();
@@ -72,8 +72,10 @@ void
 SymmetricTensor::test_sanity() const
 {
     Tensor::test_sanity();
-    assert(dtype == backend->get_dtype_from_data(data));
-    assert(device == backend->get_device_from_data(data));
+    check(dtype == backend->get_dtype_from_data(data),
+          "SymmetricTensor::test_sanity: dtype mismatch");
+    check(device == backend->get_device_from_data(data),
+          "SymmetricTensor::test_sanity: device mismatch");
     // Prefer C++ RTTI so _core.DiagonalTensor is recognized before monkey-patch.
     bool is_diagonal = dynamic_cast<DiagonalTensor const*>(this) != nullptr;
     if (!is_diagonal && Py_IsInitialized()) {
@@ -155,7 +157,9 @@ SymmetricTensor::from_zero(TensorProduct::Ptr codomain,
     auto [codomain_tp, domain_tp, backend_tp, symmetry] =
       _init_parse_args(std::move(codomain), std::move(domain), std::move(backend));
     auto dt = _parse_default_dtype(dtype, symmetry);
-    assert(dt.has_value());
+    if (!dt.has_value()) {
+        throw std::invalid_argument("dtype must be specified");
+    }
     auto device_s = backend_tp->block_backend->as_device(device);
     auto data = backend_tp->zero_data(codomain_tp, domain_tp, *dt, device_s);
     return std::make_shared<SymmetricTensor>(
@@ -178,7 +182,9 @@ SymmetricTensor::from_eye(TensorProduct::Ptr co_domain,
       _init_parse_args(co_domain, co_domain, std::move(backend));
     (void)unused_domain;
     auto dt = _parse_default_dtype(dtype, symmetry);
-    assert(dt.has_value());
+    if (!dt.has_value()) {
+        throw std::invalid_argument("dtype must be specified");
+    }
     auto labels_parsed =
       _init_parse_labels(std::move(labels), co_domain_tp, co_domain_tp, /*is_endomorphism=*/true);
     auto device_s = backend_tp->block_backend->as_device(device);
@@ -420,8 +426,12 @@ SymmetricTensor::from_random_normal(TensorProduct::Ptr codomain,
     }
 
     dtype = _parse_default_dtype(dtype, symmetry);
-    assert(dtype.has_value());
-    assert(device.has_value());
+    if (!dtype.has_value()) {
+        throw std::invalid_argument("dtype must be specified");
+    }
+    if (!device.has_value()) {
+        throw std::invalid_argument("device must be specified");
+    }
 
     auto data = backend_tp->from_random_normal(codomain_tp, domain_tp, sigma, *dtype, *device);
     auto with_zero_mean = std::make_shared<SymmetricTensor>(
@@ -456,7 +466,9 @@ SymmetricTensor::from_random_uniform(TensorProduct::Ptr codomain,
     auto [codomain_tp, domain_tp, backend_tp, symmetry] =
       _init_parse_args(std::move(codomain), std::move(domain), std::move(backend));
     auto dt = _parse_default_dtype(dtype, symmetry);
-    assert(dt.has_value());
+    if (!dt.has_value()) {
+        throw std::invalid_argument("dtype must be specified");
+    }
     Dtype d = *dt;
     auto bb = backend_tp->block_backend;
     BlockFactoryFn func = [bb, d, device](std::vector<int64> const& shape) {

@@ -104,21 +104,24 @@ test_axis_sanity(Symmetry::Ptr const& symmetry,
                  std::optional<std::vector<int64>> const& inverse_basis_perm)
 {
     if (!symmetry->can_be_dropped()) {
-        assert(!basis_perm);
+        check(!basis_perm, "basis_perm is only allowed for droppable symmetries");
     }
     if (!basis_perm) {
-        assert(!inverse_basis_perm);
+        check(!inverse_basis_perm, "inverse_basis_perm set without basis_perm");
     } else {
-        assert(inverse_basis_perm);
+        check(static_cast<bool>(inverse_basis_perm), "basis_perm requires inverse_basis_perm");
         auto const n = dim_as_size(dim);
-        assert(basis_perm->size() == n);
-        assert(inverse_basis_perm->size() == n);
-        assert(std::unordered_set<int64>(basis_perm->begin(), basis_perm->end()).size() == n);
-        assert(std::unordered_set<int64>(inverse_basis_perm->begin(), inverse_basis_perm->end())
-                 .size() == n);
+        check(basis_perm->size() == n, "basis_perm has wrong length");
+        check(inverse_basis_perm->size() == n, "inverse_basis_perm has wrong length");
+        check(std::unordered_set<int64>(basis_perm->begin(), basis_perm->end()).size() == n,
+              "basis_perm is not a permutation");
+        check(std::unordered_set<int64>(inverse_basis_perm->begin(), inverse_basis_perm->end())
+                  .size() == n,
+              "inverse_basis_perm is not a permutation");
         for (std::size_t i = 0; i < n; ++i) {
-            assert((*basis_perm)[static_cast<std::size_t>((*inverse_basis_perm)[i])] ==
-                   static_cast<int64>(i));
+            check((*basis_perm)[static_cast<std::size_t>((*inverse_basis_perm)[i])] ==
+                    static_cast<int64>(i),
+                  "basis_perm and inverse_basis_perm are inconsistent");
         }
     }
 }
@@ -710,50 +713,60 @@ Space::test_sanity() const
     // slices
     // slices should be consecutive
     // ---
-    assert(dim >= 0.);
+    check(dim >= 0., "Space::test_sanity: negative dim");
     // sectors
     if (static_cast<int64>(sector_decomposition.size()) != num_sectors ||
         sector_decomposition.sector_ind_len() != symmetry->sector_ind_len) {
         throw std::runtime_error("wrong sectors.shape");
     }
-    assert(symmetry->are_valid_sectors(sector_decomposition));
+    check(symmetry->are_valid_sectors(sector_decomposition),
+          "Space::test_sanity: invalid sectors");
     {
         std::vector<std::int64_t> ones(static_cast<std::size_t>(num_sectors), 1);
         auto const [unique, um, perm] = sector_decomposition.unique_sorted(ones);
-        assert(static_cast<int64>(unique.size()) == num_sectors);
+        check(static_cast<int64>(unique.size()) == num_sectors,
+              "Space::test_sanity: duplicate sectors");
         (void)um;
         (void)perm;
     }
     if (sector_order == "sorted") {
-        assert(is_identity_lexsort(sector_decomposition.lexsort_indices()));
+        check(is_identity_lexsort(sector_decomposition.lexsort_indices()),
+              "Space::test_sanity: sectors not sorted");
     } else if (sector_order == "dual_sorted") {
         auto expect_sorted = symmetry->dual_sectors(sector_decomposition);
-        assert(is_identity_lexsort(expect_sorted.lexsort_indices()));
+        check(is_identity_lexsort(expect_sorted.lexsort_indices()),
+              "Space::test_sanity: dual sectors not dual_sorted");
     } else if (!sector_order) {
         // nothing to check
     } else {
         throw std::runtime_error(std::format("Invalid sector_order: {}", *sector_order));
     }
     // multiplicities
-    assert(multiplicities.size() == static_cast<std::size_t>(num_sectors));
-    assert(std::ranges::all_of(multiplicities, [](int64 m) { return m > 0; }));
+    check(multiplicities.size() == static_cast<std::size_t>(num_sectors),
+          "Space::test_sanity: multiplicities size mismatch");
+    check(std::ranges::all_of(multiplicities, [](int64 m) { return m > 0; }),
+          "Space::test_sanity: non-positive multiplicity");
     if (symmetry->can_be_dropped()) {
-        assert(slices);
-        assert(sector_dims);
-        assert(slices->size() == static_cast<std::size_t>(num_sectors));
+        check(static_cast<bool>(slices), "Space::test_sanity: missing slices");
+        check(static_cast<bool>(sector_dims), "Space::test_sanity: missing sector_dims");
+        check(slices->size() == static_cast<std::size_t>(num_sectors),
+              "Space::test_sanity: slices size mismatch");
         auto expect_dims = symmetry->batch_sector_dim(sector_decomposition);
-        assert(*sector_dims == expect_dims);
+        check(*sector_dims == expect_dims, "Space::test_sanity: sector_dims mismatch");
         for (std::size_t i = 0; i < static_cast<std::size_t>(num_sectors); ++i) {
-            assert((*slices)[i][1] - (*slices)[i][0] == (*sector_dims)[i] * multiplicities[i]);
+            check((*slices)[i][1] - (*slices)[i][0] == (*sector_dims)[i] * multiplicities[i],
+                  "Space::test_sanity: slice width mismatch");
         }
         // slices should be consecutive
         if (num_sectors > 0) {
-            assert((*slices)[0][0] == 0);
+            check((*slices)[0][0] == 0, "Space::test_sanity: slices do not start at 0");
             for (std::size_t i = 1; i < static_cast<std::size_t>(num_sectors); ++i) {
-                assert((*slices)[i][0] == (*slices)[i - 1][1]);
+                check((*slices)[i][0] == (*slices)[i - 1][1],
+                      "Space::test_sanity: slices not consecutive");
             }
-            assert((*slices)[static_cast<std::size_t>(num_sectors) - 1][1] ==
-                   static_cast<int64>(dim));
+            check((*slices)[static_cast<std::size_t>(num_sectors) - 1][1] ==
+                    static_cast<int64>(dim),
+                  "Space::test_sanity: slices do not cover dim");
         }
     }
 }
@@ -1420,12 +1433,15 @@ ElementarySpace::ElementarySpace(Symmetry::Ptr symmetry_,
 void
 ElementarySpace::test_sanity() const
 {
-    assert(static_cast<int64>(defining_sectors.size()) == num_sectors);
-    assert(defining_sectors.sector_ind_len() == Space::symmetry->sector_ind_len);
+    check(static_cast<int64>(defining_sectors.size()) == num_sectors,
+          "ElementarySpace::test_sanity: defining_sectors size mismatch");
+    check(defining_sectors.sector_ind_len() == Space::symmetry->sector_ind_len,
+          "ElementarySpace::test_sanity: defining_sectors ind_len mismatch");
     if (is_dual) {
-        assert(sector_order == "dual_sorted");
+        check(sector_order == "dual_sorted",
+              "ElementarySpace::test_sanity: dual space must be dual_sorted");
     } else {
-        assert(sector_order == "sorted");
+        check(sector_order == "sorted", "ElementarySpace::test_sanity: ket space must be sorted");
     }
     Space::test_sanity();
     test_axis_sanity(Space::symmetry, Space::dim, _basis_perm, _inverse_basis_perm);
@@ -2057,7 +2073,9 @@ ElementarySpace::parse_index(int64 idx) const
         }
     }
     auto const sector_idx = static_cast<int64>(lo) - 1;
-    assert(sector_idx >= 0);
+    if (sector_idx < 0) {
+        throw std::invalid_argument("ElementarySpace::parse_index: index out of range");
+    }
     auto const multiplicity_idx = idx - sl[static_cast<std::size_t>(sector_idx)][0];
     return { sector_idx, multiplicity_idx };
 }
@@ -3078,7 +3096,8 @@ TensorProduct::TensorProduct(std::vector<Leg::Ptr> factors_,
 void
 TensorProduct::test_sanity() const
 {
-    assert(static_cast<int64>(factors.size()) == num_factors);
+    check(static_cast<int64>(factors.size()) == num_factors,
+          "TensorProduct::test_sanity: factors size mismatch");
     for (auto const& factor : factors) {
         factor.test_sanity();
     }
@@ -4055,29 +4074,37 @@ AbelianLegPipe::test_sanity() const
         }
         // Nested pipes must themselves be abelian pipes (composed on ElementarySpace).
         if (leg->is_pipe()) {
-            assert(leg->is_abelian_leg_pipe());
+            check(leg->is_abelian_leg_pipe(),
+                  "AbelianLegPipe::test_sanity: nested pipe must be AbelianLegPipe");
         }
         leg->test_sanity();
     }
     auto const n = static_cast<std::size_t>(num_legs);
     // check sector_strides
-    assert(sector_strides.size() == n);
+    check(sector_strides.size() == n, "AbelianLegPipe::test_sanity: sector_strides size mismatch");
     std::vector<int64> legs_num_sectors(n);
     int64 nblocks = 1;
     for (std::size_t i = 0; i < n; ++i) {
         legs_num_sectors[i] = legs[i]->num_sectors;
         nblocks *= legs_num_sectors[i];
     }
-    assert(sector_strides == make_stride(legs_num_sectors, combine_cstyle));
+    check(sector_strides == make_stride(legs_num_sectors, combine_cstyle),
+          "AbelianLegPipe::test_sanity: sector_strides mismatch");
     // check block_ind_map_slices
     // note: we do not check for full correctness, just for consistency as slices
-    assert(block_ind_map_slices.size() == static_cast<std::size_t>(num_sectors) + 1);
-    assert(block_ind_map_slices.front() == 0);
-    assert(block_ind_map_slices.back() == nblocks);
-    assert(std::ranges::is_sorted(block_ind_map_slices));
+    check(block_ind_map_slices.size() == static_cast<std::size_t>(num_sectors) + 1,
+          "AbelianLegPipe::test_sanity: block_ind_map_slices size mismatch");
+    check(block_ind_map_slices.front() == 0,
+          "AbelianLegPipe::test_sanity: block_ind_map_slices must start at 0");
+    check(block_ind_map_slices.back() == nblocks,
+          "AbelianLegPipe::test_sanity: block_ind_map_slices must end at nblocks");
+    check(std::ranges::is_sorted(block_ind_map_slices),
+          "AbelianLegPipe::test_sanity: block_ind_map_slices not sorted");
     // check block_ind_map
-    assert(block_ind_map.nrows() == static_cast<std::size_t>(nblocks));
-    assert(block_ind_map.ncols() == 3 + n);
+    check(block_ind_map.nrows() == static_cast<std::size_t>(nblocks),
+          "AbelianLegPipe::test_sanity: block_ind_map rows mismatch");
+    check(block_ind_map.ncols() == 3 + n,
+          "AbelianLegPipe::test_sanity: block_ind_map cols mismatch");
     // the rows are sorted first by J, then by the i, in C-style order if combine_cstyle
     // (see the class docstring). Equivalently, the keys built below are non-decreasing.
     auto const sort_key = [&](std::size_t m) {
@@ -4092,19 +4119,23 @@ AbelianLegPipe::test_sanity() const
         if (m > 0) {
             auto const prev = sort_key(m - 1);
             auto const cur = sort_key(m);
-            assert(std::ranges::lexicographical_compare(prev, cur));
+            check(std::ranges::lexicographical_compare(prev, cur),
+                  "AbelianLegPipe::test_sanity: block_ind_map not sorted");
         }
         if (m > 0 && block_ind_map(m, 2 + n) == block_ind_map(m - 1, 2 + n)) {
-            assert(block_ind_map(m, 0) == block_ind_map(m - 1, 1));
+            check(block_ind_map(m, 0) == block_ind_map(m - 1, 1),
+                  "AbelianLegPipe::test_sanity: block_ind_map slices not consecutive");
         } else {
-            assert(block_ind_map(m, 0) == 0);
+            check(block_ind_map(m, 0) == 0,
+                  "AbelianLegPipe::test_sanity: block_ind_map sector offset must be 0");
         }
         std::vector<Sector> uncoupled(n);
         for (std::size_t i = 0; i < n; ++i) {
             uncoupled[i] =
               legs[i]->sector_decomposition[static_cast<std::size_t>(block_ind_map(m, 2 + i))];
         }
-        assert(Space::symmetry->multiple_fusion(uncoupled) == sector_decomposition[J]);
+        check(Space::symmetry->multiple_fusion(uncoupled) == sector_decomposition[J],
+              "AbelianLegPipe::test_sanity: fusion outcome mismatch");
     }
     ElementarySpace::test_sanity();
 }
