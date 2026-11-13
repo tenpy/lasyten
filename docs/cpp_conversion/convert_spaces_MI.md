@@ -60,3 +60,42 @@ LegPipe                  # plain nesting pipe (FusionTree); not a Space
 - AbelianBackend combined legs remain `ElementarySpace` (`Site.leg`, nested pipes, HDF5 ES path)
 - FusionTree `make_pipe` still yields plain `LegPipe`
 - `flat_spaces` keeps abelian pipes nested; flatten strips ALP to plain ES
+
+## Downstream: TeNPy (`v2_main`)
+
+Follow-up for the spaces MI refactor (issue #254 item 3). After bumping lasyten, TeNPy
+code that assumes **`AbelianLegPipe` is-a `LegPipe`** breaks. Most MPS/MPO paths that only
+use `ElementarySpace`, `combine_legs` / `split_legs` by name, or construct `AbelianLegPipe`
+explicitly are unchanged.
+
+### Call-site map (Python)
+
+| Old | New |
+| --- | --- |
+| `isinstance(x, LegPipe)` for any combined leg (incl. abelian) | `lasy.is_leg_pipe(x)` / `x.is_pipe` |
+| `isinstance(x, LegPipe)` meaning plain FusionTree nesting only | keep `isinstance(x, LegPipe)` (ALP is no longer a subclass) |
+| `isinstance(x, LegPipe) and not isinstance(x, ElementarySpace)` | plain pipe: `is_leg_pipe(x) and not isinstance(x, ElementarySpace)` |
+| `isinstance(x, Leg)` | unchanged (`Leg` ABC still registers ES + `LegPipe`) |
+| `isinstance(x, ElementarySpace)` / `AbelianLegPipe(...)` | unchanged |
+
+### Known hit on `v2_main` (checked against current tree)
+
+**`tenpy/networks/mps.py` — `_flatten_domain_pipe`**
+
+- `assert isinstance(pipe, lasy.LegPipe) and pipe.dim == 1`
+- → `assert lasy.is_leg_pipe(pipe) and pipe.dim == 1`
+  (AbelianBackend pipes are `AbelianLegPipe`, not `LegPipe`)
+
+### Does **not** need changes (if used as today)
+
+- Explicit `AbelianLegPipe([...])` construction (e.g. `exact_diag.py`, tests)
+- `Site.leg` / `ElementarySpace` factories / `as_ElementarySpace`
+- `combine_legs` / `split_legs` / `flatten_pipe_leg` call sites that do not type-check `LegPipe`
+- Site DOF composition (already covered by [convert_SiteDOF.md](convert_SiteDOF.md) / #317)
+
+### Suggested smoke checklist after bumping lasyten
+
+- [ ] `_flatten_domain_pipe` / hidden-leg MPS paths with AbelianBackend
+- [ ] `combine_legs` / `split_legs` on MPS/MPO bonds (abelian)
+- [ ] ExactDiag grouping via `AbelianLegPipe`
+- [ ] Optional: FusionTree backend still sees plain `LegPipe` from `make_pipe`
