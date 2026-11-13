@@ -2522,7 +2522,8 @@ planar_contract_mask(TensorCPtr tensor1,
                      std::map<std::string, std::string> relabel2)
 {
     if (!tensor1 || !mask2) {
-        throw std::invalid_argument("planar_contract_mask() requires non-null Tensor and Mask arguments");
+        throw std::invalid_argument(
+          "planar_contract_mask() requires non-null Tensor and Mask arguments");
     }
     auto legs1_idcs = tensor1->get_leg_idcs(legs1);
     auto legs2_idcs = mask2->get_leg_idcs(legs2);
@@ -2542,7 +2543,8 @@ planar_contract_mask(TensorCPtr tensor1,
     auto result = _compose_with_Mask(tensor1, mask_use, tensor_leg_idx);
     auto labels = tensor1->labels();
     for (std::size_t idx = 0; idx < labels.size(); ++idx) {
-        auto const& relabel = idx == static_cast<std::size_t>(tensor_leg_idx) ? relabel2 : relabel1;
+        auto const& relabel =
+          idx == static_cast<std::size_t>(tensor_leg_idx) ? relabel2 : relabel1;
         OptionalLabel label = idx == static_cast<std::size_t>(tensor_leg_idx)
                                 ? mask2->labels()[static_cast<std::size_t>(1 - mask_leg_idx)]
                                 : labels[idx];

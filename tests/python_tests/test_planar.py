@@ -281,9 +281,7 @@ def test_planar_contract_mask(make_compatible_space, make_compatible_tensor, com
     v = make_compatible_space(is_dual=False)
     w = lasy.DirectSumSpace([v, v, v], is_dual=False, summand_labels=['IdL', 'A', 'IdR'])
     mask = w.projection_onto_summand('IdL', backend=compatible_backend, labels=['wL', 'wR'])
-    init_lp = make_compatible_tensor(
-        codomain=[v, mask.small_leg.dual], domain=[v], labels=['vR*', 'wR', 'vR']
-    )
+    init_lp = make_compatible_tensor(codomain=[v, mask.small_leg.dual], domain=[v], labels=['vR*', 'wR', 'vR'])
 
     relabel1 = {'vR*': 'vL*', 'vR': 'vL'}
     relabel2 = {'wR': 'w'}
@@ -295,9 +293,7 @@ def test_planar_contract_mask(make_compatible_space, make_compatible_tensor, com
     assert lasy.planar.planar_almost_equal(result, expect)
     assert set(result.labels) == {'vL*', 'vL', 'w'}
 
-    init_lp = make_compatible_tensor(
-        codomain=[v, mask.large_leg], domain=[v], labels=['vR*', 'wR', 'vR']
-    )
+    init_lp = make_compatible_tensor(codomain=[v, mask.large_leg], domain=[v], labels=['vR*', 'wR', 'vR'])
     result = lasy.planar_contract_mask(init_lp, mask, 'wR', 'wR')
     expect = lasy.planar_contraction(init_lp, mask.as_SymmetricTensor(), 'wR', 'wR')
     assert lasy.planar.planar_almost_equal(result, expect)
