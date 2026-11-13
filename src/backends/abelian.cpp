@@ -654,8 +654,13 @@ AbelianBackend::make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, Leg::Ptr pip
         es.push_back(std::move(p));
     }
     if (auto ab = std::dynamic_pointer_cast<AbelianLegPipe>(pipe.as_elementary_space())) {
-        assert(ab->combine_cstyle == !is_dual);
-        assert(ab->is_dual == is_dual);
+        if (ab->combine_cstyle != !is_dual) {
+            throw std::invalid_argument(
+              "make_pipe: AbelianLegPipe combine_cstyle does not match is_dual");
+        }
+        if (ab->is_dual != is_dual) {
+            throw std::invalid_argument("make_pipe: AbelianLegPipe is_dual does not match");
+        }
         return ab;
     }
     return std::make_shared<AbelianLegPipe>(std::move(es), is_dual, !is_dual);
