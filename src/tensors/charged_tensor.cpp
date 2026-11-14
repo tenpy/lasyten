@@ -71,11 +71,11 @@ ChargedTensor::ChargedTensor(SymmetricTensor::Ptr inv, BlockBackend::BlockPtr ch
     charged_state = invariant_part->backend->block_backend->as_block(
       py::cast(charged_state), invariant_part->dtype, invariant_part->device);
     invariant_part->allow_charge_leg_label = true;
-    reject_exclamation_in_labels(labels.as_list(), "ChargedTensor");
+    reject_reserved_markers_in_labels(labels.as_list(), "ChargedTensor");
 
     labels.set_hooks(
       [this](LegLabels& /*self*/, LegLabelList const& proposed) {
-          reject_exclamation_in_labels(proposed, "ChargedTensor");
+          reject_reserved_markers_in_labels(proposed, "ChargedTensor");
       },
       [this](LegLabels& self) {
           auto inv_labs = self.as_list();
@@ -102,7 +102,7 @@ ChargedTensor::test_sanity() const
       std::vector<int64>{ static_cast<int64>(charge_leg.dim()) },
       std::nullopt,
       device);
-    reject_exclamation_in_labels(labels.as_list(), "ChargedTensor");
+    reject_reserved_markers_in_labels(labels.as_list(), "ChargedTensor");
 }
 
 std::string

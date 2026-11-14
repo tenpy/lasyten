@@ -14,7 +14,7 @@ namespace lasyten {
 /// Tensors which are not symmetric, but carry a well defined charge.
 ///
 /// The main component is an invariant part, which is a `SymmetricTensor` that has an additional
-/// charge leg (label ``"!"``) as ``domain.spaces[0]``. A particular state (i.e. a vector) on that
+/// charge leg (label ``"#"``) as ``domain.spaces[0]``. A particular state (i.e. a vector) on that
 /// extra leg is specified as `charged_state`. It is (generally) not symmetric, and thus this
 /// state is not a "tensor". The composite object of invariant part and this `charged_state` then
 /// has a well-defined transformation behavior under the action of the symmetry group; unlike a
@@ -34,7 +34,7 @@ class ChargedTensor : public Tensor
     using CPtr = std::shared_ptr<const ChargedTensor>;
 
     /// Canonical label for the charge leg on the invariant part.
-    static constexpr char const* _CHARGE_LEG_LABEL = "!";
+    static constexpr char const* _CHARGE_LEG_LABEL = CHARGE_LEG_LABEL;
 
     SymmetricTensor::Ptr invariant_part;
     /// Non-null block of shape ``(charge_leg.dim,)``.

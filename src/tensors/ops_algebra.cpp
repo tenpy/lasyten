@@ -2101,8 +2101,8 @@ inner(TensorCPtr A, TensorCPtr B, bool do_dagger)
         SymmetricTensorPtr inv_part = std::dynamic_pointer_cast<SymmetricTensor>(from_compose_sym(
           _compose_SymmetricTensors(A_inv,
                                     B_inv,
-                                    std::map<std::string, std::string>{ { "!", "!A" } },
-                                    std::map<std::string, std::string>{ { "!", "!B" } })));
+                                    std::map<std::string, std::string>{ { "#", "#A" } },
+                                    std::map<std::string, std::string>{ { "#", "#B" } })));
         auto inv_b = inv_part->to_dense_block(std::nullopt, std::nullopt, true);
         auto res = bb->tdot(inv_b, bc->charged_state, { 1 }, { 0 });
         res = bb->tdot(ac->charged_state, res, { 0 }, { 0 });

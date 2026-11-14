@@ -236,7 +236,8 @@ class ContractionTree
 /// It is possible to create planar diagrams that contract `ChargedTensor` and
 /// `HiddenLegTensor`. Placeholders list **public** leg labels only (the same labels
 /// returned by `ChargedTensor.labels` or the non-hidden labels of a `HiddenLegTensor`).
-/// A lone `'!'` or any `'!'`-prefixed label is not a valid placeholder label; hidden legs
+/// A lone `'!'` / `'#'` or any `'!'`- / `'#'`-prefixed reserved label is not a valid
+/// placeholder label; hidden legs
 /// are not part of the planar diagram specification.
 ///
 /// During `evaluate`, `ChargedTensor` inputs are used as-is; contractions via `tdot` /

@@ -23,7 +23,8 @@ Stay on branch **`convert_tensors`**. Defer monkey-patch until all Tensor subcla
 
 - Inherit `Tensor`; `using Ptr = std::shared_ptr<ChargedTensor>`.
 - Members: `SymmetricTensor::Ptr invariant_part`, `std::optional<BlockBackend::BlockPtr> charged_state` (or nullable BlockPtr), `Space::Ptr charge_leg`.
-- Static `constexpr` / string `_CHARGE_LEG_LABEL = "!"`.
+- Static `constexpr` / string `_CHARGE_LEG_LABEL = "#"` (was `"!"`; breaking —
+  no HDF5 auto-migration of old `"!"` charge labels). Hidden legs keep `!…`.
 - Ctor: `(invariant_part, charged_state)` — charge leg = `domain.factors[0]` of invariant part; ChargedTensor domain drops that factor.
 - `supports_symmetry` → `symmetry->has_symmetric_braid()`.
 - Factories: `from_block_func`, `from_dense_block`, `from_dense_block_single_sector` (NotImplemented like Python), `from_invariant_part`, `from_two_charge_legs`, `from_zero`, hdf5.

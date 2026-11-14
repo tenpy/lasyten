@@ -41,6 +41,17 @@ touch the old label API. Prefer this file over
 `LegLabels` supports equality, `len`, `[]` get/set (int or str key), and
 assignment from a sequence. It does **not** implement `__iter__`.
 
+Reserved label markers (owned by `LegLabels` / free helpers in `labels.h`):
+
+| Kind | Form | Examples |
+| --- | --- | --- |
+| User hidden (`HiddenLegTensor`) | `!` + name | `!charge`, `!p` |
+| Charge leg / temps (`ChargedTensor`) | `#` / `#`+digit / `#`+capital(+`*`) | `#`, `#1`, `#A`, `#A*` |
+
+`labels.are(*want, planar=False, check_hidden=False, check_charged=False)` filters
+`self` first (drop hidden / charge unless the corresponding flag is true), then
+compares to `want`. Defaults match TeNPy’s former `_public_labels_are`.
+
 `relabel1` / `relabel2` kwargs on `compose` / `tdot` / `outer` / etc. are unchanged
 (function arguments, not tensor methods).
 

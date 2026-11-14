@@ -180,11 +180,17 @@ In Python, unset labels are empty strings (``""``).
            })
       .def(
         "are",
-        [](LegLabels const& self, py::args args, bool planar) {
-            return self.are(args_as_strings(args), planar);
+        [](LegLabels const& self,
+           py::args args,
+           bool planar,
+           bool check_hidden,
+           bool check_charged) {
+            return self.are(args_as_strings(args), planar, check_hidden, check_charged);
         },
         py::kw_only(),
         py::arg("planar") = false,
+        py::arg("check_hidden") = false,
+        py::arg("check_charged") = false,
         DOC(lasyten, LegLabels, are))
       .def("__len__", &LegLabels::size)
       .def("__getitem__",

@@ -66,6 +66,17 @@ bind_tensors_hidden_leg_tensor(py::module_& m)
       py::arg("label"),
       DOC(lasyten, HiddenLegTensor, is_hidden_leg_label));
 
+    cls.def_static(
+      "is_charge_temp_label",
+      [](py::object label) {
+          if (label.is_none()) {
+              return false;
+          }
+          return HiddenLegTensor::is_charge_temp_label(label.cast<std::string>());
+      },
+      py::arg("label"),
+      DOC(lasyten, HiddenLegTensor, is_charge_temp_label));
+
     cls.def("hidden_leg_idcs",
             &HiddenLegTensor::hidden_leg_idcs,
             DOC(lasyten, HiddenLegTensor, hidden_leg_idcs));

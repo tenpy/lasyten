@@ -2,7 +2,9 @@
 
 #include <lasyten/tools/hdf5_export.h>
 
+#include <algorithm>
 #include <cassert>
+#include <cctype>
 #include <format>
 #include <iostream>
 #include <ranges>
@@ -69,6 +71,96 @@ format_duplicate_error(std::unordered_set<std::string> const& dup)
 }
 
 } // namespace
+
+bool
+is_hidden_leg_label(std::string const& label)
+{
+    // Hidden labels are '!' plus a nonempty name (e.g. '!p', '!charge*', '!(p.q)').
+    return label.size() > 1 && label[0] == HIDDEN_LEG_PREFIX;
+}
+
+bool
+is_charge_leg_label(std::string const& label)
+{
+    // ChargedTensor charge marker and short-lived compose temps:
+    // "#", "#1"/"#2", "#A"/"#B", and duals "#A*"/"#B*".
+    if (label.empty() || label[0] != CHARGE_LEG_PREFIX) {
+        return false;
+    }
+    if (label.size() == 1) {
+        return true;
+    }
+    std::string_view suffix(label.begin() + 1, label.end());
+    if (std::all_of(
+          suffix.begin(), suffix.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+        return true;
+    }
+    if (suffix.size() == 1 && std::isupper(static_cast<unsigned char>(suffix[0])) != 0) {
+        return true;
+    }
+    if (suffix.size() == 2 && std::isupper(static_cast<unsigned char>(suffix[0])) != 0 &&
+        suffix[1] == '*') {
+        return true;
+    }
+    return false;
+}
+
+bool
+has_hidden_leg_labels(LegLabelList const& labels)
+{
+    return std::ranges::any_of(labels, [](auto const& l) { return is_hidden_leg_label(l); });
+}
+
+bool
+label_contains_exclamation(std::string const& label)
+{
+    return label.find(HIDDEN_LEG_PREFIX) != std::string::npos;
+}
+
+bool
+label_contains_hash(std::string const& label)
+{
+    return label.find(CHARGE_LEG_PREFIX) != std::string::npos;
+}
+
+void
+reject_exclamation_in_labels(LegLabelList const& labels, std::string const& context)
+{
+    for (auto const& lab : labels) {
+        if (label_contains_exclamation(lab)) {
+            throw std::invalid_argument(
+              std::format("{}: leg labels must not contain '{}'; got '{}'. "
+                          "Use HiddenLegTensor to hide legs.",
+                          context,
+                          HIDDEN_LEG_PREFIX,
+                          lab));
+        }
+    }
+}
+
+void
+reject_hash_in_labels(LegLabelList const& labels, std::string const& context)
+{
+    // Only reject a leading '#' (charge markers / temps). Mid-string '#' is used by
+    // planar unique labels such as ``bra#vR*``.
+    for (auto const& lab : labels) {
+        if (!lab.empty() && lab[0] == CHARGE_LEG_PREFIX) {
+            throw std::invalid_argument(
+              std::format("{}: leg labels must not start with '{}'; got '{}'. "
+                          "Use ChargedTensor for a charge leg.",
+                          context,
+                          CHARGE_LEG_PREFIX,
+                          lab));
+        }
+    }
+}
+
+void
+reject_reserved_markers_in_labels(LegLabelList const& labels, std::string const& context)
+{
+    reject_exclamation_in_labels(labels, context);
+    reject_hash_in_labels(labels, context);
+}
 
 bool
 is_valid_leg_label(std::string const& label)
@@ -469,27 +561,41 @@ LegLabels::has(std::vector<std::string> const& more) const
 }
 
 bool
-LegLabels::are(std::vector<std::string> const& want, bool planar) const
+LegLabels::are(std::vector<std::string> const& want,
+               bool planar,
+               bool check_hidden,
+               bool check_charged) const
 {
-    if (!is_fully_labelled()) {
+    LegLabelList effective;
+    effective.reserve(labels_.size());
+    for (auto const& lab : labels_) {
+        if (!check_hidden && is_hidden_leg_label(lab)) {
+            continue;
+        }
+        if (!check_charged && is_charge_leg_label(lab)) {
+            continue;
+        }
+        effective.push_back(lab);
+    }
+
+    if (std::ranges::any_of(effective, [](std::string const& l) { return l.empty(); })) {
         return false;
     }
-    if (static_cast<int64>(want.size()) != num_legs()) {
+    if (want.size() != effective.size()) {
         return false;
     }
     if (planar) {
         if (want.empty()) {
             return true;
         }
-        int64 start = -1;
-        try {
-            start = find_label(want.front());
-        } catch (std::invalid_argument const&) {
+        auto const it = std::ranges::find(effective, want.front());
+        if (it == effective.end()) {
             return false;
         }
-        for (std::size_t i = 1; i < want.size(); ++i) {
-            auto const idx = (static_cast<std::size_t>(start) + i) % want.size();
-            if (labels_[idx] != want[i]) {
+        auto const start = static_cast<std::size_t>(std::distance(effective.begin(), it));
+        for (std::size_t i = 0; i < want.size(); ++i) {
+            auto const idx = (start + i) % want.size();
+            if (effective[idx] != want[i]) {
                 return false;
             }
         }
@@ -497,7 +603,7 @@ LegLabels::are(std::vector<std::string> const& want, bool planar) const
     }
 
     std::set<std::string> a(want.begin(), want.end());
-    std::set<std::string> b(labels_.begin(), labels_.end());
+    std::set<std::string> b(effective.begin(), effective.end());
     return a == b;
 }
 

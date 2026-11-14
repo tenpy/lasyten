@@ -57,10 +57,10 @@ SymmetricTensor::SymmetricTensor(TensorBackend::DataPtr data_in,
   , data(std::move(data_in))
 {
     check(backend->is_correct_data_type(data), "SymmetricTensor: incorrect backend data type");
-    // Allow the ChargedTensor charge-leg marker "!" as the last label on bare
+    // Allow the ChargedTensor charge-leg marker "#" as the last label on bare
     // SymmetricTensors that are used as invariant parts (tests / factories).
     auto const labs = labels.as_list();
-    if (!labs.empty() && labs.back() == "!") {
+    if (!labs.empty() && is_charge_leg_label(labs.back())) {
         allow_charge_leg_label = true;
     }
     if (check_complex_dtype) {
@@ -89,20 +89,25 @@ SymmetricTensor::test_sanity() const
     backend->test_tensor_sanity(shared_from_this(), is_diagonal);
     verify_dtype();
     // HiddenLegTensor validates `!` itself; ChargedTensor invariant parts set
-    // allow_charge_leg_label. All other SymmetricTensors must not contain `!`.
+    // allow_charge_leg_label. All other SymmetricTensors must not contain `!` or `#`.
     if (dynamic_cast<HiddenLegTensor const*>(this) == nullptr && !allow_charge_leg_label) {
-        reject_exclamation_in_labels(labels.as_list(), "SymmetricTensor");
+        reject_reserved_markers_in_labels(labels.as_list(), "SymmetricTensor");
     } else if (allow_charge_leg_label) {
         auto labs = labels.as_list();
+        reject_exclamation_in_labels(labs, "SymmetricTensor");
         for (std::size_t i = 0; i < labs.size(); ++i) {
-            if (labs[i].empty() || !label_contains_exclamation(labs[i])) {
+            if (labs[i].empty() || labs[i][0] != CHARGE_LEG_PREFIX) {
                 continue;
             }
-            // Only the charge leg (last label, starts with '!') is allowed.
-            if (i + 1 != labs.size() || !labs[i].starts_with('!')) {
+            // Charge markers only as a trailing suffix of charge-leg labels.
+            if (!is_charge_leg_label(labs[i]) ||
+                !std::all_of(labs.begin() + static_cast<std::ptrdiff_t>(i),
+                             labs.end(),
+                             [](std::string const& l) { return is_charge_leg_label(l); })) {
                 throw std::invalid_argument(std::format(
-                  "ChargedTensor invariant_part: only the last label may contain '!', got '{}' "
-                  "at position {}",
+                  "ChargedTensor invariant_part: only trailing charge-leg labels may start with "
+                  "'{}', got '{}' at position {}",
+                  CHARGE_LEG_PREFIX,
                   labs[i],
                   i));
             }
