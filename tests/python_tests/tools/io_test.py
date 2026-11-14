@@ -49,7 +49,7 @@ def gen_example_data(version=lasyten.__version__):
     symmetric = lasyten.tensors.SymmetricTensor.from_eye([leg], labels=['p'])
     mask = lasyten.tensors.Mask.from_block_mask(np.array([True, False]), large_leg=leg, labels=['p'])
     # ChargedTensor: hide a trivial charge leg on a non-zero operator.
-    inv = lasyten.add_trivial_leg(n_op.as_SymmetricTensor(), domain_pos=0, label='!')
+    inv = lasyten.add_trivial_leg(n_op.as_SymmetricTensor(), domain_pos=0, label='#')
     charged = lasyten.tensors.ChargedTensor(inv, charged_state=[1.0])
 
     data = {

@@ -215,6 +215,24 @@ def test_LegLabels_api(make_compatible_space, compatible_backend, tmp_path):
     assert loaded.as_list() == ll.as_list()
 
 
+def test_LegLabels_are_filters_hidden_and_charged():
+    """Default are() ignores !… hidden and #… charge labels (lasyten#321)."""
+    ll = LegLabels(['vL', 'p', 'vR', '!unit_cell_charge', '#'])
+    assert ll.are('vL', 'p', 'vR')
+    assert ll.are('p', 'vR', 'vL', planar=True)
+    assert not ll.are('vL', 'p', 'vR', check_hidden=True)
+    assert not ll.are('vL', 'p', 'vR', check_charged=True)
+    assert ll.are('vL', 'p', 'vR', '!unit_cell_charge', check_hidden=True)
+    assert ll.are('vL', 'p', 'vR', '#', check_charged=True)
+    assert ll.are('vL', 'p', 'vR', '!unit_cell_charge', '#', check_hidden=True, check_charged=True)
+    assert HiddenLegTensor.is_hidden_leg_label('!charge')
+    assert not HiddenLegTensor.is_hidden_leg_label('#')
+    assert HiddenLegTensor.is_charge_temp_label('#')
+    assert HiddenLegTensor.is_charge_temp_label('#A')
+    assert HiddenLegTensor.is_charge_temp_label('#1')
+    assert not HiddenLegTensor.is_charge_temp_label('!charge')
+
+
 @pytest.mark.parametrize('leg_nums', [(1, 1), (2, 1), (3, 0), (0, 3)], ids=['1->1', '1->2', '0->3', '3->0'])
 @pytest.mark.parametrize('use_pipes', [True, 0.3])
 def test_SymmetricTensor(make_compatible_tensor, leg_nums, use_pipes):
@@ -958,7 +976,7 @@ def test_ChargedTensor_to_dense_block_single_sector(
 ):
     sector = make_compatible_sectors(1)[0]
     charge_leg = ElementarySpace(compatible_symmetry, SectorArray.from_sector(sector))
-    inv_part = make_compatible_tensor(codomain=1, domain=[charge_leg], labels=['', '!'])
+    inv_part = make_compatible_tensor(codomain=1, domain=[charge_leg], labels=['', '#'])
     tens = ChargedTensor(inv_part, charged_state=[1])
     leg = tens.codomain[0]
 
@@ -4512,6 +4530,19 @@ def test_to_backend(
 def test_reject_exclamation_in_labels(cls, make_compatible_tensor):
     with pytest.raises(ValueError, match="must not contain '!'"):
         make_compatible_tensor(cls=cls, codomain=1, domain=1, labels=['!a', 'b'])
+
+
+@pytest.mark.parametrize('cls', [SymmetricTensor, DiagonalTensor, Mask])
+def test_reject_hash_in_labels(cls, make_compatible_tensor):
+    with pytest.raises(ValueError, match="must not start with '#'"):
+        make_compatible_tensor(cls=cls, codomain=1, domain=1, labels=['#a', 'b'])
+
+
+def test_mid_hash_ok_for_planar_unique_style_labels(make_compatible_tensor):
+    """Planar unique labels use mid-string '#'; that must remain valid on public legs."""
+    T = make_compatible_tensor(cls=SymmetricTensor, codomain=1, domain=1, labels=['bra#vL', 'ket#vR'])
+    T.test_sanity()
+    assert T.labels.as_list() == ['bra#vL', 'ket#vR']
 
 
 def test_HiddenLegTensor_basic(make_compatible_tensor):

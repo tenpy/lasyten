@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cctype>
 #include <format>
 #include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
@@ -24,13 +23,20 @@ is_dual_pair(std::string const& a, std::string const& b)
 }
 
 void
-check_public_labels_no_bang(LegLabelList const& labs)
+check_public_labels_no_reserved(LegLabelList const& labs)
 {
     for (auto const& lab : labs) {
-        if (!lab.empty() && !HiddenLegTensor::is_hidden_leg_label(lab) &&
-            label_contains_exclamation(lab)) {
-            throw std::invalid_argument(std::format(
-              "Public label '{}' must not contain '{}'", lab, HiddenLegTensor::HIDDEN_PREFIX));
+        if (lab.empty() || is_hidden_leg_label(lab)) {
+            continue;
+        }
+        if (label_contains_exclamation(lab)) {
+            throw std::invalid_argument(
+              std::format("Public label '{}' must not contain '{}'", lab, HIDDEN_LEG_PREFIX));
+        }
+        // Leading '#' only: mid-string '#' is used by planar unique labels.
+        if (lab[0] == CHARGE_LEG_PREFIX) {
+            throw std::invalid_argument(
+              std::format("Public label '{}' must not start with '{}'", lab, CHARGE_LEG_PREFIX));
         }
     }
 }
@@ -38,66 +44,21 @@ check_public_labels_no_bang(LegLabelList const& labs)
 } // namespace
 
 bool
-label_contains_exclamation(std::string const& label)
-{
-    return label.find(HiddenLegTensor::HIDDEN_PREFIX) != std::string::npos;
-}
-
-void
-reject_exclamation_in_labels(LegLabelList const& labels, std::string const& context)
-{
-    for (auto const& lab : labels) {
-        if (label_contains_exclamation(lab)) {
-            throw std::invalid_argument(
-              std::format("{}: leg labels must not contain '{}'; got '{}'. "
-                          "Use HiddenLegTensor to hide legs, or ChargedTensor for a charge leg.",
-                          context,
-                          HiddenLegTensor::HIDDEN_PREFIX,
-                          lab));
-        }
-    }
-}
-
-bool
 HiddenLegTensor::is_charge_temp_label(std::string const& label)
 {
-    // ChargedTensor invariant-part markers and short-lived labels during compose/inner:
-    // "!", "!1"/"!2", "!A"/"!B", and their duals "!A*"/"!B*".
-    if (label.empty() || label[0] != HIDDEN_PREFIX) {
-        return false;
-    }
-    if (label.size() == 1) {
-        return true;
-    }
-    std::string_view suffix(label.begin() + 1, label.end());
-    if (std::all_of(
-          suffix.begin(), suffix.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
-        return true;
-    }
-    if (suffix.size() == 1 && std::isupper(static_cast<unsigned char>(suffix[0])) != 0) {
-        return true;
-    }
-    if (suffix.size() == 2 && std::isupper(static_cast<unsigned char>(suffix[0])) != 0 &&
-        suffix[1] == '*') {
-        return true;
-    }
-    return false;
+    return is_charge_leg_label(label);
 }
 
 bool
 HiddenLegTensor::is_hidden_leg_label(std::string const& label)
 {
-    // Hidden labels are '!' plus a nonempty name (e.g. '!p', '!charge*', '!(p.q)').
-    if (label.size() <= 1 || label[0] != HIDDEN_PREFIX) {
-        return false;
-    }
-    return !is_charge_temp_label(label);
+    return lasyten::is_hidden_leg_label(label);
 }
 
 bool
 HiddenLegTensor::has_hidden_leg_labels(LegLabelList const& labels)
 {
-    return std::ranges::any_of(labels, [](auto const& l) { return is_hidden_leg_label(l); });
+    return lasyten::has_hidden_leg_labels(labels);
 }
 
 std::string
@@ -166,7 +127,7 @@ HiddenLegTensor::HiddenLegTensor(SymmetricTensor::Ptr tensor)
           "HiddenLegTensor adopting constructor requires at least one '!'-prefixed label");
     }
     validate_no_dual_hidden_pair(labels.as_list());
-    check_public_labels_no_bang(labels.as_list());
+    check_public_labels_no_reserved(labels.as_list());
 
     labels.set_hooks(
       [](LegLabels& /*self*/, LegLabelList const& proposed) {
@@ -175,7 +136,7 @@ HiddenLegTensor::HiddenLegTensor(SymmetricTensor::Ptr tensor)
                 "HiddenLegTensor must keep at least one '!'-prefixed hidden leg label");
           }
           validate_no_dual_hidden_pair(proposed);
-          check_public_labels_no_bang(proposed);
+          check_public_labels_no_reserved(proposed);
       },
       [](LegLabels& /*self*/) {});
 }
@@ -205,7 +166,7 @@ HiddenLegTensor::from_tensor(Tensor::Ptr tensor,
         lab = add_hidden_prefix(lab);
     }
     validate_no_dual_hidden_pair(labs);
-    check_public_labels_no_bang(labs);
+    check_public_labels_no_reserved(labs);
     auto with_labels = std::make_shared<SymmetricTensor>(
       sym->data, sym->codomain, sym->domain, sym->backend, sym->symmetry, std::move(labs));
     return std::make_shared<HiddenLegTensor>(std::move(with_labels));
@@ -218,7 +179,7 @@ HiddenLegTensor::test_sanity() const
     check(has_hidden_leg_labels(labels.as_list()),
           "HiddenLegTensor::test_sanity: missing hidden-leg labels");
     validate_no_dual_hidden_pair(labels.as_list());
-    check_public_labels_no_bang(labels.as_list());
+    check_public_labels_no_reserved(labels.as_list());
 }
 
 std::string

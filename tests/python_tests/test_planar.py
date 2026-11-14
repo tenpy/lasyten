@@ -1684,14 +1684,21 @@ def test_PlanarDiagram_two_open_charge_legs(symmetry, np_random):
 def test_PlanarDiagram_charged_flag_and_planarity():
     with pytest.raises(ValueError, match='!'):
         _ = lasy.PlanarDiagram(
-            tensors='A[a, !], B[a, !]',
+            tensors='A[a, !charge], B[a, !charge]',
             definition='A:a @ B:a',
             dims=dict(chi=['a']),
         )
 
-    with pytest.raises(ValueError, match='!'):
+    with pytest.raises(ValueError, match='#'):
         _ = lasy.PlanarDiagram(
-            tensors='A[a, !]',
+            tensors='A[a, #], B[a, #]',
+            definition='A:a @ B:a',
+            dims=dict(chi=['a']),
+        )
+
+    with pytest.raises(ValueError, match='#'):
+        _ = lasy.PlanarDiagram(
+            tensors='A[a, #]',
             definition='A:a -> a',
             dims=dict(chi=['a']),
         )

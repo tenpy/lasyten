@@ -28,6 +28,37 @@ inline constexpr char const* FORBIDDEN_LEG_LABEL_CHARS[] = {
     " ", "\t", "\n", "@", ":", "-", ">",
 };
 
+/// Prefix for user-facing hidden legs (`HiddenLegTensor`), e.g. ``!charge``.
+inline constexpr char HIDDEN_LEG_PREFIX = '!';
+/// Prefix for ChargedTensor charge legs / short-lived charge temps, e.g. ``#``, ``#A``.
+inline constexpr char CHARGE_LEG_PREFIX = '#';
+/// Canonical charge-leg label on a ChargedTensor invariant part.
+inline constexpr char const* CHARGE_LEG_LABEL = "#";
+
+/// User-facing hidden leg: ``!`` + nonempty name (e.g. ``!charge``, ``!p*``).
+[[nodiscard]] bool is_hidden_leg_label(std::string const& label);
+
+/// ChargedTensor charge marker / temp: ``#``, ``#1``, ``#A``, ``#A*``, …
+[[nodiscard]] bool is_charge_leg_label(std::string const& label);
+
+/// True if any label starts with ``!``.
+[[nodiscard]] bool has_hidden_leg_labels(LegLabelList const& labels);
+
+/// True if `label` contains ``!`` (not necessarily as a prefix).
+[[nodiscard]] bool label_contains_exclamation(std::string const& label);
+
+/// True if `label` contains ``#`` (not necessarily as a prefix).
+[[nodiscard]] bool label_contains_hash(std::string const& label);
+
+/// Raise if any label contains ``!``. Used by normal (non-HiddenLeg) tensors.
+void reject_exclamation_in_labels(LegLabelList const& labels, std::string const& context);
+
+/// Raise if any label starts with ``#``. Mid-string ``#`` is allowed (planar unique labels).
+void reject_hash_in_labels(LegLabelList const& labels, std::string const& context);
+
+/// Raise if any label contains ``!`` or ``#``.
+void reject_reserved_markers_in_labels(LegLabelList const& labels, std::string const& context);
+
 /// If the given string is a valid leg label (`""` is always valid = unset).
 [[nodiscard]] bool is_valid_leg_label(std::string const& label);
 
@@ -153,8 +184,14 @@ class LegLabels
     [[nodiscard]] bool contains(std::string const& label) const { return has(label); }
 
     /// If the given labels and this are the same, up to permutation.
-    /// If `planar` is true, only cyclic permutations are accepted.
-    [[nodiscard]] bool are(std::vector<std::string> const& labels, bool planar = false) const;
+    ///
+    /// If `planar` is true, only cyclic permutations of the compared sequence are accepted.
+    /// By default, user-hidden (`!…`) and charge (`#…`) labels on `this` are ignored so the
+    /// check matches public legs only; set `check_hidden` / `check_charged` to include them.
+    [[nodiscard]] bool are(std::vector<std::string> const& labels,
+                           bool planar = false,
+                           bool check_hidden = false,
+                           bool check_charged = false) const;
 
     void save_hdf5(lasyten::hdf5::Saver& saver,
                    HighFive::Group& h5gr,

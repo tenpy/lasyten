@@ -28,8 +28,9 @@ namespace {
 [[nodiscard]] bool
 _is_invalid_planar_placeholder_label(std::string const& label)
 {
-    // Reject the ChargedTensor charge marker "!" and any HiddenLegTensor `!…` label.
-    return label.find(HiddenLegTensor::HIDDEN_PREFIX) != std::string::npos;
+    // Reject HiddenLegTensor `!…` and ChargedTensor `#` / `#…` charge labels.
+    return is_hidden_leg_label(label) || is_charge_leg_label(label) ||
+           label_contains_exclamation(label);
 }
 
 void
@@ -38,12 +39,12 @@ _assert_valid_planar_placeholder_labels(std::vector<std::string> const& labels,
 {
     for (auto const& label : labels) {
         if (_is_invalid_planar_placeholder_label(label)) {
-            throw std::invalid_argument(
-              std::format("{}: placeholder labels must not be '{}' or start with '{}', got '{}'",
-                          context,
-                          HiddenLegTensor::HIDDEN_PREFIX,
-                          HiddenLegTensor::HIDDEN_PREFIX,
-                          label));
+            throw std::invalid_argument(std::format(
+              "{}: placeholder labels must not use reserved markers '{}' / '{}', got '{}'",
+              context,
+              HIDDEN_LEG_PREFIX,
+              CHARGE_LEG_PREFIX,
+              label));
         }
     }
 }
@@ -59,8 +60,7 @@ _is_hidden_planar_label(std::string const& label)
         return false;
     }
     // HiddenLegTensor hidden legs and ChargedTensor charge-leg markers / temps.
-    if (HiddenLegTensor::is_hidden_leg_label(label) ||
-        HiddenLegTensor::is_charge_temp_label(label)) {
+    if (is_hidden_leg_label(label) || is_charge_leg_label(label)) {
         return true;
     }
     auto pos = label.rfind(PLANAR_UNIQUE_LABEL_SEP);
@@ -68,8 +68,7 @@ _is_hidden_planar_label(std::string const& label)
         return false;
     }
     std::string tail{ label.substr(pos + 1) };
-    return HiddenLegTensor::is_hidden_leg_label(tail) ||
-           HiddenLegTensor::is_charge_temp_label(tail);
+    return is_hidden_leg_label(tail) || is_charge_leg_label(tail);
 }
 
 [[nodiscard]] std::string
@@ -99,7 +98,7 @@ _public_string_labels(TensorCPtr tensor)
         return as_strings(labs);
     }
     for (auto const& l : labs) {
-        if (HiddenLegTensor::is_hidden_leg_label(l) || HiddenLegTensor::is_charge_temp_label(l)) {
+        if (is_hidden_leg_label(l) || is_charge_leg_label(l)) {
             continue;
         }
         out.push_back(l.empty() ? "None" : l);

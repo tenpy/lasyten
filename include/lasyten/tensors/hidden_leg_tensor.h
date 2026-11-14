@@ -35,7 +35,7 @@ class HiddenLegTensor : public SymmetricTensor
     using CPtr = std::shared_ptr<const HiddenLegTensor>;
 
     /// Prefix character for hidden-leg labels.
-    static constexpr char HIDDEN_PREFIX = '!';
+    static constexpr char HIDDEN_PREFIX = HIDDEN_LEG_PREFIX;
 
     /// Adopt an existing symmetric tensor whose labels already contain hidden (`!`) legs.
     /// Used by ops that preserve hidden labels on the result.
@@ -52,14 +52,15 @@ class HiddenLegTensor : public SymmetricTensor
     [[nodiscard]] std::string ascii_diagram_type_name() const override;
     [[nodiscard]] std::string class_name() const override;
 
-    /// True for ChargedTensor charge markers and short-lived compose temps (``!``, ``!1``,
-    /// ``!A``).
+    /// True for ChargedTensor charge markers and short-lived compose temps (``#``, ``#1``,
+    /// ``#A``). Prefer free function `lasyten::is_charge_leg_label`.
     [[nodiscard]] static bool is_charge_temp_label(std::string const& label);
 
-    /// True if `label` is a user-facing hidden leg label (``!`` prefix, not a charge temp).
+    /// True if `label` is a user-facing hidden leg label (``!`` + nonempty name).
+    /// Prefer free function `lasyten::is_hidden_leg_label`.
     [[nodiscard]] static bool is_hidden_leg_label(std::string const& label);
 
-    /// True if any label starts with ``!``.
+    /// True if any label is a user-facing hidden leg.
     [[nodiscard]] static bool has_hidden_leg_labels(LegLabelList const& labels);
 
     /// Strip a leading ``!`` from a hidden label. Returns `label` unchanged if not hidden.
@@ -111,11 +112,5 @@ class HiddenLegTensor : public SymmetricTensor
     /// Wrap `tensor` as `HiddenLegTensor` if it has hidden labels; otherwise return `tensor`.
     [[nodiscard]] static TensorPtr maybe_wrap(SymmetricTensor::Ptr tensor);
 };
-
-/// True if any label contains the character ``!`` (not necessarily as a prefix).
-[[nodiscard]] bool label_contains_exclamation(std::string const& label);
-
-/// Raise if any label contains ``!``. Used by normal (non-HiddenLeg) tensors.
-void reject_exclamation_in_labels(LegLabelList const& labels, std::string const& context);
 
 } // namespace lasyten

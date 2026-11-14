@@ -268,8 +268,9 @@ wherever it accepts an integer index.
 Differences:
 
 - Dual labels use a trailing ``*``, same as TeNPy ``Array.conj()``. Combined
-  pipes still use ``(a.b)``. Avoid ``( ) . ? ! *`` inside a *single* (not
+  pipes still use ``(a.b)``. Avoid ``( ) . ? ! # *`` inside a *single* (not
   combined/dual) label; see :func:`~lasyten.tensors.is_valid_leg_label`.
+  ``!…`` marks user-hidden legs; ``#`` / ``#…`` mark ChargedTensor charge legs.
 - Unset labels are empty strings (``""``), not ``None``.
 - Each tensor owns a :class:`~lasyten.tensors.LegLabels` member
   ``t.labels``. Assign a full list with ``t.labels = [...]`` or
