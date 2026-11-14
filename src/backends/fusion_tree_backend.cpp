@@ -51,9 +51,28 @@ py_bool_dtype()
 }
 
 [[nodiscard]] std::pair<int64, int64>
-parse_leg_index(std::shared_ptr<LegOrSpace> const& leg, int64 idx)
+parse_leg_index(ElementarySpace::Ptr const& leg, int64 idx)
+{
+    if (!leg) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return leg->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Space::Ptr const& leg, int64 idx)
 {
     auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
+    if (!es) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return es->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Leg const& leg, int64 idx)
+{
+    auto es = leg.as_elementary_space();
     if (!es) {
         throw std::invalid_argument("parse_index requires an ElementarySpace leg");
     }
@@ -423,9 +442,9 @@ legs_flat_leg_permutation(py::object legs)
     int64 offset = 0;
     for (py::handle h : legs) {
         auto leg = h.cast<Leg::Ptr>();
-        auto part_perm = leg->_flat_leg_permutation(offset);
+        auto part_perm = leg._flat_leg_permutation(offset);
         out.insert(out.end(), part_perm.begin(), part_perm.end());
-        offset += leg->num_flat_legs();
+        offset += leg.num_flat_legs();
     }
     return out;
 }
@@ -473,7 +492,7 @@ flat_are_dual(TensorProduct::Ptr tp)
 {
     std::vector<std::uint8_t> out;
     for (auto const& leg : tp->flat_legs())
-        out.push_back(static_cast<std::uint8_t>(leg->is_dual));
+        out.push_back(static_cast<std::uint8_t>(leg.is_dual()));
     return out;
 }
 
@@ -532,19 +551,22 @@ FusionTreeBackend::test_tensor_sanity(TensorCPtr a, bool is_diagonal)
     } catch (...) {
         return;
     }
-    assert(a->device == data->device);
-    assert(data->device == block_backend->as_device(data->device));
-    assert(a->dtype == data->dtype);
+    check(a->device == data->device, "test_tensor_sanity: device mismatch");
+    check(data->device == block_backend->as_device(data->device),
+          "test_tensor_sanity: device not normalized by block backend");
+    check(a->dtype == data->dtype, "test_tensor_sanity: dtype mismatch");
     auto const& bi = data->block_inds;
-    assert(bi.nrows() == data->blocks.size());
-    assert(bi.ncols() == 2);
-    assert(bi.all_ge(0));
+    check(bi.nrows() == data->blocks.size(),
+          "test_tensor_sanity: block_inds rows != number of blocks");
+    check(bi.ncols() == 2, "test_tensor_sanity: expected 2 block_inds columns");
+    check(bi.all_ge(0), "test_tensor_sanity: negative block index");
     std::vector<int64> maxes = { a->codomain->num_sectors, a->domain->num_sectors };
-    assert(bi.all_lt_per_column(maxes));
-    assert(bi.is_lexsorted());
+    check(bi.all_lt_per_column(maxes), "test_tensor_sanity: block index out of range");
+    check(bi.is_lexsorted(), "test_tensor_sanity: block_inds not lexsorted");
     for (std::size_t r = 0; r < bi.nrows(); ++r) {
-        assert(a->codomain->sector_decomposition[static_cast<std::size_t>(bi(r, 0))] ==
-               a->domain->sector_decomposition[static_cast<std::size_t>(bi(r, 1))]);
+        check(a->codomain->sector_decomposition[static_cast<std::size_t>(bi(r, 0))] ==
+                a->domain->sector_decomposition[static_cast<std::size_t>(bi(r, 1))],
+              "test_tensor_sanity: charge rule violated (coupled sectors mismatch)");
     }
     for (std::size_t i = 0; i < bi.nrows(); ++i) {
         int64 ic = bi(i, 0);
@@ -554,7 +576,8 @@ FusionTreeBackend::test_tensor_sanity(TensorCPtr a, bool is_diagonal)
             mults_of(py::cast(a->domain))[static_cast<std::size_t>(id)]
         };
         if (is_diagonal) {
-            assert(expect_shape[0] == expect_shape[1]);
+            check(expect_shape[0] == expect_shape[1],
+                  "test_tensor_sanity: diagonal block shape mismatch");
             expect_shape = { expect_shape[0] };
         }
         block_backend->test_block_sanity(data->blocks[i], expect_shape, a->dtype, a->device);
@@ -578,11 +601,12 @@ FusionTreeBackend::test_mask_sanity(MaskCPtr a)
     } catch (...) {
         return;
     }
-    assert(a->device == data->device);
-    assert(data->dtype == Dtype::Bool);
+    check(a->device == data->device, "test_mask_sanity: device mismatch");
+    check(data->dtype == Dtype::Bool, "test_mask_sanity: dtype must be bool");
     auto const& bi = data->block_inds;
-    assert(bi.nrows() == data->blocks.size());
-    assert(bi.ncols() == 2);
+    check(bi.nrows() == data->blocks.size(),
+          "test_mask_sanity: block_inds rows != number of blocks");
+    check(bi.ncols() == 2, "test_mask_sanity: expected 2 block_inds columns");
     bool is_projection = a->is_projection;
     // block_inds index TensorProduct (co)domain sectors, not ElementarySpace defining order.
     // For dual legs those orders differ, so use domain/codomain multiplicities (like Python).
@@ -595,11 +619,12 @@ FusionTreeBackend::test_mask_sanity(MaskCPtr a)
                                          : codomain_mults[static_cast<std::size_t>(i_cod)];
         int64 expect_sum = is_projection ? codomain_mults[static_cast<std::size_t>(i_cod)]
                                          : domain_mults[static_cast<std::size_t>(i_dom)];
-        assert(expect_len > 0);
-        assert(expect_sum > 0);
+        check(expect_len > 0, "test_mask_sanity: non-positive mask block length");
+        check(expect_sum > 0, "test_mask_sanity: non-positive mask block sum");
         block_backend->test_block_sanity(
           data->blocks[i], std::vector<int64>{ expect_len }, Dtype::Bool, data->device);
-        assert(block_backend->sum_all(data->blocks[i]).as_int64() == expect_sum);
+        check(block_backend->sum_all(data->blocks[i]).as_int64() == expect_sum,
+              "test_mask_sanity: mask block sum mismatch");
     }
 }
 
@@ -716,8 +741,8 @@ plan_key_put_product(std::string& k, TensorProduct::Ptr const& tp)
     auto const legs = tp->flat_legs();
     plan_key_put(k, static_cast<std::int64_t>(legs.size()));
     for (auto const& leg : legs) {
-        plan_key_put(k, leg->is_dual ? 1 : 0);
-        auto const space = leg->as_space();
+        plan_key_put(k, leg.is_dual() ? 1 : 0);
+        auto const space = leg.as_space();
         plan_key_put(k, static_cast<std::int64_t>(space->sector_decomposition.size()));
         for (Sector const& s : space->sector_decomposition) {
             plan_key_put_sector(k, s);
@@ -991,7 +1016,7 @@ FusionTreeBackend::apply_mask_to_DiagonalTensor(DiagonalTensorCPtr tensor, MaskC
 TensorBackend::DataPtr
 FusionTreeBackend::combine_legs(TensorCPtr tensor,
                                 std::vector<std::vector<int64>> leg_idcs_combine,
-                                std::vector<LegPipe::Ptr> pipes,
+                                std::vector<Leg::Ptr> pipes,
                                 TensorProduct::Ptr new_codomain,
                                 TensorProduct::Ptr new_domain)
 {
@@ -1292,7 +1317,10 @@ FusionTreeBackend::diagonal_tensor_to_block(DiagonalTensorCPtr a)
     // different sorting order of the ``a.domain == TensorProduct(a.leg)``
     // versus the ``a.leg`` itself
     // ---
-    assert(py::cast(a->symmetry).attr("can_be_dropped").cast<bool>());
+    if (!a->symmetry->can_be_dropped()) {
+        throw SymmetryError(std::format(
+          "diagonal_tensor_to_block requires a droppable symmetry. Got {}.", a->symmetry->str()));
+    }
     auto a_data = data_from_tensor(a);
     auto res = block_backend->zeros({ py::cast(a->leg()).attr("dim").cast<int64>() }, a->dtype);
     auto const& bi = a_data->block_inds;
@@ -1456,7 +1484,7 @@ FusionTreeBackend::inv_part_to_dense_block_single_sector(SymmetricTensorCPtr ten
 py::object
 FusionTreeBackend::state_tensor_product(BlockBackend::BlockPtr /*state1*/,
                                         BlockBackend::BlockPtr /*state2*/,
-                                        LegPipe::Ptr /*pipe*/)
+                                        Leg::Ptr /*pipe*/)
 {
     // --- hints from Python FusionTreeBackend.state_tensor_product ---
     // TODO clearly define what this should do in tensors.py first!
@@ -2038,7 +2066,7 @@ FusionTreeBackend::from_dense_block(BlockBackend::BlockPtr a,
         for (auto const& f : codomain->factors)
             legs.append(py::cast(f));
         for (auto it = domain->factors.rbegin(); it != domain->factors.rend(); ++it)
-            legs.append(py::cast((*it)->dual()));
+            legs.append(py::cast(it->dual()));
         auto axes_perm = legs_flat_leg_permutation(legs);
         int64 perm_idx = 0;
         for (py::ssize_t n = 0; n < legs.size(); ++n) {
@@ -2068,7 +2096,10 @@ FusionTreeBackend::from_dense_block(BlockBackend::BlockPtr a,
           a, idcs.cast<std::vector<int64>>(), split_dims.cast<std::vector<std::vector<int64>>>());
         a = block_backend->permute_axes(a, axes_perm);
     }
-    assert(codomain->symmetry->can_be_dropped());
+    if (!codomain->symmetry->can_be_dropped()) {
+        throw SymmetryError(std::format("from_dense_block requires a droppable symmetry. Got {}.",
+                                        codomain->symmetry->str()));
+    }
     int64 J = codomain->num_flat_legs();
     int64 K = domain->num_flat_legs();
     int64 num_legs = J + K;
@@ -2193,7 +2224,10 @@ FusionTreeBackend::to_dense_block(TensorCPtr a)
     // in the end permute leg order [i1,...,iJ,j1,...,jK] -> [i1,...,iJ,jK,...,j1] need to cast to
     // a list here since numpy arrays leads errors in the torch block backend
     // ---
-    assert(py::cast(a->symmetry).attr("can_be_dropped").cast<bool>());
+    if (!a->symmetry->can_be_dropped()) {
+        throw SymmetryError(std::format("to_dense_block requires a droppable symmetry. Got {}.",
+                                        a->symmetry->str()));
+    }
     auto a_data = data_from_tensor(a);
     auto codomain = py::cast(a->codomain).cast<TensorProduct::Ptr>();
     auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
@@ -2204,9 +2238,9 @@ FusionTreeBackend::to_dense_block(TensorCPtr a)
       { a_data->dtype, py::cast(a->symmetry).attr("fusion_tensor_dtype").cast<Dtype>() });
     std::vector<int64> shape;
     for (auto const& leg : codomain->flat_legs())
-        shape.push_back(leg->dim);
+        shape.push_back(leg.dim());
     for (auto const& leg : domain->flat_legs())
-        shape.push_back(leg->dim);
+        shape.push_back(leg.dim());
     auto res = block_backend->zeros(shape, dt);
     auto const& bi = a_data->block_inds;
     for (std::size_t row = 0; row < bi.nrows(); ++row) {
@@ -2800,10 +2834,17 @@ FusionTreeBackend::_mask_contract(TensorCPtr tensor, MaskCPtr mask, int64 leg_id
     auto parsed = tensor->_parse_leg_idx(leg_idx);
     bool in_domain = std::get<0>(parsed);
     int64 co_domain_idx = std::get<1>(parsed);
-    if (in_domain)
-        assert(mask->is_projection != large_leg);
-    else
-        assert(mask->is_projection == large_leg);
+    if (in_domain) {
+        if (mask->is_projection == large_leg) {
+            throw std::invalid_argument(
+              "_mask_contract: domain leg requires inclusion mask when large_leg is set, "
+              "or projection mask when large_leg is unset");
+        }
+    } else if (mask->is_projection != large_leg) {
+        throw std::invalid_argument(
+          "_mask_contract: codomain leg requires projection mask when large_leg is set, "
+          "or inclusion mask when large_leg is unset");
+    }
     TensorProduct::Ptr codomain;
     TensorProduct::Ptr domain;
     TensorProduct::Ptr target_space;
@@ -3169,7 +3210,7 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
     // (pipes are transparent). Index of the contracted leg among the flat legs of `iter_space`:
     int64 flat_leg_idx = 0;
     for (int64 i = 0; i < leg_idx; ++i)
-        flat_leg_idx += iter_space->factors[static_cast<std::size_t>(i)]->num_flat_legs();
+        flat_leg_idx += iter_space->factors[static_cast<std::size_t>(i)].num_flat_legs();
     py::list new_block_inds_rows;
     std::vector<BlockBackend::BlockPtr> new_blocks;
     // Python builds a cache keyed by ``vertex_labels``, but the key expression is a generator
@@ -3703,8 +3744,8 @@ FusionTreeBackend::get_element(SymmetricTensorCPtr a, std::vector<int64> idcs)
     auto legs = a->legs();
     for (std::size_t li = 0; li < legs.size(); ++li) {
         std::vector<int64> dims;
-        for (auto const& fl : legs[li]->flat_legs())
-            dims.push_back(static_cast<int64>(fl->dim));
+        for (auto const& fl : legs[li].flat_legs())
+            dims.push_back(static_cast<int64>(fl.dim()));
         auto strides = make_stride(dims, /*cstyle=*/true);
         int64 rem = idcs[li];
         std::vector<int64> unr(dims.size());
@@ -4320,10 +4361,11 @@ FusionTreeBackend::mask_from_block(BlockBackend::BlockPtr a, Space::Ptr large_le
         auto multis = large_leg_obj.attr("multiplicities")
                         .attr("__getitem__")(perm)
                         .cast<std::vector<int64>>();
-        auto leg_ptr = std::dynamic_pointer_cast<Leg>(large_leg);
-        if (!leg_ptr) {
-            throw std::invalid_argument("mask_from_block: large_leg must also be a Leg");
+        auto large_es = std::dynamic_pointer_cast<ElementarySpace>(large_leg);
+        if (!large_es) {
+            throw std::invalid_argument("mask_from_block: large_leg must be an ElementarySpace");
         }
+        auto leg_ptr = Leg{ large_es };
         domain = py::cast(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ leg_ptr },
                                                           large_leg->symmetry,
                                                           std::move(sorted_duals),

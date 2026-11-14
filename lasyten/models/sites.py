@@ -7,10 +7,13 @@ from .._core import (  # noqa: F401
     ClockSite,
     FibonacciAnyonSite,
     GoldenSite,
+    GroupedSite,
     IsingAnyonSite,
     SpinHalfFermionSite,
     SpinlessBosonSite,
     SpinlessFermionSite,
     SpinSite,
     SU2kSpin1Site,
+    group_sites,
+    set_common_symmetry,
 )

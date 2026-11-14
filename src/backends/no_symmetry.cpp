@@ -19,9 +19,28 @@ namespace lasyten {
 namespace {
 
 [[nodiscard]] std::pair<int64, int64>
-parse_leg_index(std::shared_ptr<LegOrSpace> const& leg, int64 idx)
+parse_leg_index(ElementarySpace::Ptr const& leg, int64 idx)
+{
+    if (!leg) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return leg->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Space::Ptr const& leg, int64 idx)
 {
     auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
+    if (!es) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return es->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Leg const& leg, int64 idx)
+{
+    auto es = leg.as_elementary_space();
     if (!es) {
         throw std::invalid_argument("parse_index requires an ElementarySpace leg");
     }
@@ -59,7 +78,7 @@ dims_from_legs(std::vector<Leg::Ptr> const& legs)
     std::vector<int64> dims;
     dims.reserve(legs.size());
     for (auto const& leg : legs)
-        dims.push_back(static_cast<int64>(leg->dim));
+        dims.push_back(static_cast<int64>(leg.dim()));
     return dims;
 }
 
@@ -86,8 +105,8 @@ rank_basis_perm_masked(py::object basis_perm, BlockBackend& bb, BlockBackend::Bl
 bool
 space_is_dual(Space const& space)
 {
-    if (auto const* leg = dynamic_cast<Leg const*>(&space))
-        return leg->is_dual;
+    if (auto const* es = dynamic_cast<ElementarySpace const*>(&space))
+        return es->is_dual;
     return false;
 }
 
@@ -166,7 +185,8 @@ NoSymmetryBackend::test_mask_sanity(MaskCPtr a)
     block_backend->test_block_sanity(
       data, std::vector<int64>{ leg_dim_i64(py::cast(a->large_leg())) }, Dtype::Bool, a->device);
     auto small_dim = static_cast<int64>(py::cast(a->small_leg()).attr("dim").cast<float64>());
-    assert(block_backend->sum_all(data).as_int64() == small_dim);
+    check(block_backend->sum_all(data).as_int64() == small_dim,
+          "test_mask_sanity: mask block sum mismatch");
 }
 
 TensorBackend::DataPtr
@@ -203,7 +223,7 @@ NoSymmetryBackend::apply_mask_to_DiagonalTensor(DiagonalTensorCPtr tensor, MaskC
 TensorBackend::DataPtr
 NoSymmetryBackend::combine_legs(TensorCPtr tensor,
                                 std::vector<std::vector<int64>> leg_idcs_combine,
-                                std::vector<LegPipe::Ptr> pipes,
+                                std::vector<Leg::Ptr> pipes,
                                 TensorProduct::Ptr new_codomain,
                                 TensorProduct::Ptr new_domain)
 {
@@ -212,7 +232,10 @@ NoSymmetryBackend::combine_legs(TensorCPtr tensor,
     cstyles.reserve(pipes.size());
     for (std::size_t i = 0; i < pipes.size(); ++i) {
         bool in_domain = leg_idcs_combine[i][0] >= num_codomain_legs;
-        cstyles.push_back(pipes[i]->combine_cstyle != in_domain);
+        auto pipe = pipes[i].as_leg_pipe();
+        if (!pipe)
+            throw std::invalid_argument("NoSymmetryBackend::combine_legs expects LegPipe");
+        cstyles.push_back(pipe->combine_cstyle != in_domain);
     }
     return wrap(block_backend->combine_legs(block_from_tensor(tensor), leg_idcs_combine, cstyles));
 }
@@ -440,7 +463,7 @@ NoSymmetryBackend::eye_data(TensorProduct::Ptr co_domain, Dtype dtype, std::stri
     std::vector<int64> legs;
     legs.reserve(co_domain->factors.size());
     for (auto const& f : co_domain->factors)
-        legs.push_back(static_cast<int64>(f->dim));
+        legs.push_back(static_cast<int64>(f.dim()));
     return wrap(block_backend->eye_block(legs, dtype, device));
 }
 
@@ -460,7 +483,10 @@ NoSymmetryBackend::from_dense_block_trivial_sector(BlockBackend::BlockPtr block,
     // there are no other sectors, so this is just the unmodified block.
     // ---
     // there are no other sectors, so this is just the unmodified block.
-    assert(block_backend->get_shape(block) == std::vector<int64>{ space_dim_i64(*leg) });
+    if (block_backend->get_shape(block) != std::vector<int64>{ space_dim_i64(*leg) }) {
+        throw std::invalid_argument(
+          "from_dense_block_trivial_sector: block shape does not match leg dim");
+    }
     return wrap(std::move(block));
 }
 
@@ -530,10 +556,14 @@ NoSymmetryBackend::from_tree_pairs(
   Dtype /*dtype*/,
   std::string /*device*/)
 {
-    assert(trees.size() == 1);
+    if (trees.size() != 1) {
+        throw std::invalid_argument("from_tree_map: expected exactly one tree for NoSymmetry");
+    }
     auto block = trees.begin()->second;
     auto expect_shape = dims_from_legs(conventional_leg_order(codomain, domain));
-    assert(block_backend->get_shape(block) == expect_shape);
+    if (block_backend->get_shape(block) != expect_shape) {
+        throw std::invalid_argument("from_tree_map: block shape does not match legs");
+    }
     return wrap(std::move(block));
 }
 
@@ -1000,7 +1030,7 @@ NoSymmetryBackend::svd(SymmetricTensorCPtr a,
 py::object
 NoSymmetryBackend::state_tensor_product(BlockBackend::BlockPtr /*state1*/,
                                         BlockBackend::BlockPtr /*state2*/,
-                                        LegPipe::Ptr /*pipe*/)
+                                        Leg::Ptr /*pipe*/)
 {
     // --- hints from Python NoSymmetryBackend.state_tensor_product ---
     // TODO clearly define what this should do in tensors.py first!

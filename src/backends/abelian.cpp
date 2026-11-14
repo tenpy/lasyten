@@ -40,9 +40,28 @@ py_bool_dtype()
 }
 
 [[nodiscard]] std::pair<int64, int64>
-parse_leg_index(std::shared_ptr<LegOrSpace> const& leg, int64 idx)
+parse_leg_index(ElementarySpace::Ptr const& leg, int64 idx)
+{
+    if (!leg) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return leg->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Space::Ptr const& leg, int64 idx)
 {
     auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
+    if (!es) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return es->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Leg const& leg, int64 idx)
+{
+    auto es = leg.as_elementary_space();
     if (!es) {
         throw std::invalid_argument("parse_index requires an ElementarySpace leg");
     }
@@ -516,6 +535,22 @@ AbelianBackend::data_from_tensor(TensorCPtr tensor)
       "AbelianBackend::data_from_tensor: expected SymmetricTensor or Mask");
 }
 
+namespace {
+
+void
+require_matrix_form(SymmetricTensorCPtr a, char const* op)
+{
+    if (a->num_codomain_legs() != 1 || a->num_domain_legs() != 1) {
+        throw std::invalid_argument(
+          std::format("{} requires a single-leg codomain and domain (matrix form); got {}x{}",
+                      op,
+                      a->num_codomain_legs(),
+                      a->num_domain_legs()));
+    }
+}
+
+} // namespace
+
 AbelianBackend::AbelianBackend(std::shared_ptr<BlockBackend> block_backend_)
   : TensorBackend(std::move(block_backend_))
 {
@@ -544,30 +579,29 @@ AbelianBackend::test_tensor_sanity(TensorCPtr a, bool is_diagonal)
     } catch (...) {
         return;
     }
-    assert(a->device == data->device);
-    assert(data->device == block_backend->as_device(data->device));
-    assert(a->dtype == data->dtype);
+    check(a->device == data->device, "test_tensor_sanity: device mismatch");
+    check(data->device == block_backend->as_device(data->device),
+          "test_tensor_sanity: device not normalized by block backend");
+    check(a->dtype == data->dtype, "test_tensor_sanity: dtype mismatch");
     int64 num_legs = a->num_legs;
     for (int64 n = 0; n < num_legs; ++n) {
-        py::object l = py::cast(a).attr("get_leg_co_domain")(n);
-        try {
-            auto pipe = l.cast<LegPipe::Ptr>();
-            if (pipe && !std::dynamic_pointer_cast<AbelianLegPipe>(pipe))
-                throw std::runtime_error("pipes must be AbelianLegPipe");
-        } catch (py::cast_error const&) {
-        }
+        auto leg = a->get_leg_co_domain(n);
+        if (leg && leg.is_pipe() && !leg.is_abelian_leg_pipe())
+            throw std::runtime_error("pipes must be AbelianLegPipe");
     }
     auto const& bi = data->block_inds;
-    assert(bi.nrows() == data->blocks.size());
-    assert(static_cast<int64>(bi.ncols()) == num_legs);
-    assert(bi.all_ge(0));
+    check(bi.nrows() == data->blocks.size(),
+          "test_tensor_sanity: block_inds rows != number of blocks");
+    check(static_cast<int64>(bi.ncols()) == num_legs,
+          "test_tensor_sanity: block_inds cols != num_legs");
+    check(bi.all_ge(0), "test_tensor_sanity: negative block index");
     std::vector<int64> maxes;
     for (auto const& leg : conventional_leg_order(a))
         maxes.push_back(nsec(leg));
-    assert(bi.all_lt_per_column(maxes));
-    assert(bi.is_lexsorted());
+    check(bi.all_lt_per_column(maxes), "test_tensor_sanity: block index out of range");
+    check(bi.is_lexsorted(), "test_tensor_sanity: block_inds not lexsorted");
     if (is_diagonal)
-        assert(bi.columns_equal(0, 1));
+        check(bi.columns_equal(0, 1), "test_tensor_sanity: diagonal block_inds mismatch");
     auto legs = conventional_leg_order(a);
     for (std::size_t i = 0; i < data->blocks.size(); ++i) {
         std::vector<int64> shape;
@@ -604,28 +638,31 @@ AbelianBackend::test_mask_sanity(MaskCPtr a)
     } catch (...) {
         return;
     }
-    assert(a->device == data->device);
-    assert(data->dtype == Dtype::Bool);
+    check(a->device == data->device, "test_mask_sanity: device mismatch");
+    check(data->dtype == Dtype::Bool, "test_mask_sanity: dtype must be bool");
     auto const& bi = data->block_inds;
-    assert(bi.nrows() == data->blocks.size());
-    assert(static_cast<int64>(bi.ncols()) == a->num_legs);
+    check(bi.nrows() == data->blocks.size(),
+          "test_mask_sanity: block_inds rows != number of blocks");
+    check(static_cast<int64>(bi.ncols()) == a->num_legs,
+          "test_mask_sanity: block_inds cols != num_legs");
     bool is_projection = a->is_projection;
     auto large_leg = py::cast(a->large_leg());
     auto small_leg = py::cast(a->small_leg());
     for (std::size_t i = 0; i < data->blocks.size(); ++i) {
         int64 bi_small = is_projection ? bi(i, 0) : bi(i, 1);
         int64 bi_large = is_projection ? bi(i, 1) : bi(i, 0);
-        assert(bi_large >= bi_small);
+        check(bi_large >= bi_small, "test_mask_sanity: inconsistent sector indices");
         int64 expect_len = mults_of(large_leg)[static_cast<std::size_t>(bi_large)];
         int64 expect_sum = mults_of(small_leg)[static_cast<std::size_t>(bi_small)];
         block_backend->test_block_sanity(
           data->blocks[i], std::vector<int64>{ expect_len }, Dtype::Bool, data->device);
-        assert(block_backend->sum_all(data->blocks[i]).as_int64() == expect_sum);
+        check(block_backend->sum_all(data->blocks[i]).as_int64() == expect_sum,
+              "test_mask_sanity: mask block sum mismatch");
     }
 }
 
-LegPipe::Ptr
-AbelianBackend::make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, LegPipe::Ptr pipe)
+Leg::Ptr
+AbelianBackend::make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, Leg::Ptr pipe)
 {
     // --- hints from Python AbelianBackend.make_pipe ---
     // OPTIMIZE rm check
@@ -633,14 +670,19 @@ AbelianBackend::make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, LegPipe::Ptr
     std::vector<ElementarySpace::Ptr> es;
     es.reserve(legs.size());
     for (auto const& l : legs) {
-        auto p = std::dynamic_pointer_cast<ElementarySpace>(l);
+        auto p = l.as_elementary_space();
         if (!p)
             throw std::invalid_argument("make_pipe: legs must be ElementarySpace");
         es.push_back(std::move(p));
     }
-    if (auto ab = std::dynamic_pointer_cast<AbelianLegPipe>(pipe)) {
-        assert(ab->combine_cstyle == !is_dual);
-        assert(ab->is_dual == is_dual);
+    if (auto ab = std::dynamic_pointer_cast<AbelianLegPipe>(pipe.as_elementary_space())) {
+        if (ab->combine_cstyle != !is_dual) {
+            throw std::invalid_argument(
+              "make_pipe: AbelianLegPipe combine_cstyle does not match is_dual");
+        }
+        if (ab->is_dual != is_dual) {
+            throw std::invalid_argument("make_pipe: AbelianLegPipe is_dual does not match");
+        }
         return ab;
     }
     return std::make_shared<AbelianLegPipe>(std::move(es), is_dual, !is_dual);
@@ -889,7 +931,7 @@ AbelianBackend::supports_symmetry(Symmetry::Ptr symmetry)
 py::object
 AbelianBackend::state_tensor_product(BlockBackend::BlockPtr /*state1*/,
                                      BlockBackend::BlockPtr /*state2*/,
-                                     LegPipe::Ptr /*pipe*/)
+                                     Leg::Ptr /*pipe*/)
 {
     // --- hints from Python AbelianBackend.state_tensor_product ---
     // clearly define what this should do in tensors.py first!
@@ -900,11 +942,16 @@ AbelianBackend::state_tensor_product(BlockBackend::BlockPtr /*state1*/,
 BlockBackend::BlockPtr
 AbelianBackend::to_dense_block_trivial_sector(TensorCPtr tensor)
 {
-    assert(tensor->num_legs == 1);
+    if (tensor->num_legs != 1) {
+        throw std::invalid_argument("to_dense_block_trivial_sector requires a 1-leg tensor");
+    }
     auto data = data_from_tensor(tensor);
     auto space = as_space(tensor->codomain->factors[0]);
     auto bi = space->sector_decomposition_where(space->symmetry->trivial_sector);
-    assert(bi.has_value());
+    if (!bi.has_value()) {
+        throw std::invalid_argument(
+          "to_dense_block_trivial_sector: space does not contain the trivial sector");
+    }
     int64 const row_v = *bi;
     auto block = data->get_block(BlockInds::from_row(std::span<const int64>(&row_v, 1)));
     if (!block) {
@@ -962,7 +1009,10 @@ AbelianBackend::leg_pipe_map_incoming_block_inds(AbelianLegPipe const& pipe,
     // calculate indices of _block_ind_map by using the appropriate strides
     // now permute them to indices in _block_ind_map
     // ---
-    assert(static_cast<int64>(incoming_block_inds.ncols()) == pipe.num_legs);
+    if (static_cast<int64>(incoming_block_inds.ncols()) != pipe.num_legs) {
+        throw std::invalid_argument(
+          "leg_pipe_map_incoming_block_inds: ncols does not match pipe.num_legs");
+    }
     // Pack multi-leg sector indices with pipe sector_strides, then apply inverse fusion sort.
     std::vector<int64> strides = pipe.sector_strides;
     auto packed = incoming_block_inds.pack(strides);
@@ -1109,7 +1159,7 @@ AbelianBackend::diagonal_transpose(DiagonalTensorCPtr tens)
 TensorBackend::DataPtr
 AbelianBackend::combine_legs(TensorCPtr tensor,
                              std::vector<std::vector<int64>> leg_idcs_combine,
-                             std::vector<LegPipe::Ptr> pipes,
+                             std::vector<Leg::Ptr> pipes,
                              TensorProduct::Ptr new_codomain,
                              TensorProduct::Ptr new_domain)
 {
@@ -1139,7 +1189,7 @@ AbelianBackend::combine_legs(TensorCPtr tensor,
     // which is sorted and thus preserves lexsort( .T)-ing of res_block_inds
     // ---
     for (auto const& p : pipes) {
-        if (!std::dynamic_pointer_cast<AbelianLegPipe>(p))
+        if (!std::dynamic_pointer_cast<AbelianLegPipe>(p.as_elementary_space()))
             throw std::invalid_argument("abelian backend requires AbelianLegPipe");
     }
     auto t_data = data_from_tensor(tensor);
@@ -1156,7 +1206,7 @@ AbelianBackend::combine_legs(TensorCPtr tensor,
     auto const& t_bi = t_data->block_inds;
     for (std::size_t gi = 0; gi < leg_idcs_combine.size(); ++gi) {
         auto const& group = leg_idcs_combine[gi];
-        auto pipe = std::dynamic_pointer_cast<AbelianLegPipe>(pipes[gi]);
+        auto pipe = std::dynamic_pointer_cast<AbelianLegPipe>(pipes[gi].as_elementary_space());
         int64 num_uncombined = group[0] - j;
         if (num_uncombined > 0) {
             std::vector<std::size_t> src_cols(static_cast<std::size_t>(num_uncombined));
@@ -1227,7 +1277,7 @@ AbelianBackend::combine_legs(TensorCPtr tensor,
     j = 0;
     for (std::size_t gi = 0; gi < leg_idcs_combine.size(); ++gi) {
         auto const& group = leg_idcs_combine[gi];
-        auto pipe = std::dynamic_pointer_cast<AbelianLegPipe>(pipes[gi]);
+        auto pipe = std::dynamic_pointer_cast<AbelianLegPipe>(pipes[gi].as_elementary_space());
         auto const& block_ind_map_rows = map_inds[gi];
         int64 num_uncombined = group[0] - j;
         for (int64 u = 0; u < num_uncombined; ++u) {
@@ -1840,8 +1890,7 @@ AbelianBackend::eigh(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<std
     // representation within that block is the identity matrix.
     // we initialize all blocks to eye and override those where `a` has blocks.
     // ---
-    assert(a->num_codomain_legs() == 1);
-    assert(a->num_domain_legs() == 1);
+    require_matrix_form(a, "eigh");
     auto a_data = data_from_tensor(a);
     auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
     auto new_leg = domain->as_ElementarySpace(new_leg_dual);
@@ -1863,8 +1912,7 @@ AbelianBackend::eigh(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<std
 std::tuple<TensorBackend::DataPtr, TensorBackend::DataPtr, ElementarySpace::Ptr>
 AbelianBackend::eig(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<std::string> sort)
 {
-    assert(a->num_codomain_legs() == 1);
-    assert(a->num_domain_legs() == 1);
+    require_matrix_form(a, "eig");
     auto a_data = data_from_tensor(a);
     auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
     auto new_leg = domain->as_ElementarySpace(new_leg_dual);
@@ -1886,8 +1934,7 @@ AbelianBackend::eig(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<std:
 std::tuple<TensorBackend::DataPtr, ElementarySpace::Ptr>
 AbelianBackend::eigvalsh(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<std::string> sort)
 {
-    assert(a->num_codomain_legs() == 1);
-    assert(a->num_domain_legs() == 1);
+    require_matrix_form(a, "eigvalsh");
     auto a_data = data_from_tensor(a);
     auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
     auto new_leg = domain->as_ElementarySpace(new_leg_dual);
@@ -1904,8 +1951,7 @@ AbelianBackend::eigvalsh(SymmetricTensorCPtr a, bool new_leg_dual, std::optional
 std::tuple<TensorBackend::DataPtr, ElementarySpace::Ptr>
 AbelianBackend::eigvals(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<std::string> sort)
 {
-    assert(a->num_codomain_legs() == 1);
-    assert(a->num_domain_legs() == 1);
+    require_matrix_form(a, "eigvals");
     auto a_data = data_from_tensor(a);
     auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
     auto new_leg = domain->as_ElementarySpace(new_leg_dual);
@@ -1992,7 +2038,10 @@ TensorBackend::DataPtr
 AbelianBackend::from_dense_block_trivial_sector(BlockBackend::BlockPtr block, Space::Ptr leg)
 {
     auto bi = leg->sector_decomposition_where(leg->symmetry->trivial_sector);
-    assert(bi.has_value());
+    if (!bi.has_value()) {
+        throw std::invalid_argument(
+          "from_dense_block_trivial_sector: leg does not contain the trivial sector");
+    }
     auto block_inds = BlockInds::from_row(std::array<int64, 1>{ *bi });
     return wrap(make_data(block_backend->get_dtype(block),
                           block_backend->get_device(block),
@@ -2334,11 +2383,20 @@ AbelianBackend::inv_part_from_dense_block_single_sector(BlockBackend::BlockPtr v
                                                         Space::Ptr space,
                                                         ElementarySpace::Ptr charge_leg)
 {
-    assert(charge_leg->num_sectors == 1);
+    if (charge_leg->num_sectors != 1) {
+        throw std::invalid_argument(
+          "inv_part_from_dense_block_single_sector: charge_leg must have exactly one sector");
+    }
     auto bi = space->sector_decomposition_where(charge_leg->sector_decomposition[0]);
-    assert(bi.has_value());
-    assert(block_backend->get_shape(vector) ==
-           std::vector<int64>{ space->multiplicities[static_cast<std::size_t>(*bi)] });
+    if (!bi.has_value()) {
+        throw std::invalid_argument(
+          "inv_part_from_dense_block_single_sector: space missing charge sector");
+    }
+    auto expect_shape = std::vector<int64>{ space->multiplicities[static_cast<std::size_t>(*bi)] };
+    if (block_backend->get_shape(vector) != expect_shape) {
+        throw std::invalid_argument("inv_part_from_dense_block_single_sector: vector shape does "
+                                    "not match sector multiplicity");
+    }
     auto block_inds = BlockInds::from_row(std::array<int64, 2>{ *bi, 0 });
     return wrap(make_data(block_backend->get_dtype(vector),
                           block_backend->get_device(vector),
@@ -2351,7 +2409,10 @@ BlockBackend::BlockPtr
 AbelianBackend::inv_part_to_dense_block_single_sector(SymmetricTensorCPtr tensor)
 {
     auto data = data_from_tensor(tensor);
-    assert(data->blocks.size() <= 1);
+    if (data->blocks.size() > 1) {
+        throw std::invalid_argument(
+          "inv_part_to_dense_block_single_sector: expected at most one block");
+    }
     if (data->blocks.size() == 1) {
         return b_get(data->blocks[0],
                      py::make_tuple(py::slice(std::nullopt, std::nullopt, std::nullopt), 0));
@@ -2435,8 +2496,7 @@ AbelianBackend::lq(SymmetricTensorCPtr tensor, TensorProduct::Ptr new_co_domain)
     // => L_block == 0 and we dont even set it.
     // can choose arbitrary blocks for q, as long as they are isometric
     // ---
-    assert(tensor->num_codomain_legs() == 1);
-    assert(tensor->num_domain_legs() == 1);
+    require_matrix_form(tensor, "lq");
     auto a_data = data_from_tensor(tensor);
     py::object new_leg = py::cast(new_co_domain->factors[0]);
     auto cod0 = py::cast(tensor->codomain).attr("__getitem__")(0);
@@ -2604,10 +2664,18 @@ AbelianBackend::_mask_contract(TensorCPtr tensor, MaskCPtr mask, int64 leg_idx, 
     leg_idx = std::get<2>(parsed);
     int64 mask_contr;
     if (in_domain) {
-        assert(mask->is_projection != large_leg);
+        if (mask->is_projection == large_leg) {
+            throw std::invalid_argument(
+              "_mask_contract: domain leg requires inclusion mask when large_leg is set, "
+              "or projection mask when large_leg is unset");
+        }
         mask_contr = 0;
     } else {
-        assert(mask->is_projection == large_leg);
+        if (mask->is_projection != large_leg) {
+            throw std::invalid_argument(
+              "_mask_contract: codomain leg requires projection mask when large_leg is set, "
+              "or inclusion mask when large_leg is unset");
+        }
         mask_contr = 1;
     }
     auto t_data = data_from_tensor(tensor);
@@ -2675,15 +2743,13 @@ AbelianBackend::_mask_contract(TensorCPtr tensor, MaskCPtr mask, int64 leg_idx, 
         codomain = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
         auto spaces = tensor->domain->factors;
         spaces[static_cast<std::size_t>(co_domain_idx)] =
-          large_leg ? std::static_pointer_cast<Leg>(mask->small_leg())
-                    : std::static_pointer_cast<Leg>(mask->large_leg());
+          large_leg ? Leg{ mask->small_leg() } : Leg{ mask->large_leg() };
         domain = std::make_shared<TensorProduct>(std::move(spaces), tensor->symmetry);
     } else {
         domain = tensor->domain;
         auto spaces = tensor->codomain->factors;
         spaces[static_cast<std::size_t>(co_domain_idx)] =
-          large_leg ? std::static_pointer_cast<Leg>(mask->small_leg())
-                    : std::static_pointer_cast<Leg>(mask->large_leg());
+          large_leg ? Leg{ mask->small_leg() } : Leg{ mask->large_leg() };
         codomain = std::make_shared<TensorProduct>(std::move(spaces), tensor->symmetry);
     }
     return { wrap(data), codomain, domain };
@@ -3188,8 +3254,7 @@ AbelianBackend::qr(SymmetricTensorCPtr a, TensorProduct::Ptr new_co_domain)
     // --- hints from Python AbelianBackend.qr ---
     // => R_block == 0 and we dont even set it.
     // ---
-    assert(a->num_codomain_legs() == 1);
-    assert(a->num_domain_legs() == 1);
+    require_matrix_form(a, "qr");
     auto a_data = data_from_tensor(a);
     py::object new_leg = py::cast(new_co_domain->factors[0]);
     auto cod0 = py::cast(a->codomain).attr("__getitem__")(0);
@@ -3571,8 +3636,7 @@ AbelianBackend::svd(SymmetricTensorCPtr a,
     // thus the block_inds are np.lexsort( .T)-ed if the sector_order of
     // the corresponding leg is sorted
     // ---
-    assert(a->num_codomain_legs() == 1);
-    assert(a->num_domain_legs() == 1);
+    require_matrix_form(a, "svd");
     auto a_data = data_from_tensor(a);
     py::object new_leg = py::cast(new_co_domain->factors[0]);
     auto cod0 = py::cast(a->codomain).attr("__getitem__")(0);

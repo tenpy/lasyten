@@ -23,30 +23,44 @@ namespace lasyten {
 
 namespace {
 
-Space::Ptr
-as_space_leg(Space::Ptr leg)
+ElementarySpace::Ptr
+as_elementary_leg(Space::Ptr leg)
 {
     if (!leg) {
         throw std::invalid_argument("Must specify the leg.");
     }
-    if (std::dynamic_pointer_cast<LegPipe>(leg)) {
+    auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
+    if (!es) {
+        throw std::invalid_argument("DiagonalTensor requires an ElementarySpace leg.");
+    }
+    if (es->is_pipe()) {
         throw std::invalid_argument("DiagonalTensor is not defined on LegPipes.");
     }
-    return leg;
+    return es;
+}
+
+Space::Ptr
+as_space_leg(Space::Ptr leg)
+{
+    return as_elementary_leg(std::move(leg));
+}
+
+[[nodiscard]] Leg
+leg_from_space(Space::Ptr const& leg)
+{
+    return Leg{ as_elementary_leg(leg) };
 }
 
 TensorProduct::Ptr
 product_of_leg(Space::Ptr const& leg)
 {
-    auto sp = as_space_leg(leg);
-    return std::make_shared<TensorProduct>(
-      std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(sp) });
+    return std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ leg_from_space(leg) });
 }
 
 BlockBackend::LegCPtr
 as_leg_cptr(Space::Ptr const& leg)
 {
-    return std::dynamic_pointer_cast<Leg const>(as_space_leg(leg));
+    return leg_from_space(leg);
 }
 
 } // namespace
@@ -57,20 +71,18 @@ DiagonalTensor::DiagonalTensor(TensorBackend::DataPtr data_in,
                                Space::Ptr leg_in,
                                TensorBackend::Ptr backend_in,
                                Symmetry::Ptr symmetry_in,
-                               OptionalLabels labels_in)
+                               LegLabelList labels_in)
   : SymmetricTensor(std::move(data_in),
-                    std::make_shared<TensorProduct>(
-                      std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(leg_in) }),
-                    std::make_shared<TensorProduct>(
-                      std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(leg_in) }),
+                    std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
+                      Leg{ std::dynamic_pointer_cast<ElementarySpace>(leg_in) } }),
+                    std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
+                      Leg{ std::dynamic_pointer_cast<ElementarySpace>(leg_in) } }),
                     std::move(backend_in),
                     std::move(symmetry_in),
                     std::move(labels_in),
                     /*check_complex_dtype=*/false)
 {
-    if (std::dynamic_pointer_cast<LegPipe>(leg_in)) {
-        throw std::invalid_argument("DiagonalTensor is not defined on LegPipes.");
-    }
+    as_elementary_leg(leg_in);
 }
 
 std::vector<Dtype> const&
@@ -83,8 +95,9 @@ void
 DiagonalTensor::test_sanity() const
 {
     SymmetricTensor::test_sanity();
-    assert(domain->operator==(*codomain));
-    assert(domain->num_factors == 1);
+    check(domain->operator==(*codomain),
+          "DiagonalTensor::test_sanity: domain must equal codomain");
+    check(domain->num_factors == 1, "DiagonalTensor::test_sanity: expected a single factor");
 }
 
 void
@@ -118,7 +131,7 @@ DiagonalTensor::Ptr
 DiagonalTensor::from_block_func(BlockFactoryFn func,
                                 Space::Ptr leg,
                                 TensorBackend::Ptr backend,
-                                std::optional<OptionalLabels> labels,
+                                std::optional<LegLabelList> labels,
                                 std::optional<Dtype> dtype,
                                 std::optional<std::string> device)
 {
@@ -153,7 +166,7 @@ DiagonalTensor::Ptr
 DiagonalTensor::from_dense_block(BlockBackend::BlockPtr block,
                                  Space::Ptr leg,
                                  TensorBackend::Ptr backend,
-                                 std::optional<OptionalLabels> labels,
+                                 std::optional<LegLabelList> labels,
                                  std::optional<Dtype> dtype,
                                  float64 tol,
                                  std::optional<std::string> device,
@@ -184,7 +197,7 @@ DiagonalTensor::Ptr
 DiagonalTensor::from_diag_block(BlockBackend::BlockPtr diag,
                                 Space::Ptr leg,
                                 TensorBackend::Ptr backend,
-                                std::optional<OptionalLabels> labels,
+                                std::optional<LegLabelList> labels,
                                 std::optional<Dtype> dtype,
                                 std::optional<std::string> device,
                                 float64 tol)
@@ -209,7 +222,7 @@ DiagonalTensor::from_diag_block(BlockBackend::BlockPtr diag,
 DiagonalTensor::Ptr
 DiagonalTensor::from_eye(Space::Ptr leg,
                          TensorBackend::Ptr backend,
-                         std::optional<OptionalLabels> labels,
+                         std::optional<LegLabelList> labels,
                          Dtype dtype,
                          std::optional<std::string> device)
 {
@@ -233,7 +246,7 @@ DiagonalTensor::from_random_normal(Space::Ptr leg,
                                    TensorCPtr mean,
                                    float64 sigma,
                                    TensorBackend::Ptr backend,
-                                   std::optional<OptionalLabels> labels,
+                                   std::optional<LegLabelList> labels,
                                    Dtype dtype,
                                    std::optional<std::string> device)
 {
@@ -249,7 +262,7 @@ DiagonalTensor::from_random_normal(Space::Ptr leg,
         if (!leg) {
             leg = mean_leg;
         } else {
-            if (!(*mean_leg == *leg)) {
+            if (!(mean_leg == leg)) {
                 throw std::invalid_argument("mean.leg must match the given leg");
             }
         }
@@ -261,7 +274,7 @@ DiagonalTensor::from_random_normal(Space::Ptr leg,
             }
         }
         if (!labels.has_value()) {
-            labels = mean->labels();
+            labels = mean->labels.as_list();
         }
         if (!device.has_value()) {
             device = mean->device;
@@ -296,7 +309,7 @@ DiagonalTensor::from_random_normal(Space::Ptr leg,
                                                 with_zero_mean->leg(),
                                                 backend,
                                                 with_zero_mean->symmetry,
-                                                with_zero_mean->labels());
+                                                with_zero_mean->labels.as_list());
     }
     return with_zero_mean;
 }
@@ -304,7 +317,7 @@ DiagonalTensor::from_random_normal(Space::Ptr leg,
 DiagonalTensor::Ptr
 DiagonalTensor::from_random_uniform(Space::Ptr leg,
                                     TensorBackend::Ptr backend,
-                                    std::optional<OptionalLabels> labels,
+                                    std::optional<LegLabelList> labels,
                                     Dtype dtype,
                                     std::optional<std::string> device)
 {
@@ -327,7 +340,7 @@ DiagonalTensor::Ptr
 DiagonalTensor::from_sector_block_func(SectorBlockFactoryFn func,
                                        Space::Ptr leg,
                                        TensorBackend::Ptr backend,
-                                       std::optional<OptionalLabels> labels,
+                                       std::optional<LegLabelList> labels,
                                        std::optional<Dtype> dtype,
                                        std::optional<std::string> device)
 {
@@ -363,13 +376,13 @@ DiagonalTensor::from_tensor(SymmetricTensorCPtr tens, std::optional<float64> tol
     auto data = tens->backend->diagonal_tensor_from_full_tensor(tens, tol);
     auto leg = as_space(tens->codomain->factors[0]);
     return std::make_shared<DiagonalTensor>(
-      data, leg, tens->backend, tens->symmetry, tens->labels());
+      data, leg, tens->backend, tens->symmetry, tens->labels.as_list());
 }
 
 DiagonalTensor::Ptr
 DiagonalTensor::from_zero(Space::Ptr leg,
                           TensorBackend::Ptr backend,
-                          std::optional<OptionalLabels> labels,
+                          std::optional<LegLabelList> labels,
                           Dtype dtype,
                           std::optional<std::string> device)
 {
@@ -396,7 +409,7 @@ DiagonalTensor::as_dtype(Dtype new_dtype)
         return shared_from_this();
     }
     auto new_data = backend->to_dtype(shared_from_this(), new_dtype);
-    return std::make_shared<DiagonalTensor>(new_data, leg(), backend, symmetry, labels());
+    return std::make_shared<DiagonalTensor>(new_data, leg(), backend, symmetry, labels.as_list());
 }
 
 SymmetricTensorPtr
@@ -408,7 +421,7 @@ DiagonalTensor::as_SymmetricTensor(bool /*guarantee_copy*/, std::optional<std::s
     auto new_data = backend->full_data_from_diagonal_tensor(
       std::static_pointer_cast<DiagonalTensor const>(shared_from_this()));
     return std::make_shared<SymmetricTensor>(
-      new_data, codomain, domain, backend, symmetry, labels());
+      new_data, codomain, domain, backend, symmetry, labels.as_list());
 }
 
 DiagonalTensor::Ptr
@@ -443,7 +456,7 @@ DiagonalTensor::_binary_operand(BlockBackend::Scalar other,
           },
           /*maps_zero_to_zero=*/false);
     }
-    return std::make_shared<DiagonalTensor>(new_data, leg(), backend, symmetry, labels());
+    return std::make_shared<DiagonalTensor>(new_data, leg(), backend, symmetry, labels.as_list());
 }
 
 DiagonalTensor::Ptr
@@ -474,7 +487,7 @@ DiagonalTensor::_binary_operand(DiagonalTensorCPtr other,
           func,
           /*partial_zero_is_zero=*/false);
     }
-    auto out_labels = _get_matching_labels(labels(), other->labels());
+    auto out_labels = _get_matching_labels(labels.as_list(), other->labels.as_list());
     return std::make_shared<DiagonalTensor>(new_data, leg(), same, symmetry, out_labels);
 }
 
@@ -495,7 +508,7 @@ DiagonalTensor::copy(bool deep,
     } else {
         new_data = data;
     }
-    return std::make_shared<DiagonalTensor>(new_data, leg(), backend, symmetry, labels());
+    return std::make_shared<DiagonalTensor>(new_data, leg(), backend, symmetry, labels.as_list());
 }
 
 DiagonalTensorPtr
@@ -543,7 +556,7 @@ DiagonalTensor::elementwise_almost_equal(DiagonalTensorCPtr other, float64 rtol,
     if (auto id = std::dynamic_pointer_cast<Identity const>(other)) {
         other = std::const_pointer_cast<Identity>(id)->as_DiagonalTensor();
     }
-    auto ones = from_eye(leg(), backend, labels(), dtype::to_real(dtype), device);
+    auto ones = from_eye(leg(), backend, labels.as_list(), dtype::to_real(dtype), device);
     auto self_m = std::static_pointer_cast<DiagonalTensor>(shared_from_this());
     BlockBinaryFn sub = [](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
         return (*a) - (*b);
@@ -584,7 +597,7 @@ DiagonalTensor::_elementwise_binary(DiagonalTensorCPtr other,
       other,
       std::move(func),
       partial_zero_is_zero);
-    auto labs = _get_matching_labels(labels(), other->labels());
+    auto labs = _get_matching_labels(labels.as_list(), other->labels.as_list());
     return std::make_shared<DiagonalTensor>(data_out, leg(), same, symmetry, labs);
 }
 
@@ -595,7 +608,7 @@ DiagonalTensor::_elementwise_unary(BlockUnaryFn func, bool maps_zero_to_zero)
       std::static_pointer_cast<DiagonalTensor const>(shared_from_this()),
       std::move(func),
       maps_zero_to_zero);
-    return std::make_shared<DiagonalTensor>(data_out, leg(), backend, symmetry, labels());
+    return std::make_shared<DiagonalTensor>(data_out, leg(), backend, symmetry, labels.as_list());
 }
 
 BlockBackend::Scalar
@@ -751,7 +764,7 @@ DiagonalTensor::sector_argmin(std::optional<Sector> s) const
     auto selected_sector = sectors[*winning_sector];
     auto selected_local_argmin = winning_local_argmin;
     auto device_s = device;
-    auto mask_labels = labels();
+    auto mask_labels = labels.as_list();
     mask_labels.resize(1);
     mask_labels.push_back(_dual_leg_label(mask_labels[0]));
     auto diagonal = from_sector_block_func(
@@ -883,7 +896,8 @@ DiagonalTensor::to_backend(TensorBackend::Ptr new_backend,
           new_backend->block_backend->as_block(py::cast(old_diag), dtype_opt, device_s);
         new_data = new_backend->diagonal_from_block(new_diag, codomain, 0.);
     }
-    return std::make_shared<DiagonalTensor>(new_data, leg(), new_backend, symmetry, labels());
+    return std::make_shared<DiagonalTensor>(
+      new_data, leg(), new_backend, symmetry, labels.as_list());
 }
 
 BlockBackend::BlockPtr
@@ -906,7 +920,7 @@ DiagonalTensor::to_dense_block(
     auto diag = diagonal_as_block(dtype_opt);
     auto res = backend->block_backend->block_from_diagonal(diag);
     if (leg_order.has_value()) {
-        res = backend->block_backend->permute_axes(res, get_leg_idcs(*leg_order));
+        res = backend->block_backend->permute_axes(res, labels.indices(*leg_order));
     }
     return res;
 }
@@ -936,10 +950,10 @@ DiagonalTensor::from_hdf5(lasyten::hdf5::Loader& loader,
         H5Idec_ref(id);
     }
     auto dt = hdf5_export::load_dtype_string(loader, subpath + "dtype");
-    auto labels = hdf5_export::load_optional_labels(loader, subpath + "labels");
+    auto labels = hdf5_export::load_leg_labels(loader, subpath + "labels");
     int64 nlegs = codomain->num_factors + domain->num_factors;
     if (labels.empty() && nlegs > 0) {
-        labels.assign(static_cast<std::size_t>(nlegs), std::nullopt);
+        labels.assign(static_cast<std::size_t>(nlegs), "");
     }
 
     auto obj = std::make_shared<DiagonalTensor>(
@@ -972,14 +986,14 @@ Identity::unsupported_factory(char const* name)
 Identity::Identity(Space::Ptr leg_in,
                    TensorBackend::Ptr backend_in,
                    Symmetry::Ptr symmetry_in,
-                   OptionalLabels labels_in,
+                   LegLabelList labels_in,
                    Dtype dtype_in,
                    std::string device_in)
   : DiagonalTensor(
       // Do not std::move(leg_in)/backend_in in this mem-initializer list: argument
       // evaluation order is unspecified, and eye_data still needs both.
-      backend_in->eye_data(std::make_shared<TensorProduct>(
-                             std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(leg_in) }),
+      backend_in->eye_data(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
+                             Leg{ std::dynamic_pointer_cast<ElementarySpace>(leg_in) } }),
                            dtype_in,
                            device_in),
       leg_in,
@@ -1005,7 +1019,7 @@ Identity::class_name() const
 Identity::Ptr
 Identity::from_eye(Space::Ptr leg,
                    TensorBackend::Ptr backend,
-                   std::optional<OptionalLabels> labels,
+                   std::optional<LegLabelList> labels,
                    Dtype dtype,
                    std::optional<std::string> device)
 {
@@ -1040,9 +1054,9 @@ Identity::from_hdf5(lasyten::hdf5::Loader& loader,
     auto device = loader.load_string(device_id);
     H5Idec_ref(device_id);
     auto dt = hdf5_export::load_dtype_string(loader, subpath + "dtype");
-    auto labels = hdf5_export::load_optional_labels(loader, subpath + "labels");
+    auto labels = hdf5_export::load_leg_labels(loader, subpath + "labels");
     if (labels.empty()) {
-        labels.assign(2, std::nullopt);
+        labels.assign(2, "");
     }
 
     if (dynamic_cast<TorchBlockBackend*>(backend->block_backend.get()) != nullptr) {
@@ -1064,7 +1078,8 @@ Identity::as_dtype(Dtype new_dtype)
     if (new_dtype == dtype) {
         return shared_from_this();
     }
-    return std::make_shared<Identity>(leg(), backend, symmetry, labels(), new_dtype, device);
+    return std::make_shared<Identity>(
+      leg(), backend, symmetry, labels.as_list(), new_dtype, device);
 }
 
 SymmetricTensorPtr
@@ -1073,7 +1088,7 @@ Identity::as_SymmetricTensor(bool /*guarantee_copy*/, std::optional<std::string>
     if (warning.has_value()) {
         warn(*warning);
     }
-    return SymmetricTensor::from_eye(codomain, backend, labels(), dtype, device);
+    return SymmetricTensor::from_eye(codomain, backend, labels.as_list(), dtype, device);
 }
 
 DiagonalTensor::Ptr
@@ -1082,7 +1097,7 @@ Identity::as_DiagonalTensor(bool /*guarantee_copy*/, std::optional<std::string> 
     if (warning.has_value()) {
         warn(*warning);
     }
-    return DiagonalTensor::from_eye(leg(), backend, labels(), dtype, device);
+    return DiagonalTensor::from_eye(leg(), backend, labels.as_list(), dtype, device);
 }
 
 DiagonalTensor::Ptr
@@ -1244,7 +1259,8 @@ Identity::to_backend(TensorBackend::Ptr new_backend,
     Dtype dt = dtype_opt.value_or(dtype);
     auto device_s = new_backend->block_backend->as_device(
       device_opt.has_value() ? device_opt : std::optional<std::string>{ device });
-    return std::make_shared<Identity>(leg(), new_backend, symmetry, labels(), dt, device_s);
+    return std::make_shared<Identity>(
+      leg(), new_backend, symmetry, labels.as_list(), dt, device_s);
 }
 
 BlockBackend::BlockPtr

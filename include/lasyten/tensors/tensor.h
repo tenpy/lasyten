@@ -60,8 +60,7 @@ namespace lasyten {
 /// shape: tuple of int
 ///     The dimension of each of the `legs`.
 class Tensor
-  : public LabelledLegs
-  , public VectorLike
+  : public VectorLike
   , public std::enable_shared_from_this<Tensor>
 {
   public:
@@ -73,6 +72,11 @@ class Tensor
 
     /// Subclass-overridable forbidden dtypes (e.g. DiagonalTensor allows bool).
     [[nodiscard]] virtual std::vector<Dtype> const& forbidden_dtypes() const;
+
+    /// Leg labels (composition; empty string = unset).
+    LegLabels labels;
+    /// Number of legs (== `labels.size()`). Kept in sync with `labels`.
+    int64 num_legs = 0;
 
     TensorProduct::Ptr codomain;
     TensorProduct::Ptr domain;
@@ -88,7 +92,7 @@ class Tensor
            TensorProduct::Ptr domain,
            TensorBackend::Ptr backend,
            Symmetry::Ptr symmetry,
-           OptionalLabels labels,
+           LegLabelList labels,
            Dtype dtype,
            std::string device);
 
@@ -99,7 +103,7 @@ class Tensor
         TensorProduct::Ptr domain;
         TensorBackend::Ptr backend;
         Symmetry::Ptr symmetry;
-        OptionalLabels labels;
+        LegLabelList labels;
     };
     Tensor(InitParsed init, Dtype dtype, std::string device);
 
@@ -128,13 +132,13 @@ class Tensor
     /// Also supports a special case for input formats of endomorphisms (maps where domain
     /// and codomain coincide), where a flat list of labels for the codomain can be given,
     /// and the domain labels are auto-filled with the respective dual labels.
-    static OptionalLabels _init_parse_labels(std::optional<OptionalLabels> labels,
-                                             TensorProduct::Ptr const& codomain,
-                                             TensorProduct::Ptr const& domain,
-                                             bool is_endomorphism = false);
+    static LegLabelList _init_parse_labels(std::optional<LegLabelList> labels,
+                                           TensorProduct::Ptr const& codomain,
+                                           TensorProduct::Ptr const& domain,
+                                           bool is_endomorphism = false);
 
     /// Perform sanity checks.
-    void test_sanity() const override;
+    virtual void test_sanity() const;
 
     /// An ascii representation of the tensor.
     ///
@@ -213,7 +217,7 @@ class Tensor
       bool understood_braiding = false) = 0;
 
     /// The labels that refer to legs in the codomain.
-    [[nodiscard]] OptionalLabels codomain_labels() const;
+    [[nodiscard]] LegLabelList codomain_labels() const;
 
     /// The hermitian conjugate tensor, a.k.a the dagger of a tensor.
     ///
@@ -246,7 +250,7 @@ class Tensor
     [[nodiscard]] virtual Ptr dagger() const;
 
     /// The labels that refer to legs in the domain.
-    [[nodiscard]] OptionalLabels domain_labels() const;
+    [[nodiscard]] LegLabelList domain_labels() const;
 
     /// If any of the legs is a pipe
     [[nodiscard]] bool has_pipes() const;
@@ -343,9 +347,6 @@ class Tensor
     [[nodiscard]] std::vector<Leg::Ptr> get_leg_co_domain(
       std::vector<std::variant<int64, std::string>> const& which_legs) const;
 
-    /// Set the given labels, in-place. Return the modified instance.
-    Tensor& set_labels(OptionalLabels labels) override;
-
     /// Convert to a numpy array.
     [[nodiscard]] py::array to_numpy(
       std::optional<std::vector<std::variant<int64, std::string>>> leg_order = std::nullopt,
@@ -384,10 +385,10 @@ std::tuple<TensorProduct::Ptr, TensorProduct::Ptr, TensorBackend::Ptr, Symmetry:
 parse_tensor_init_args(py::object codomain, py::object domain, TensorBackend::Ptr backend);
 
 /// Python-flexible label parsing (``None``, nested lists, endomorphism shorthand).
-OptionalLabels parse_tensor_init_labels(py::object labels,
-                                        TensorProduct::Ptr const& codomain,
-                                        TensorProduct::Ptr const& domain,
-                                        bool is_endomorphism = false);
+LegLabelList parse_tensor_init_labels(py::object labels,
+                                      TensorProduct::Ptr const& codomain,
+                                      TensorProduct::Ptr const& domain,
+                                      bool is_endomorphism = false);
 
 /// Parse (co)domain, backend, and labels together for py-object subclass constructors.
 Tensor::InitParsed parse_tensor_init(py::object codomain,

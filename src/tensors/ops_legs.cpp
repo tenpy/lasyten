@@ -68,7 +68,7 @@ make_symmetric_native(TensorBackend::DataPtr data,
                       TensorProduct::Ptr codomain,
                       TensorProduct::Ptr domain,
                       TensorBackend::Ptr backend,
-                      OptionalLabels labels)
+                      LegLabelList labels)
 {
     return std::make_shared<SymmetricTensor>(std::move(data),
                                              std::move(codomain),
@@ -114,11 +114,52 @@ contains_int(std::vector<int64> const& v, int64 x)
     return std::find(v.begin(), v.end(), x) != v.end();
 }
 
+/// One-level factors of a pipe (`LegPipe` or `AbelianLegPipe`).
+[[nodiscard]] std::vector<Leg::Ptr>
+pipe_legs(Leg::Ptr const& pipe)
+{
+    if (auto alp = std::dynamic_pointer_cast<AbelianLegPipe>(pipe.as_elementary_space())) {
+        std::vector<Leg::Ptr> out;
+        out.reserve(alp->legs.size());
+        for (auto const& leg : alp->legs) {
+            out.push_back(Leg{ leg });
+        }
+        return out;
+    }
+    if (auto lp = pipe.as_leg_pipe()) {
+        return lp->legs;
+    }
+    throw std::invalid_argument("expected a pipe (LegPipe or AbelianLegPipe)");
+}
+
+[[nodiscard]] int64
+pipe_num_legs(Leg::Ptr const& pipe)
+{
+    if (auto alp = std::dynamic_pointer_cast<AbelianLegPipe>(pipe.as_elementary_space())) {
+        return alp->num_legs;
+    }
+    if (auto lp = pipe.as_leg_pipe()) {
+        return lp->num_legs;
+    }
+    throw std::invalid_argument("expected a pipe (LegPipe or AbelianLegPipe)");
+}
+
+[[nodiscard]] ElementarySpace::Ptr
+strip_abelian_leg_pipe(AbelianLegPipe::Ptr const& alp)
+{
+    std::optional<std::vector<int64>> bperm;
+    if (alp->has_custom_basis_perm()) {
+        bperm = alp->basis_perm();
+    }
+    return std::make_shared<ElementarySpace>(
+      alp->symmetry, alp->defining_sectors, alp->multiplicities, alp->is_dual, std::move(bperm));
+}
+
 [[nodiscard]] std::vector<int64>
 resolve_leg_refs(TensorCPtr const& tensor, std::vector<LegRef> const& refs)
 {
     std::vector<std::variant<int64, std::string>> keys(refs.begin(), refs.end());
-    return tensor->get_leg_idcs(keys);
+    return tensor->labels.indices(keys);
 }
 
 [[nodiscard]] std::vector<int64>
@@ -140,12 +181,12 @@ make_tensor_product(std::vector<Leg::Ptr> factors,
       std::move(factors), std::move(symmetry), std::move(sectors), std::move(mults));
 }
 
-[[nodiscard]] OptionalLabels
-flat_labels(OptionalLabels const& codomain_labels, OptionalLabels const& domain_labels)
+[[nodiscard]] LegLabelList
+flat_labels(LegLabelList const& codomain_labels, LegLabelList const& domain_labels)
 {
     // Flat leg labels are ``codomain_labels + reversed(domain_labels)``, matching
     // ``parse_tensor_init_labels`` / ``nested_flat_labels`` and Python SymmetricTensor init.
-    OptionalLabels out = codomain_labels;
+    LegLabelList out = codomain_labels;
     out.insert(out.end(), domain_labels.rbegin(), domain_labels.rend());
     return out;
 }
@@ -211,16 +252,16 @@ normalize_pipe_dualities(std::optional<PipeDualities> const& pipe_dualities, std
 }
 
 [[nodiscard]] std::string
-format_optional_labels(OptionalLabels const& labs)
+format_optional_labels(LegLabelList const& labs)
 {
     std::string out = "[";
     for (std::size_t i = 0; i < labs.size(); ++i) {
         if (i > 0) {
             out += ", ";
         }
-        if (labs[i]) {
+        if (!labs[i].empty()) {
             out += '\'';
-            out += *labs[i];
+            out += labs[i];
             out += '\'';
         } else {
             out += "None";
@@ -289,18 +330,16 @@ check_same_legs(TensorCPtr t1, TensorCPtr t2)
         throw std::invalid_argument("Incompatible symmetries");
     }
     bool incompatible_labels = false;
-    OptionalLabels const labels1 = t1->labels();
-    auto const& labelmap2 = t2->labelmap();
+    LegLabelList const labels1 = t1->labels.as_list();
     for (std::size_t n = 0; n < labels1.size(); ++n) {
-        if (!labels1[n]) {
+        if (labels1[n].empty()) {
             // either l1 is None or l1 not in l2.labels
             continue;
         }
-        auto it = labelmap2.find(*labels1[n]);
-        if (it == labelmap2.end()) {
+        if (!t2->labels.has(labels1[n])) {
             continue;
         }
-        if (it->second != static_cast<int64>(n)) {
+        if (t2->labels.index(labels1[n]) != static_cast<int64>(n)) {
             incompatible_labels = true;
             break;
         }
@@ -314,8 +353,8 @@ check_same_legs(TensorCPtr t1, TensorCPtr t2)
         std::string msg = "Incompatible legs. ";
         if (incompatible_labels) {
             msg += std::format("Should you permute_legs first? t1.labels={}  t2.labels={}",
-                               format_optional_labels(t1->labels()),
-                               format_optional_labels(t2->labels()));
+                               format_optional_labels(t1->labels.as_list()),
+                               format_optional_labels(t2->labels.as_list()));
         }
         throw std::invalid_argument(msg);
     }
@@ -382,7 +421,7 @@ permute_legs(TensorCPtr tensor,
         }
         if (!missing.empty()) {
             if (as_Hidden(tensor)) {
-                auto labs = tensor->labels();
+                auto labs = tensor->labels.as_list();
                 std::vector<int64> public_missing;
                 for (auto m : missing) {
                     if (HiddenLegTensor::is_hidden_leg_label(labs[static_cast<std::size_t>(m)])) {
@@ -529,7 +568,7 @@ permute_legs(TensorCPtr tensor,
     }
 
     if (as_Hidden(tensor)) {
-        auto labs = tensor->labels();
+        auto labs = tensor->labels.as_list();
         int64 min_public = 0;
         bool any_public_level = false;
         for (int64 i = 0; i < num_legs; ++i) {
@@ -587,9 +626,9 @@ permute_legs(TensorCPtr tensor,
                                       levels_v,
                                       bend_right_v);
 
-    OptionalLabels all_labels = tensor->labels();
-    OptionalLabels cod_labels;
-    OptionalLabels dom_labels;
+    LegLabelList all_labels = tensor->labels.as_list();
+    LegLabelList cod_labels;
+    LegLabelList dom_labels;
     for (auto n : codomain_v) {
         cod_labels.push_back(all_labels[static_cast<std::size_t>(n)]);
     }
@@ -714,7 +753,7 @@ combine_legs(TensorCPtr tensor,
     }
 
     if (as_Hidden(tensor)) {
-        auto labs = tensor->labels();
+        auto labs = tensor->labels.as_list();
         for (auto const& group : which_legs_v) {
             for (auto idx : group) {
                 if (HiddenLegTensor::is_hidden_leg_label(labs[static_cast<std::size_t>(idx)])) {
@@ -809,12 +848,12 @@ combine_legs(TensorCPtr tensor,
 
     auto backend = tensor->backend;
     std::vector<Leg::Ptr> codomain_spaces;
-    std::vector<OptionalLabel> codomain_labels;
-    std::vector<OptionalLabel> domain_labels_reversed;
+    std::vector<std::string> codomain_labels;
+    std::vector<std::string> domain_labels_reversed;
     std::vector<Leg::Ptr> domain_spaces_reversed;
     std::size_t i = 0;
     int64 label_offset = 0;
-    OptionalLabels all_labels = tensor->labels();
+    LegLabelList all_labels = tensor->labels.as_list();
 
     for (int64 n = 0; n < N; ++n) {
         if (codomain_groups.contains(n)) {
@@ -823,18 +862,17 @@ combine_legs(TensorCPtr tensor,
             for (int64 g = group.front(); g <= group.back(); ++g) {
                 spaces_to_combine.push_back((*tensor->codomain)[g]);
             }
-            auto pipe_arg = std::dynamic_pointer_cast<LegPipe>(pipes_v[i]);
             auto combined =
-              backend->make_pipe(std::move(spaces_to_combine), pipe_dualities_v[i], pipe_arg);
+              backend->make_pipe(std::move(spaces_to_combine), pipe_dualities_v[i], pipes_v[i]);
             pipes_v[i] = combined;
             codomain_spaces.push_back(combined);
-            OptionalLabels group_labels(all_labels.begin() + group.front(),
-                                        all_labels.begin() + group.back() + 1);
+            LegLabelList group_labels(all_labels.begin() + group.front(),
+                                      all_labels.begin() + group.back() + 1);
             codomain_labels.push_back(_combine_leg_labels(group_labels, label_offset));
             ++i;
             int64 none_count = 0;
             for (auto l : group) {
-                if (!all_labels[static_cast<std::size_t>(l)].has_value()) {
+                if (all_labels[static_cast<std::size_t>(l)].empty()) {
                     ++none_count;
                 }
             }
@@ -847,18 +885,17 @@ combine_legs(TensorCPtr tensor,
             for (int64 g = codomain_idx2; g <= domain_idx1; ++g) {
                 spaces_to_combine.push_back((*tensor->domain)[g]);
             }
-            auto pipe_arg = std::dynamic_pointer_cast<LegPipe>(pipes_v[i]);
             auto combined =
-              backend->make_pipe(std::move(spaces_to_combine), !pipe_dualities_v[i], pipe_arg);
+              backend->make_pipe(std::move(spaces_to_combine), !pipe_dualities_v[i], pipes_v[i]);
             pipes_v[i] = combined;
             domain_spaces_reversed.push_back(combined);
-            OptionalLabels group_labels(all_labels.begin() + group.front(),
-                                        all_labels.begin() + group.back() + 1);
+            LegLabelList group_labels(all_labels.begin() + group.front(),
+                                      all_labels.begin() + group.back() + 1);
             domain_labels_reversed.push_back(_combine_leg_labels(group_labels, label_offset));
             ++i;
             int64 none_count = 0;
             for (auto l : group) {
-                if (!all_labels[static_cast<std::size_t>(l)].has_value()) {
+                if (all_labels[static_cast<std::size_t>(l)].empty()) {
                     ++none_count;
                 }
             }
@@ -879,18 +916,14 @@ combine_legs(TensorCPtr tensor,
     auto domain_tp = make_tensor_product(std::move(domain_spaces), tensor->symmetry);
 
     std::sort(which_legs_v.begin(), which_legs_v.end());
-    std::vector<LegPipe::Ptr> pipes_ptr;
-    pipes_ptr.reserve(which_legs_v.size());
     for (std::size_t k = 0; k < which_legs_v.size(); ++k) {
-        auto pipe = std::dynamic_pointer_cast<LegPipe>(pipes_v[k]);
-        if (!pipe) {
-            throw std::runtime_error("combine_legs: expected LegPipe");
+        if (!pipes_v[k] || !pipes_v[k].is_pipe()) {
+            throw std::runtime_error("combine_legs: expected a pipe (LegPipe or AbelianLegPipe)");
         }
-        pipes_ptr.push_back(std::move(pipe));
     }
-    auto data = backend->combine_legs(tensor, which_legs_v, pipes_ptr, codomain_tp, domain_tp);
+    auto data = backend->combine_legs(tensor, which_legs_v, pipes_v, codomain_tp, domain_tp);
 
-    OptionalLabels res_labels = codomain_labels;
+    LegLabelList res_labels = codomain_labels;
     res_labels.insert(
       res_labels.end(), domain_labels_reversed.begin(), domain_labels_reversed.end());
     auto res = make_symmetric_native(
@@ -949,10 +982,10 @@ split_legs(TensorCPtr tensor, std::optional<std::vector<LegRef>> legs)
     int64 num_legs = tensor->num_legs;
 
     if (!legs.has_value()) {
-        auto labs = tensor->labels();
+        auto labs = tensor->labels.as_list();
         for (int64 n = 0; n < tensor->codomain->num_factors; ++n) {
             auto l = (*tensor->codomain)[n];
-            if (std::dynamic_pointer_cast<LegPipe>(l)) {
+            if (l && l.is_pipe()) {
                 if (!(as_Hidden(tensor) &&
                       HiddenLegTensor::is_hidden_leg_label(labs[static_cast<std::size_t>(n)]))) {
                     codomain_split.push_back(n);
@@ -961,7 +994,7 @@ split_legs(TensorCPtr tensor, std::optional<std::vector<LegRef>> legs)
         }
         for (int64 n = 0; n < tensor->domain->num_factors; ++n) {
             auto l = (*tensor->domain)[n];
-            if (std::dynamic_pointer_cast<LegPipe>(l)) {
+            if (l && l.is_pipe()) {
                 int64 leg_idx = num_legs - 1 - n;
                 if (!(as_Hidden(tensor) && HiddenLegTensor::is_hidden_leg_label(
                                              labs[static_cast<std::size_t>(leg_idx)]))) {
@@ -975,7 +1008,7 @@ split_legs(TensorCPtr tensor, std::optional<std::vector<LegRef>> legs)
         }
     } else {
         if (as_Hidden(tensor)) {
-            auto labs = tensor->labels();
+            auto labs = tensor->labels.as_list();
             auto sorted = resolve_leg_refs(tensor, *legs);
             for (auto idx : sorted) {
                 if (HiddenLegTensor::is_hidden_leg_label(labs[static_cast<std::size_t>(idx)])) {
@@ -995,7 +1028,8 @@ split_legs(TensorCPtr tensor, std::optional<std::vector<LegRef>> legs)
             } else {
                 codomain_split.push_back(co_domain_idx);
             }
-            if (!std::dynamic_pointer_cast<LegPipe>(tensor->get_leg_co_domain(leg_idx))) {
+            auto leg = tensor->get_leg_co_domain(leg_idx);
+            if (!leg || !leg.is_pipe()) {
                 throw std::invalid_argument("Not a LegPipe.");
             }
         }
@@ -1005,8 +1039,7 @@ split_legs(TensorCPtr tensor, std::optional<std::vector<LegRef>> legs)
     for (int64 n = 0; n < tensor->codomain->num_factors; ++n) {
         auto lo = (*tensor->codomain)[n];
         if (contains_int(codomain_split, n)) {
-            auto pipe = std::dynamic_pointer_cast<LegPipe>(lo);
-            for (auto const& sub : pipe->legs) {
+            for (auto const& sub : pipe_legs(lo)) {
                 codomain_spaces.push_back(sub);
             }
         } else {
@@ -1017,8 +1050,7 @@ split_legs(TensorCPtr tensor, std::optional<std::vector<LegRef>> legs)
     for (int64 n = 0; n < tensor->domain->num_factors; ++n) {
         auto lo = (*tensor->domain)[n];
         if (contains_int(domain_split, n)) {
-            auto pipe = std::dynamic_pointer_cast<LegPipe>(lo);
-            for (auto const& sub : pipe->legs) {
+            for (auto const& sub : pipe_legs(lo)) {
                 domain_spaces.push_back(sub);
             }
         } else {
@@ -1035,14 +1067,14 @@ split_legs(TensorCPtr tensor, std::optional<std::vector<LegRef>> legs)
                                          tensor->domain->sector_decomposition,
                                          tensor->domain->multiplicities);
 
-    OptionalLabels all_labels = tensor->labels();
-    OptionalLabels labels;
+    LegLabelList all_labels = tensor->labels.as_list();
+    LegLabelList labels;
     std::unordered_set<int64> leg_idcs_set(leg_idcs.begin(), leg_idcs.end());
     for (int64 idx = 0; idx < static_cast<int64>(all_labels.size()); ++idx) {
         if (leg_idcs_set.contains(idx)) {
-            auto pipe = std::dynamic_pointer_cast<LegPipe>(tensor->get_leg_co_domain(idx));
+            auto pipe = tensor->get_leg_co_domain(idx);
             auto split =
-              _split_leg_label(all_labels[static_cast<std::size_t>(idx)], pipe->num_legs);
+              _split_leg_label(all_labels[static_cast<std::size_t>(idx)], pipe_num_legs(pipe));
             labels.insert(labels.end(), split.begin(), split.end());
         } else {
             labels.push_back(all_labels[static_cast<std::size_t>(idx)]);
@@ -1065,7 +1097,7 @@ squeeze_legs(TensorCPtr tensor, std::optional<std::vector<LegRef>> legs)
     if (!legs.has_value()) {
         int64 n = 0;
         for (auto l : conventional_leg_order(tensor)) {
-            if (l->is_trivial()) {
+            if (l.is_trivial()) {
                 legs_v.push_back(n);
             }
             ++n;
@@ -1073,7 +1105,7 @@ squeeze_legs(TensorCPtr tensor, std::optional<std::vector<LegRef>> legs)
     } else {
         legs_v = resolve_leg_refs(tensor, *legs);
         for (auto n : legs_v) {
-            if (!tensor->get_leg_co_domain(n)->is_trivial()) {
+            if (!tensor->get_leg_co_domain(n).is_trivial()) {
                 throw std::invalid_argument("Can only squeeze trivial legs");
             }
         }
@@ -1131,8 +1163,8 @@ squeeze_legs(TensorCPtr tensor, std::optional<std::vector<LegRef>> legs)
                                          tensor->domain->sector_decomposition,
                                          tensor->domain->multiplicities);
 
-    OptionalLabels all_labels = tensor->labels();
-    OptionalLabels labels;
+    LegLabelList all_labels = tensor->labels.as_list();
+    LegLabelList labels;
     for (auto n : remaining) {
         labels.push_back(all_labels[static_cast<std::size_t>(n)]);
     }
@@ -1146,18 +1178,18 @@ namespace {
 [[nodiscard]] int64
 leg_idx(TensorCPtr const& tensor, LegRef const& which)
 {
-    return std::visit([&](auto const& key) { return tensor->get_leg_idcs(key).at(0); }, which);
+    return std::visit([&](auto const& key) { return tensor->labels.index(key); }, which);
 }
 
 [[nodiscard]] std::string
 unique_temp_label(TensorCPtr const& tensor, std::string base)
 {
-    if (!tensor->has_label(base)) {
+    if (!tensor->labels.has(base)) {
         return base;
     }
     for (int n = 1;; ++n) {
         auto cand = base + std::to_string(n);
-        if (!tensor->has_label(cand)) {
+        if (!tensor->labels.has(cand)) {
             return cand;
         }
     }
@@ -1166,7 +1198,7 @@ unique_temp_label(TensorCPtr const& tensor, std::string base)
 [[nodiscard]] LevelsSpec
 levels_with_hidden(TensorCPtr const& tensor, int64 hidden_idx)
 {
-    auto labs = tensor->labels();
+    auto labs = tensor->labels.as_list();
     LevelsSpec levels(static_cast<std::size_t>(tensor->num_legs), std::optional<int64>{ 0 });
     for (int64 i = 0; i < tensor->num_legs; ++i) {
         if (HiddenLegTensor::is_hidden_leg_label(labs.at(static_cast<std::size_t>(i)))) {
@@ -1360,7 +1392,7 @@ flatten_first_pipe_data_fusion_tree(SymmetricTensor const& tensor,
 /// tensor with codomain ``[flat]`` and domain ``[pipe]``.
 ///
 /// For a non-dual pipe, all blocks of ``U`` are identities, i.e. ``U`` uses the same order of
-/// the states as `flatten_pipe_block_perm`. A dual pipe is ``P.dual_leg()`` for a non-dual pipe
+/// the states as `flatten_pipe_block_perm`. A dual pipe is ``P.dual()`` for a non-dual pipe
 /// ``P``, i.e. the pipe as seen from the other side of a bond. To be consistent with flattening
 /// ``P`` on the other side, we use ``(U_P^dagger)^T``. This bends only the small tensor ``U_P``.
 [[nodiscard]] TensorPtr
@@ -1368,11 +1400,15 @@ flatten_pipe_unitary(LegPipe::Ptr const& pipe, Leg::Ptr const& flat, SymmetricTe
 {
     auto const& symmetry = like.symmetry;
     if (pipe->is_dual) {
-        auto P = std::dynamic_pointer_cast<LegPipe>(pipe->dual_leg());
-        Leg::Ptr flat_P = P->as_ElementarySpace(false);
+        auto dual_leg = pipe->dual();
+        auto P = dual_leg.as_leg_pipe();
+        if (!P) {
+            throw std::logic_error("flatten_pipe_leg: dual of LegPipe must be a LegPipe");
+        }
+        Leg::Ptr flat_P = dual_leg.as_ElementarySpace(false);
         auto U = transpose(dagger(flatten_pipe_unitary(P, flat_P, like)));
         auto U_sym = std::dynamic_pointer_cast<SymmetricTensor>(U);
-        if (!U_sym || !(*U_sym->domain->factors.at(0) == *pipe)) {
+        if (!U_sym || !(U_sym->domain->factors.at(0) == Leg{ pipe })) {
             throw std::logic_error(
               "flatten_pipe_leg: the dual unitary does not match the dual pipe");
         }
@@ -1393,7 +1429,7 @@ flatten_pipe_unitary(LegPipe::Ptr const& pipe, Leg::Ptr const& flat, SymmetricTe
                                              std::move(pipe_prod),
                                              like.backend,
                                              symmetry,
-                                             OptionalLabels{ "?flat", "?pipe" });
+                                             LegLabelList{ "?flat", "?pipe" });
 }
 
 /// `flatten_pipe_leg` for the `FusionTreeBackend` by contracting the pipe at ``legs_idx`` with
@@ -1409,13 +1445,13 @@ flatten_pipe_leg_by_unitary(SymmetricTensorCPtr const& tensor,
 {
     // act on the unhidden tensor, such that the leg indices include hidden legs
     TensorPtr plain = std::const_pointer_cast<SymmetricTensor>(tensor)->as_SymmetricTensor();
-    auto const label = plain->labels().at(static_cast<std::size_t>(legs_idx));
+    auto const label = plain->labels.as_list().at(static_cast<std::size_t>(legs_idx));
     auto U = flatten_pipe_unitary(pipe, flat, *tensor); // [flat] <- [pipe]
     if (in_domain) {
         U = dagger(U); // [pipe] <- [flat]
     }
     // the label of the contracted leg of U replaces the pipe label
-    U->set_labels(in_domain ? OptionalLabels{ "?pipe", label } : OptionalLabels{ label, "?pipe" });
+    U->labels.set(in_domain ? LegLabelList{ "?pipe", label } : LegLabelList{ label, "?pipe" });
     TensorPtr res;
     if (product.num_factors == 1) {
         // partial_compose requires a remaining leg; contract the full (co)domain instead
@@ -1430,7 +1466,7 @@ flatten_pipe_leg_by_unitary(SymmetricTensorCPtr const& tensor,
                                                                          res_sym->domain,
                                                                          res_sym->backend,
                                                                          res_sym->symmetry,
-                                                                         tensor->labels(),
+                                                                         tensor->labels.as_list(),
                                                                          false));
 }
 
@@ -1445,30 +1481,27 @@ flatten_pipe_leg_at(TensorCPtr tensor, int64 legs_idx)
     (void)unused;
     auto product = in_domain ? tensor->domain : tensor->codomain;
     auto factor = product->factors.at(static_cast<std::size_t>(co_idx));
-    auto pipe = std::dynamic_pointer_cast<LegPipe>(factor);
-    if (!pipe) {
+    if (!factor || !factor.is_pipe()) {
         return std::const_pointer_cast<Tensor>(tensor);
     }
     bool const fusion_tree =
       static_cast<bool>(std::dynamic_pointer_cast<FusionTreeBackend const>(tensor->backend));
-    auto es = pipe->as_ElementarySpace(pipe->is_dual);
-    if (std::dynamic_pointer_cast<LegPipe>(es)) {
-        // AbelianLegPipe is both a pipe and an ElementarySpace; drop the pipe
+    ElementarySpace::Ptr es;
+    LegPipe::Ptr plain_pipe;
+    if (factor.is_abelian_leg_pipe()) {
+        // AbelianLegPipe is a pipe composed on ElementarySpace; drop the pipe
         // metadata so the bond is a plain charge-shifted ElementarySpace.
-        std::optional<std::vector<int64>> bperm;
-        if (es->has_custom_basis_perm()) {
-            bperm = es->basis_perm();
-        }
-        auto const& sp = static_cast<Space const&>(*es);
-        auto const& lg = static_cast<Leg const&>(*es);
-        es = std::make_shared<ElementarySpace>(
-          sp.symmetry, es->defining_sectors, sp.multiplicities, lg.is_dual, std::move(bperm));
+        auto alp = std::dynamic_pointer_cast<AbelianLegPipe>(factor.as_elementary_space());
+        es = strip_abelian_leg_pipe(alp);
+    } else {
+        plain_pipe = factor.as_leg_pipe();
+        es = factor.as_ElementarySpace(plain_pipe->is_dual);
     }
-    if (fusion_tree && (co_idx != 0 || pipe->is_dual)) {
+    if (fusion_tree && plain_pipe && (co_idx != 0 || plain_pipe->is_dual)) {
         // The data can only be permuted for a non-dual pipe as the first factor of the
         // (co)domain. Otherwise, contract the pipe with a unitary ``pipe -> flat leg``, which
         // requires only one-sided F-moves (no bending of `tensor`).
-        return flatten_pipe_leg_by_unitary(sym, legs_idx, in_domain, *product, pipe, es);
+        return flatten_pipe_leg_by_unitary(sym, legs_idx, in_domain, *product, plain_pipe, es);
     }
     auto new_factors = product->factors;
     new_factors.at(static_cast<std::size_t>(co_idx)) = es;
@@ -1479,17 +1512,17 @@ flatten_pipe_leg_at(TensorCPtr tensor, int64 legs_idx)
     auto new_cod = in_domain ? tensor->codomain : new_product;
     auto new_dom = in_domain ? new_product : tensor->domain;
     auto data =
-      fusion_tree
-        ? flatten_first_pipe_data_fusion_tree(*sym, in_domain, *product, *new_product, *pipe)
+      fusion_tree && plain_pipe
+        ? flatten_first_pipe_data_fusion_tree(*sym, in_domain, *product, *new_product, *plain_pipe)
         : sym->data;
     auto out = std::make_shared<SymmetricTensor>(std::move(data),
                                                  std::move(new_cod),
                                                  std::move(new_dom),
                                                  tensor->backend,
                                                  tensor->symmetry,
-                                                 tensor->labels(),
+                                                 tensor->labels.as_list(),
                                                  /*check_complex_dtype=*/false);
-    if (HiddenLegTensor::has_hidden_leg_labels(out->labels())) {
+    if (HiddenLegTensor::has_hidden_leg_labels(out->labels.as_list())) {
         return std::make_shared<HiddenLegTensor>(std::move(out));
     }
     return out;
@@ -1505,7 +1538,7 @@ replace_legs_space(TensorPtr tensor, int64 legs_idx, Leg::Ptr new_legs_space)
     auto [in_domain, co_idx, unused] = tensor->_parse_leg_idx(legs_idx);
     (void)unused;
     auto product = in_domain ? tensor->domain : tensor->codomain;
-    Leg::Ptr factor = in_domain ? new_legs_space->dual_leg() : new_legs_space;
+    Leg::Ptr factor = in_domain ? new_legs_space.dual() : new_legs_space;
     auto new_factors = product->factors;
     new_factors.at(static_cast<std::size_t>(co_idx)) = std::move(factor);
     auto new_product = std::make_shared<TensorProduct>(std::move(new_factors),
@@ -1519,9 +1552,9 @@ replace_legs_space(TensorPtr tensor, int64 legs_idx, Leg::Ptr new_legs_space)
                                                  std::move(new_dom),
                                                  tensor->backend,
                                                  tensor->symmetry,
-                                                 tensor->labels(),
+                                                 tensor->labels.as_list(),
                                                  /*check_complex_dtype=*/false);
-    if (HiddenLegTensor::has_hidden_leg_labels(out->labels())) {
+    if (HiddenLegTensor::has_hidden_leg_labels(out->labels.as_list())) {
         return std::make_shared<HiddenLegTensor>(std::move(out));
     }
     return out;
@@ -1532,18 +1565,18 @@ stripped_hidden_labels_except(HiddenLegTensorCPtr const& tensor,
                               std::optional<std::string> const& skip_hidden)
 {
     std::vector<std::string> out;
-    auto labs = tensor->labels();
+    auto labs = tensor->labels.as_list();
     for (auto idx : tensor->hidden_leg_idcs()) {
         auto const& lab = labs.at(static_cast<std::size_t>(idx));
-        if (!lab) {
+        if (lab.empty()) {
             continue;
         }
-        if (skip_hidden && *lab == *skip_hidden) {
+        if (skip_hidden.has_value() && lab == *skip_hidden) {
             continue;
         }
         auto stripped = HiddenLegTensor::strip_hidden_prefix(lab);
-        if (stripped) {
-            out.push_back(*stripped);
+        if (!stripped.empty()) {
+            out.push_back(stripped);
         }
     }
     return out;
@@ -1604,7 +1637,7 @@ move_hidden_leg(HiddenLegTensorCPtr A,
         throw std::invalid_argument(
           "move_hidden_leg: specify exactly one of target_codomain_pos and target_domain_pos.");
     }
-    if (!HiddenLegTensor::is_hidden_leg_label(OptionalLabel{ hidden_leg_label })) {
+    if (!HiddenLegTensor::is_hidden_leg_label(hidden_leg_label)) {
         throw std::invalid_argument(std::format(
           "move_hidden_leg: hidden_leg_label '{}' must be a hidden label (including '!').",
           hidden_leg_label));
@@ -1612,13 +1645,13 @@ move_hidden_leg(HiddenLegTensorCPtr A,
 
     int64 hidden_idx = -1;
     try {
-        hidden_idx = A->get_leg_idcs(hidden_leg_label).at(0);
+        hidden_idx = A->labels.index(hidden_leg_label);
     } catch (std::invalid_argument const&) {
         throw std::invalid_argument(
           std::format("move_hidden_leg: A has no hidden leg '{}'. Labels are not matching.",
                       hidden_leg_label));
     }
-    auto A_labs = A->labels();
+    auto A_labs = A->labels.as_list();
     if (!HiddenLegTensor::is_hidden_leg_label(A_labs.at(static_cast<std::size_t>(hidden_idx)))) {
         throw std::invalid_argument(
           std::format("move_hidden_leg: '{}' is not a hidden leg of A.", hidden_leg_label));
@@ -1629,33 +1662,33 @@ move_hidden_leg(HiddenLegTensorCPtr A,
     if (HiddenLegTensor::is_hidden_leg_label(A_labs.at(static_cast<std::size_t>(axis_A_idx)))) {
         throw std::invalid_argument("move_hidden_leg: axis_A must be a public leg.");
     }
-    auto B_labs = B->labels();
+    auto B_labs = B->labels.as_list();
     if (HiddenLegTensor::is_hidden_leg_label(B_labs.at(static_cast<std::size_t>(axis_B_idx)))) {
         throw std::invalid_argument("move_hidden_leg: axis_B must be a public leg.");
     }
 
     auto a_axis_leg = A->get_leg(axis_A_idx);
     auto b_axis_leg = B->get_leg(axis_B_idx);
-    if (!(*a_axis_leg == *b_axis_leg->dual_leg())) {
+    if (!(a_axis_leg == b_axis_leg.dual())) {
         throw std::invalid_argument(
           "move_hidden_leg: axis_A and axis_B are not contractible (must be duals).");
     }
 
-    if (B->has_label(hidden_leg_label)) {
+    if (B->labels.has(hidden_leg_label)) {
         throw std::invalid_argument(std::format(
           "move_hidden_leg: B already has label '{}'. Relabel one of the hidden legs first.",
           hidden_leg_label));
     }
-    auto dual_hidden = _dual_leg_label(OptionalLabel{ hidden_leg_label });
-    if (dual_hidden && B->has_label(*dual_hidden)) {
+    auto dual_hidden = _dual_leg_label(hidden_leg_label);
+    if (!dual_hidden.empty() && B->labels.has(dual_hidden)) {
         throw std::invalid_argument(std::format(
           "move_hidden_leg: B already has dual hidden label '{}'. Dual hidden pairs on one "
           "tensor are not allowed.",
-          *dual_hidden));
+          dual_hidden));
     }
 
-    auto stripped_h = HiddenLegTensor::strip_hidden_prefix(OptionalLabel{ hidden_leg_label });
-    if (!stripped_h) {
+    auto stripped_h = HiddenLegTensor::strip_hidden_prefix(hidden_leg_label);
+    if (stripped_h.empty()) {
         throw std::invalid_argument("move_hidden_leg: hidden_leg_label has no name after '!'.");
     }
     auto A_other_hidden = stripped_hidden_labels_except(A, hidden_leg_label);
@@ -1681,41 +1714,40 @@ move_hidden_leg(HiddenLegTensorCPtr A,
     }
     B_work = std::dynamic_pointer_cast<SymmetricTensor>(rehide_labels(B_work, B_other_hidden));
 
-    if (!original_axis_A_label) {
+    if (original_axis_A_label.empty()) {
         original_axis_A_label = unique_temp_label(A_work, "_mhl_axisA");
-        A_work->set_label(axis_A_idx, original_axis_A_label);
+        A_work->labels[axis_A_idx] = original_axis_A_label;
     }
-    if (!original_axis_B_label) {
+    if (original_axis_B_label.empty()) {
         original_axis_B_label = unique_temp_label(B_work, "_mhl_axisB");
-        B_work->set_label(axis_B_idx, original_axis_B_label);
+        B_work->labels[axis_B_idx] = original_axis_B_label;
     }
 
     auto h_leg = A->get_leg(hidden_idx);
-    bool const flatten_1d = h_leg->dim == 1.;
+    bool const flatten_1d = h_leg.dim() == 1.;
 
     A_work = std::dynamic_pointer_cast<SymmetricTensor>(move_onto_target_side(
-      A_work, LegRef{ *stripped_h }, LegRef{ *original_axis_A_label }, /*after=*/false));
+      A_work, LegRef{ stripped_h }, LegRef{ original_axis_A_label }, /*after=*/false));
     if (!A_work) {
         throw std::runtime_error(
           "move_hidden_leg: expected SymmetricTensor after moving A's hidden");
     }
-    auto h_idx_A = A_work->get_leg_idcs(*stripped_h).at(0);
+    auto h_idx_A = A_work->labels.index(stripped_h);
     A_work = std::dynamic_pointer_cast<SymmetricTensor>(
       combine_legs(A_work,
                    std::vector<std::vector<LegRef>>{
-                     { LegRef{ *stripped_h }, LegRef{ *original_axis_A_label } } },
+                     { LegRef{ stripped_h }, LegRef{ original_axis_A_label } } },
                    std::nullopt,
                    std::nullopt,
                    levels_with_hidden(A_work, h_idx_A)));
     if (!A_work) {
         throw std::runtime_error("move_hidden_leg: expected SymmetricTensor after combining A");
     }
-    auto pipe_A_label =
-      _combine_leg_labels({ OptionalLabel{ *stripped_h }, original_axis_A_label });
-    int64 pipe_A_idx = A_work->get_leg_idcs(pipe_A_label).at(0);
-    A_work->set_label(pipe_A_idx, original_axis_A_label);
-    auto pipe_A = A_work->get_leg(A_work->get_leg_idcs(*original_axis_A_label).at(0));
-    auto desired_B_legs = pipe_A->dual_leg();
+    auto pipe_A_label = _combine_leg_labels({ stripped_h, original_axis_A_label });
+    int64 pipe_A_idx = A_work->labels.index(pipe_A_label);
+    A_work->labels[pipe_A_idx] = original_axis_A_label;
+    auto pipe_A = A_work->get_leg(A_work->labels.index(original_axis_A_label));
+    auto desired_B_legs = pipe_A.dual();
 
     auto h_space = as_space(h_leg);
     auto open_lab = unique_temp_label(B_work, "_mhl_open");
@@ -1725,14 +1757,14 @@ move_hidden_leg(HiddenLegTensorCPtr A,
     }
     auto I = eye(h_space,
                  A->backend,
-                 OptionalLabels{ OptionalLabel{ open_lab }, OptionalLabel{ int_lab } },
+                 LegLabelList{ open_lab, int_lab },
                  A->dtype,
                  A->device,
                  /*diagonal=*/false);
     auto B_ext = outer(I, B_work);
     B_ext = move_onto_target_side(
-      std::move(B_ext), LegRef{ int_lab }, LegRef{ *original_axis_B_label }, /*after=*/true);
-    auto int_idx = B_ext->get_leg_idcs(int_lab).at(0);
+      std::move(B_ext), LegRef{ int_lab }, LegRef{ original_axis_B_label }, /*after=*/true);
+    auto int_idx = B_ext->labels.index(int_lab);
     auto [b_in_dom, b_co, b_legs] = B_ext->_parse_leg_idx(int_lab);
     (void)b_co;
     (void)b_legs;
@@ -1740,36 +1772,36 @@ move_hidden_leg(HiddenLegTensorCPtr A,
     std::vector<Leg::Ptr> b_pipes{ b_in_dom ? pipe_A : desired_B_legs };
     B_ext = combine_legs(
       B_ext,
-      std::vector<std::vector<LegRef>>{ { LegRef{ *original_axis_B_label }, LegRef{ int_lab } } },
-      PipeDualities{ desired_B_legs->is_dual },
+      std::vector<std::vector<LegRef>>{ { LegRef{ original_axis_B_label }, LegRef{ int_lab } } },
+      PipeDualities{ desired_B_legs.is_dual() },
       b_pipes,
       levels_with_hidden(B_ext, int_idx));
-    auto pipe_B_label = _combine_leg_labels({ original_axis_B_label, OptionalLabel{ int_lab } });
-    int64 pipe_B_idx = B_ext->get_leg_idcs(pipe_B_label).at(0);
-    B_ext->set_label(pipe_B_idx, original_axis_B_label);
+    auto pipe_B_label = _combine_leg_labels({ original_axis_B_label, int_lab });
+    int64 pipe_B_idx = B_ext->labels.index(pipe_B_label);
+    B_ext->labels[pipe_B_idx] = original_axis_B_label;
     if (flatten_1d) {
         A_work = std::dynamic_pointer_cast<SymmetricTensor>(
-          flatten_pipe_leg_at(A_work, A_work->get_leg_idcs(*original_axis_A_label).at(0)));
+          flatten_pipe_leg_at(A_work, A_work->labels.index(original_axis_A_label)));
         if (!A_work) {
             throw std::runtime_error(
               "move_hidden_leg: expected SymmetricTensor after flattening A");
         }
-        auto a_flat = A_work->get_leg(A_work->get_leg_idcs(*original_axis_A_label).at(0));
-        B_ext = replace_legs_space(
-          B_ext, B_ext->get_leg_idcs(*original_axis_B_label).at(0), a_flat->dual_leg());
+        auto a_flat = A_work->get_leg(A_work->labels.index(original_axis_A_label));
+        B_ext =
+          replace_legs_space(B_ext, B_ext->labels.index(original_axis_B_label), a_flat.dual());
     }
     B_ext = move_leg(B_ext,
                      LegRef{ open_lab },
                      target_codomain_pos,
                      target_domain_pos,
-                     levels_with_hidden(B_ext, B_ext->get_leg_idcs(open_lab).at(0)),
+                     levels_with_hidden(B_ext, B_ext->labels.index(open_lab)),
                      BendRight{ true });
-    auto open_idx = B_ext->get_leg_idcs(open_lab).at(0);
-    B_ext->set_label(open_idx, *stripped_h);
+    auto open_idx = B_ext->labels.index(open_lab);
+    B_ext->labels[open_idx] = stripped_h;
 
     auto A_out = rehide_labels(A_work, A_other_hidden);
     std::vector<std::string> B_hide = B_other_hidden;
-    B_hide.insert(B_hide.begin(), *stripped_h);
+    B_hide.insert(B_hide.begin(), stripped_h);
     auto B_out_tensor = rehide_labels(std::move(B_ext), B_hide);
     auto B_out = std::dynamic_pointer_cast<HiddenLegTensor>(B_out_tensor);
     if (!B_out) {
@@ -1783,10 +1815,10 @@ namespace {
 ElementarySpace::Ptr
 as_elementary_leg(Leg::Ptr const& leg_obj)
 {
-    if (std::dynamic_pointer_cast<LegPipe>(leg_obj)) {
+    if (!leg_obj || leg_obj.is_pipe()) {
         throw std::invalid_argument("slice_leg is not supported on LegPipes.");
     }
-    auto es = std::dynamic_pointer_cast<ElementarySpace>(leg_obj);
+    auto es = leg_obj.as_elementary_space();
     if (!es) {
         throw std::invalid_argument("slice_leg requires an ElementarySpace leg.");
     }
@@ -1864,7 +1896,7 @@ slice_leg(TensorCPtr tensor, LegRef leg, Sector const& sector, int64 multiplicit
                           leg,
                           /*codomain_pos=*/std::nullopt,
                           /*domain_pos=*/0);
-    moved->set_label(-1, std::string("slice"));
+    moved->labels[-1] = std::string("slice");
     auto inv = std::dynamic_pointer_cast<SymmetricTensor>(moved);
     if (!inv) {
         inv = moved->as_SymmetricTensor();

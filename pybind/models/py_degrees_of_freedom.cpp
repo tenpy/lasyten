@@ -6,6 +6,7 @@
 
 #include "tools/hdf5_bind.h"
 #include <cmath>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -22,6 +23,16 @@ class PySite
     using Site::Site;
 
     void test_sanity() override { PYBIND11_OVERRIDE(void, Site, test_sanity); }
+};
+
+class PyDegreeOfFreedom
+  : public DegreeOfFreedom
+  , public py::trampoline_self_life_support
+{
+  public:
+    using DegreeOfFreedom::DegreeOfFreedom;
+
+    void test_sanity() override { PYBIND11_OVERRIDE_PURE(void, DegreeOfFreedom, test_sanity); }
 };
 
 class PyOccupationDOF
@@ -41,6 +52,8 @@ class PyOccupationDOF
     {
         PYBIND11_OVERRIDE_PURE(py::array, OccupationDOF, get_creator_numpy, species, include_JW);
     }
+
+    void test_sanity() override { PYBIND11_OVERRIDE(void, OccupationDOF, test_sanity); }
 };
 
 py::object
@@ -52,12 +65,49 @@ dim_to_python(float64 dim)
     return py::float_(dim);
 }
 
+py::dict
+dofs_as_dict(Site const& self)
+{
+    py::dict out;
+    for (auto const& [name, dof] : self.dofs) {
+        out[py::str(name)] = py::cast(dof);
+    }
+    return out;
+}
+
+void
+set_dofs_from_dict(Site& self, py::dict const& mapping)
+{
+    self.dofs.clear();
+    for (auto item : mapping) {
+        auto name = py::cast<std::string>(item.first);
+        self.set_dof(name, py::cast<DegreeOfFreedom::Ptr>(item.second));
+    }
+}
+
+template<class T>
+py::object
+dof_or_none(Site const& self, std::string const& name)
+{
+    auto dof = self.get_dof<T>(name);
+    if (!dof) {
+        return py::none();
+    }
+    return py::cast(dof);
+}
+
 } // namespace
 
 void
 bind_models_degrees_of_freedom(py::module_& m)
 {
     m.attr("ALL_SPECIES") = all_species_sentinel();
+
+    py::class_<DegreeOfFreedom, PyDegreeOfFreedom, py::smart_holder> degree_of_freedom(
+      m, "DegreeOfFreedom");
+    degree_of_freedom.doc() =
+      "Base class for degrees of freedom composed into a Site (not site mixins).";
+    degree_of_freedom.def("test_sanity", &DegreeOfFreedom::test_sanity);
 
     py::class_<Site, PySite, py::smart_holder> site(m, "Site");
     site.doc() = DOC(lasyten, Site);
@@ -67,21 +117,50 @@ bind_models_degrees_of_freedom(py::module_& m)
                     std::map<std::string, int64>,
                     std::map<std::string, SymmetricTensorPtr>,
                     TensorBackend::Ptr,
-                    std::optional<std::string>>(),
+                    std::optional<std::string>,
+                    std::map<std::string, DegreeOfFreedom::Ptr>>(),
            py::arg("leg"),
            py::arg("state_labels") = std::map<std::string, int64>{},
            py::arg("onsite_operators") = std::map<std::string, SymmetricTensorPtr>{},
            py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
+           py::arg("default_device") = py::none(),
+           py::arg("dofs") = std::map<std::string, DegreeOfFreedom::Ptr>{})
       .def_readwrite("leg", &Site::leg)
       .def_readwrite("state_labels", &Site::state_labels)
       .def_readwrite("backend", &Site::backend)
       .def_readwrite("default_device", &Site::default_device)
       .def_readwrite("onsite_operators", &Site::onsite_operators)
       .def_readwrite("hc_ops", &Site::hc_ops)
+      .def_property(
+        "dofs",
+        [](Site const& self) { return dofs_as_dict(self); },
+        [](Site& self, py::dict const& mapping) { set_dofs_from_dict(self, mapping); })
+      .def_property_readonly("spin",
+                             [](Site const& self) { return dof_or_none<SpinDOF>(self, DOF_SPIN); })
+      .def_property_readonly(
+        "occupation",
+        [](Site const& self) { return dof_or_none<OccupationDOF>(self, DOF_OCCUPATION); })
+      .def_property_readonly(
+        "clock", [](Site const& self) { return dof_or_none<ClockDOF>(self, DOF_CLOCK); })
+      .def_property_readonly(
+        "anyon", [](Site const& self) { return dof_or_none<AnyonDOF>(self, DOF_ANYON); })
+      .def("set_dof",
+           &Site::set_dof,
+           py::arg("name"),
+           py::arg("dof"),
+           "Register (or replace) a named degree of freedom.")
       .def("test_sanity", &Site::test_sanity, DOC(lasyten, Site, test_sanity))
       .def_property_readonly("symmetry", &Site::symmetry)
       .def_property_readonly("dim", [](Site const& self) { return dim_to_python(self.dim()); })
+      .def(
+        "change_leg",
+        [](Site& self, ElementarySpace::Ptr new_leg) -> Site& {
+            self.change_leg(std::move(new_leg));
+            return self;
+        },
+        py::arg("new_leg") = ElementarySpace::Ptr{},
+        py::return_value_policy::reference_internal,
+        DOC(lasyten, Site, change_leg))
       .def("add_onsite_operator",
            &Site::add_onsite_operator,
            py::arg("name"),
@@ -135,8 +214,6 @@ bind_models_degrees_of_freedom(py::module_& m)
       .def(
         "save_hdf5",
         [](Site const& self, py::object py_saver, py::object py_h5gr, std::string subpath) {
-            // Use subclass hdf5_init_kwargs (S/conserve for SpinSite, etc.) rather than the
-            // base Site leg/state_labels format, which many site constructors do not accept.
             lasyten::hdf5::PyBridge bridge(py_saver, py::none(), py_h5gr);
             lasyten::hdf5::py_save(subpath + "init_kwargs", self.hdf5_init_kwargs());
         },
@@ -161,24 +238,15 @@ bind_models_degrees_of_freedom(py::module_& m)
       py::arg("subpath"),
       "Reconstruct a Site (or subclass) from HDF5."));
 
-    py::class_<SpinDOF, Site, py::smart_holder> spin_dof(m, "SpinDOF");
+    py::class_<SpinDOF, DegreeOfFreedom, py::smart_holder> spin_dof(m, "SpinDOF");
     spin_dof.doc() = DOC(lasyten, SpinDOF);
 
     spin_dof
-      .def(py::init<ElementarySpace::Ptr,
-                    py::array,
-                    std::map<std::string, int64>,
-                    std::map<std::string, SymmetricTensorPtr>,
-                    TensorBackend::Ptr,
-                    std::optional<std::string>>(),
-           py::arg("leg"),
-           py::arg("spin_vector"),
-           py::arg("state_labels") = std::map<std::string, int64>{},
-           py::arg("onsite_operators") = std::map<std::string, SymmetricTensorPtr>{},
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
+      .def(py::init<ElementarySpace::Ptr, py::array>(), py::arg("leg"), py::arg("spin_vector"))
       .def_readwrite("spin_vector", &SpinDOF::spin_vector)
-      .def("test_sanity", &SpinDOF::test_sanity, DOC(lasyten, SpinDOF, test_sanity))
+      .def("test_sanity",
+           &SpinDOF::test_sanity,
+           doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::SpinDOF::test_sanity()"))
       .def_static("spin_vector_from_Sp",
                   &SpinDOF::spin_vector_from_Sp,
                   py::arg("Sz"),
@@ -190,50 +258,44 @@ bind_models_degrees_of_freedom(py::module_& m)
                   py::arg("use_test_su2") = false,
                   DOC(lasyten, SpinDOF, conservation_law_to_symmetry));
 
-    py::class_<ClockDOF, Site, py::smart_holder> clock_dof(m, "ClockDOF");
+    py::class_<ClockDOF, DegreeOfFreedom, py::smart_holder> clock_dof(m, "ClockDOF");
     clock_dof.doc() = DOC(lasyten, ClockDOF);
 
     clock_dof
-      .def(py::init<ElementarySpace::Ptr,
-                    py::array,
-                    std::map<std::string, int64>,
-                    std::map<std::string, SymmetricTensorPtr>,
-                    TensorBackend::Ptr,
-                    std::optional<std::string>>(),
-           py::arg("leg"),
-           py::arg("clock_operators"),
-           py::arg("state_labels") = std::map<std::string, int64>{},
-           py::arg("onsite_operators") = std::map<std::string, SymmetricTensorPtr>{},
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
+      .def(py::init<ElementarySpace::Ptr, py::array>(), py::arg("leg"), py::arg("clock_operators"))
       .def_readwrite("clock_operators", &ClockDOF::clock_operators)
-      .def("test_sanity", &ClockDOF::test_sanity, DOC(lasyten, ClockDOF, test_sanity))
+      .def("test_sanity",
+           &ClockDOF::test_sanity,
+           doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::ClockDOF::test_sanity()"))
+      .def("register_default_ops",
+           &ClockDOF::register_default_ops,
+           py::arg("site"),
+           "Register default Z / Zhc / Zphc onsite operators on the given site.")
       .def_static("conservation_law_to_symmetry",
                   &ClockDOF::conservation_law_to_symmetry,
                   py::arg("conserve"),
                   py::arg("use_test_su2") = false,
                   DOC(lasyten, ClockDOF, conservation_law_to_symmetry));
 
-    py::class_<AnyonDOF, Site, py::smart_holder> anyon_dof(m, "AnyonDOF");
+    py::class_<AnyonDOF, DegreeOfFreedom, py::smart_holder> anyon_dof(m, "AnyonDOF");
     anyon_dof.doc() = DOC(lasyten, AnyonDOF);
 
     anyon_dof
-      .def(py::init<ElementarySpace::Ptr,
-                    std::vector<std::string>,
-                    std::map<std::string, int64>,
-                    std::map<std::string, SymmetricTensorPtr>,
-                    TensorBackend::Ptr,
-                    std::optional<std::string>>(),
+      .def(py::init<ElementarySpace::Ptr, std::vector<std::string>>(),
            py::arg("leg"),
-           py::arg("sector_names") = std::vector<std::string>{},
-           py::arg("state_labels") = std::map<std::string, int64>{},
-           py::arg("onsite_operators") = std::map<std::string, SymmetricTensorPtr>{},
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
+           py::arg("sector_names") = std::vector<std::string>{})
       .def_readwrite("sector_names", &AnyonDOF::sector_names)
-      .def("test_sanity", &AnyonDOF::test_sanity, DOC(lasyten, AnyonDOF, test_sanity));
+      .def("test_sanity",
+           &AnyonDOF::test_sanity,
+           doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::AnyonDOF::test_sanity()"))
+      .def("register_default_ops",
+           &AnyonDOF::register_default_ops,
+           py::arg("site"),
+           py::arg("backend") = nullptr,
+           py::arg("default_device") = py::none(),
+           "Register sector-projection onsite operators on the given site.");
 
-    py::class_<OccupationDOF, Site, PyOccupationDOF, py::smart_holder> occupation_dof(
+    py::class_<OccupationDOF, DegreeOfFreedom, PyOccupationDOF, py::smart_holder> occupation_dof(
       m, "OccupationDOF");
     occupation_dof.doc() = DOC(lasyten, OccupationDOF);
 
@@ -249,9 +311,11 @@ bind_models_degrees_of_freedom(py::module_& m)
            doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::OccupationDOF::test_sanity()"))
       .def("add_individual_occupation_ops",
            &OccupationDOF::add_individual_occupation_ops,
+           py::arg("site"),
            DOC(lasyten, OccupationDOF, add_individual_occupation_ops))
       .def("add_total_occupation_ops",
            &OccupationDOF::add_total_occupation_ops,
+           py::arg("site"),
            doc_cpp_ref(R"pydoc(add_total_occupation_ops)pydoc",
                        "lasyten::OccupationDOF::add_total_occupation_ops()"))
       .def("get_annihilator_numpy",
@@ -278,20 +342,12 @@ bind_models_degrees_of_freedom(py::module_& m)
                     py::array,
                     py::array,
                     py::array,
-                    std::vector<std::optional<std::string>>,
-                    std::map<std::string, int64>,
-                    std::map<std::string, SymmetricTensorPtr>,
-                    TensorBackend::Ptr,
-                    std::optional<std::string>>(),
+                    std::vector<std::optional<std::string>>>(),
            py::arg("leg"),
            py::arg("Nmax"),
            py::arg("creators"),
            py::arg("annihilators"),
-           py::arg("species_names") = std::vector<std::optional<std::string>>{},
-           py::arg("state_labels") = std::map<std::string, int64>{},
-           py::arg("onsite_operators") = std::map<std::string, SymmetricTensorPtr>{},
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
+           py::arg("species_names") = std::vector<std::optional<std::string>>{})
       .def_readwrite("Nmax", &BosonicDOF::Nmax)
       .def_readwrite("JW", &BosonicDOF::JW)
       .def_readwrite("_JW", &BosonicDOF::JW)
@@ -300,6 +356,7 @@ bind_models_degrees_of_freedom(py::module_& m)
            doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::BosonicDOF::test_sanity()"))
       .def("add_individual_occupation_ops",
            &BosonicDOF::add_individual_occupation_ops,
+           py::arg("site"),
            doc_cpp_ref(R"pydoc(add_individual_occupation_ops)pydoc",
                        "lasyten::BosonicDOF::add_individual_occupation_ops()"))
       .def("get_annihilator_numpy",
@@ -336,19 +393,11 @@ bind_models_degrees_of_freedom(py::module_& m)
       .def(py::init<ElementarySpace::Ptr,
                     py::array,
                     py::array,
-                    std::vector<std::optional<std::string>>,
-                    std::map<std::string, int64>,
-                    std::map<std::string, SymmetricTensorPtr>,
-                    TensorBackend::Ptr,
-                    std::optional<std::string>>(),
+                    std::vector<std::optional<std::string>>>(),
            py::arg("leg"),
            py::arg("creators"),
            py::arg("annihilators"),
-           py::arg("species_names") = std::vector<std::optional<std::string>>{},
-           py::arg("state_labels") = std::map<std::string, int64>{},
-           py::arg("onsite_operators") = std::map<std::string, SymmetricTensorPtr>{},
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
+           py::arg("species_names") = std::vector<std::optional<std::string>>{})
       .def_readwrite("partial_JWs", &FermionicDOF::partial_JWs)
       .def_readwrite("JW", &FermionicDOF::JW)
       .def_readwrite("_JW", &FermionicDOF::JW)
@@ -371,6 +420,71 @@ bind_models_degrees_of_freedom(py::module_& m)
       .def_static("creation_annihilation_ops",
                   &FermionicDOF::creation_annihilation_ops,
                   py::arg("num_species"));
+
+    m.def(
+      "set_common_symmetry",
+      [](py::sequence sites_obj, py::object symmetry_combine, py::object new_symmetry_obj) {
+          std::vector<Site::Ptr> sites;
+          sites.reserve(static_cast<std::size_t>(py::len(sites_obj)));
+          for (py::handle item : sites_obj) {
+              sites.push_back(item.cast<Site::Ptr>());
+          }
+          Symmetry::Ptr new_symmetry;
+          if (!new_symmetry_obj.is_none()) {
+              new_symmetry = new_symmetry_obj.cast<Symmetry::Ptr>();
+          }
+
+          if (py::isinstance<py::str>(symmetry_combine)) {
+              set_common_symmetry(sites, symmetry_combine.cast<std::string>(), new_symmetry);
+              return;
+          }
+          if (py::isinstance<py::list>(symmetry_combine) ||
+              py::isinstance<py::tuple>(symmetry_combine)) {
+              CommonSymmetryComboSpec spec;
+              for (py::handle col_obj : symmetry_combine) {
+                  CommonSymmetryComboColumn col;
+                  for (py::handle term_obj : col_obj) {
+                      py::tuple term = term_obj.cast<py::tuple>();
+                      if (term.size() != 3) {
+                          throw py::value_error(
+                            "symmetry_combine terms must be (prefactor, site_idx, old_col_idx)");
+                      }
+                      col.emplace_back(
+                        term[0].cast<float64>(), term[1].cast<int64>(), term[2].cast<int64>());
+                  }
+                  spec.push_back(std::move(col));
+              }
+              set_common_symmetry(sites, spec, new_symmetry);
+              return;
+          }
+          if (py::isinstance<py::function>(symmetry_combine) ||
+              py::hasattr(symmetry_combine, "__call__")) {
+              py::object fn = symmetry_combine;
+              SiteSectorMapFn map = [fn](int64 site_idx, SectorArray const& old_sectors) {
+                  return fn(site_idx, old_sectors).cast<SectorArray>();
+              };
+              set_common_symmetry(sites, std::move(map), new_symmetry);
+              return;
+          }
+          throw py::type_error("symmetry_combine must be str, callable, or list; got " +
+                               py::str(py::type::of(symmetry_combine)).cast<std::string>());
+      },
+      py::arg("sites"),
+      py::arg("symmetry_combine") = "by_name",
+      py::arg("new_symmetry") = py::none(),
+      doc_cpp_ref(
+        R"pydoc(Adjust the symmetries of the given sites *in place* so they can be used together.
+
+Parameters
+----------
+sites
+    Sites to combine. Modified **in place**; the same object must not appear twice.
+symmetry_combine : ``'by_name'`` | ``'same'`` | ``'drop'`` | ``'independent'`` | callable | list
+    How the common symmetry is built from the individual ones.
+new_symmetry
+    Required for callable / list modes; ignored for the string presets.
+)pydoc",
+        "lasyten::set_common_symmetry()"));
 }
 
 } // namespace lasyten

@@ -66,8 +66,8 @@ class ChargedTensor : public Tensor
       std::variant<ElementarySpace::Ptr, Sector> charge);
 
     /// Utility like `_init_parse_labels`, but also returns invariant part labels.
-    [[nodiscard]] static std::tuple<OptionalLabels, OptionalLabels> _parse_inv_labels(
-      std::optional<OptionalLabels> labels,
+    [[nodiscard]] static std::tuple<LegLabelList, LegLabelList> _parse_inv_labels(
+      std::optional<LegLabelList> labels,
       TensorProduct::Ptr const& codomain,
       TensorProduct::Ptr const& domain);
 
@@ -83,7 +83,7 @@ class ChargedTensor : public Tensor
                                              TensorProduct::Ptr domain = nullptr,
                                              BlockBackend::BlockPtr charged_state = nullptr,
                                              TensorBackend::Ptr backend = nullptr,
-                                             std::optional<OptionalLabels> labels = std::nullopt,
+                                             std::optional<LegLabelList> labels = std::nullopt,
                                              std::optional<Dtype> dtype = std::nullopt,
                                              std::optional<std::string> device = std::nullopt);
 
@@ -94,7 +94,7 @@ class ChargedTensor : public Tensor
       TensorProduct::Ptr domain = nullptr,
       std::optional<std::variant<ElementarySpace::Ptr, Sector>> charge = std::nullopt,
       TensorBackend::Ptr backend = nullptr,
-      std::optional<OptionalLabels> labels = std::nullopt,
+      std::optional<LegLabelList> labels = std::nullopt,
       std::optional<Dtype> dtype = std::nullopt,
       std::optional<std::string> device = std::nullopt,
       float64 tol = 1e-6,
@@ -128,7 +128,7 @@ class ChargedTensor : public Tensor
                                        std::variant<ElementarySpace::Ptr, Sector> charge,
                                        BlockBackend::BlockPtr charged_state = nullptr,
                                        TensorBackend::Ptr backend = nullptr,
-                                       std::optional<OptionalLabels> labels = std::nullopt,
+                                       std::optional<LegLabelList> labels = std::nullopt,
                                        Dtype dtype = Dtype::Complex128,
                                        std::optional<std::string> device = std::nullopt);
 
@@ -205,11 +205,6 @@ class ChargedTensor : public Tensor
     [[nodiscard]] std::vector<std::string> _repr_header_lines(
       std::string const& indent,
       bool use_symm_str = false) const override;
-
-    /// Set a single label at given position, in-place. Return the modified instance.
-    LabelledLegs& set_label(int64 pos, OptionalLabel label) override;
-    /// Set the given labels, in-place. Return the modified instance.
-    Tensor& set_labels(OptionalLabels labels) override;
 
     /// Convert to a tensor with a different backend.
     ///

@@ -163,14 +163,14 @@ built from the dense two-site block (axes ``p0, p1, p1*, p0*``):
 
 .. code-block:: python
 
-    Cd = ferm.get_creator_numpy(species=0, include_JW=True)
-    C = ferm.get_annihilator_numpy(species=0, include_JW=True)
-    h = (Cd @ ferm.JW)[:, None, None, :] * C[None, :, :, None]
+    Cd = ferm.occupation.get_creator_numpy(species=0, include_JW=True)
+    C = ferm.occupation.get_annihilator_numpy(species=0, include_JW=True)
+    h = (Cd @ ferm.occupation.JW)[:, None, None, :] * C[None, :, :, None]
     cdag_c = lasy.Coupling.from_dense_block(
         h, [ferm, ferm], name='Cd C', understood_braiding=True
     )
 
-``include_JW=True`` and the extra ``ferm.JW`` on the *left* factor are the
+``include_JW=True`` and the extra ``ferm.occupation.JW`` on the *left* factor are the
 **on-site** JW dressing (TeNPy's ``"Cd JW"`` on site :math:`i`). They are
 *not* the string on the sites between :math:`i` and :math:`j` — that string
 is the next section.
@@ -280,14 +280,14 @@ sector — exactly the bond of :math:`c^\dagger_i c_j` — the swap gate is
 ``JW`` operator.
 
 In the example script the virtual bond of ``cdag_c`` is one-dimensional
-(one fermion), and the middle factor's dense block *is* ``ferm.JW``:
+(one fermion), and the middle factor's dense block *is* ``ferm.occupation.JW``:
 
 .. code-block:: python
 
     wR = cdag_c.factorization[0].get_leg_co_domain('wR')
     Id_middle = ferm.identity_tensor(wR)
     jw_block = Id_middle.to_numpy(understood_braiding=True)
-    # jw_block[0, :, 0, :]  ==  ferm.JW  ==  diag(+1, -1)
+    # jw_block[0, :, 0, :]  ==  ferm.occupation.JW  ==  diag(+1, -1)
 
 TeNPy v1 would have inserted the same operator by hand on the physical leg
 of every site between :math:`i` and :math:`j`::

@@ -18,22 +18,22 @@ namespace lasyten {
 
 namespace {
 
-std::optional<OptionalLabels>
+std::optional<LegLabelList>
 optional_labels(py::object labels)
 {
     if (labels.is_none()) {
         return std::nullopt;
     }
-    return labels.cast<OptionalLabels>();
+    return labels.cast<LegLabelList>();
 }
 
-std::vector<OptionalLabel>
+std::vector<std::string>
 to_leg_labels(py::object maybe_labels)
 {
-    std::vector<OptionalLabel> out;
+    std::vector<std::string> out;
     for (auto item : maybe_labels) {
         if (item.is_none()) {
-            out.push_back(std::nullopt);
+            out.push_back("");
         } else {
             out.push_back(item.cast<std::string>());
         }
@@ -41,13 +41,13 @@ to_leg_labels(py::object maybe_labels)
     return out;
 }
 
-std::optional<OptionalLabels>
+std::optional<LegLabelList>
 optional_vector_labels_from_py(py::object labels)
 {
     if (labels.is_none()) {
         return std::nullopt;
     }
-    return OptionalLabels(to_leg_labels(labels));
+    return LegLabelList(to_leg_labels(labels));
 }
 
 class PyLinearOperatorAdapter : public LinearOperator
@@ -130,7 +130,7 @@ bind_tensors_sparse(py::module_& m)
     linear_operator.attr("acts_on") = LinearOperator::acts_on;
 
     linear_operator
-      .def(py::init<std::vector<Leg::Ptr>, Dtype, std::optional<OptionalLabels>>(),
+      .def(py::init<std::vector<Leg::Ptr>, Dtype, std::optional<LegLabelList>>(),
            py::arg("vector_legs") = std::vector<Leg::Ptr>{},
            py::arg("dtype") = Dtype::Float64,
            py::arg("vector_labels") = py::none())

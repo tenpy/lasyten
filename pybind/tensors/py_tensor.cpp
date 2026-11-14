@@ -47,15 +47,14 @@ as_leg_ref(py::handle obj)
     return obj.cast<int64>();
 }
 
-std::optional<py::class_<Tensor, LabelledLegs, VectorLike, PyTensor, py::smart_holder>> g_tensor;
+std::optional<py::class_<Tensor, VectorLike, PyTensor, py::smart_holder>> g_tensor;
 
 } // namespace
 
 void
 declare_tensors_tensor(py::module_& m)
 {
-    g_tensor =
-      py::class_<Tensor, LabelledLegs, VectorLike, PyTensor, py::smart_holder>(m, "Tensor");
+    g_tensor = py::class_<Tensor, VectorLike, PyTensor, py::smart_holder>(m, "Tensor");
     (*g_tensor).doc() = DOC(lasyten, Tensor);
 }
 
@@ -93,6 +92,17 @@ bind_tensors_tensor(py::module_& m)
       .def_readwrite("symmetry", &Tensor::symmetry)
       .def_readwrite("dtype", &Tensor::dtype)
       .def_readwrite("device", &Tensor::device)
+      .def_readwrite("num_legs", &Tensor::num_legs)
+      .def_property("labels",
+                    py::cpp_function([](Tensor& self) -> LegLabels& { return self.labels; },
+                                     py::return_value_policy::reference_internal),
+                    py::cpp_function([](Tensor& self, py::object value) {
+                        if (py::isinstance<LegLabels>(value)) {
+                            self.labels.set(value.cast<LegLabels const&>().as_list());
+                        } else {
+                            self.labels.set(value.cast<LegLabelList>());
+                        }
+                    }))
       .def_property(
         "shape",
         [](Tensor const& self) {
@@ -402,24 +412,15 @@ bind_tensors_tensor(py::module_& m)
         py::arg("which_leg"),
         DOC(lasyten, Tensor, get_leg_co_domain));
 
-    cls
-      .def(
-        "set_labels",
-        [](Tensor& self, py::object labels) -> Tensor& {
-            return self.set_labels(parse_tensor_init_labels(labels, self.codomain, self.domain));
-        },
-        py::arg("labels"),
-        py::return_value_policy::reference,
-        DOC(lasyten, Tensor, set_labels))
-      .def(
-        "to_numpy",
-        [](Tensor& self, py::object leg_order, py::object numpy_dtype, bool understood_braiding) {
-            return self.to_numpy(optional_leg_order(leg_order), numpy_dtype, understood_braiding);
-        },
-        py::arg("leg_order") = py::none(),
-        py::arg("numpy_dtype") = py::none(),
-        py::arg("understood_braiding") = false,
-        DOC(lasyten, Tensor, to_numpy));
+    cls.def(
+      "to_numpy",
+      [](Tensor& self, py::object leg_order, py::object numpy_dtype, bool understood_braiding) {
+          return self.to_numpy(optional_leg_order(leg_order), numpy_dtype, understood_braiding);
+      },
+      py::arg("leg_order") = py::none(),
+      py::arg("numpy_dtype") = py::none(),
+      py::arg("understood_braiding") = false,
+      DOC(lasyten, Tensor, to_numpy));
 }
 
 } // namespace lasyten

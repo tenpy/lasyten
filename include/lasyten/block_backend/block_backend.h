@@ -25,7 +25,8 @@ class BlockBackend
 
     using BlockPtr = std::shared_ptr<Block>;
     using BlockCPtr = std::shared_ptr<const Block>;
-    using LegCPtr = std::shared_ptr<const Leg>;
+    /// Value-type leg handle (same as `lasyten::Leg` / `Leg::CPtr`).
+    using LegCPtr = Leg;
 
     /// C++ slice for one axis (``std::nullopt`` = open end / default step), like Python
     /// ``slice(start, stop, step)``.

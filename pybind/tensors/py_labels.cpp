@@ -2,10 +2,13 @@
 
 #include "../doc_plus.h"
 #include "../py_lasyten_pybind11.h"
+#include "../tools/hdf5_bind.h"
 
 #include "docstrings/tensors/labels.h"
 
+#include <map>
 #include <optional>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -13,23 +16,23 @@ namespace lasyten {
 
 namespace {
 
-OptionalLabel
+std::string
 as_leg_label(py::handle obj)
 {
     if (obj.is_none()) {
-        return std::nullopt;
+        return "";
     }
     return obj.cast<std::string>();
 }
 
 std::vector<int64>
-py_get_leg_idcs(LabelledLegs const& self, py::object idcs)
+py_indices(LegLabels const& self, py::object idcs)
 {
     if (py::isinstance<py::str>(idcs)) {
-        return self.get_leg_idcs(idcs.cast<std::string>());
+        return { self.index(idcs.cast<std::string>()) };
     }
     if (py::isinstance<py::int_>(idcs)) {
-        return self.get_leg_idcs(idcs.cast<int64>());
+        return { self.index(idcs.cast<int64>()) };
     }
     std::vector<std::variant<int64, std::string>> parsed;
     for (auto item : py::reinterpret_borrow<py::iterable>(to_iterable(idcs))) {
@@ -39,7 +42,16 @@ py_get_leg_idcs(LabelledLegs const& self, py::object idcs)
             parsed.emplace_back(item.cast<int64>());
         }
     }
-    return self.get_leg_idcs(parsed);
+    return self.indices(parsed);
+}
+
+int64
+py_index(LegLabels const& self, py::object idx)
+{
+    if (py::isinstance<py::str>(idx)) {
+        return self.index(idx.cast<std::string>());
+    }
+    return self.index(idx.cast<int64>());
 }
 
 std::vector<std::string>
@@ -53,15 +65,15 @@ args_as_strings(py::args const& args)
     return out;
 }
 
-std::optional<py::class_<LabelledLegs, py::smart_holder>> g_labelled_legs;
+std::optional<py::class_<LegLabels, py::smart_holder>> g_labelled_legs;
 
 } // namespace
 
 void
 declare_tensors_labels(py::module_& m)
 {
-    g_labelled_legs = py::class_<LabelledLegs, py::smart_holder>(m, "LabelledLegs");
-    (*g_labelled_legs).doc() = DOC(lasyten, LabelledLegs);
+    g_labelled_legs = py::class_<LegLabels, py::smart_holder>(m, "LegLabels");
+    (*g_labelled_legs).doc() = DOC(lasyten, LegLabels);
 }
 
 void
@@ -87,7 +99,7 @@ bind_tensors_labels(py::module_& m)
           if (!py::isinstance<py::str>(label)) {
               return false;
           }
-          return is_valid_leg_label(OptionalLabel{ label.cast<std::string>() });
+          return is_valid_leg_label(std::string{ label.cast<std::string>() });
       },
       py::arg("label"),
       DOC(lasyten, is_valid_leg_label));
@@ -122,7 +134,7 @@ bind_tensors_labels(py::module_& m)
 
     m.def(
       "_get_matching_labels",
-      [](OptionalLabels const& labels1, OptionalLabels const& labels2, int64 /*stacklevel*/) {
+      [](LegLabelList const& labels1, LegLabelList const& labels2, int64 /*stacklevel*/) {
           return _get_matching_labels(labels1, labels2);
       },
       py::arg("labels1"),
@@ -131,82 +143,102 @@ bind_tensors_labels(py::module_& m)
       doc_plus(DOC(lasyten, _get_matching_labels),
                R"pydoc(
 The ``stacklevel`` argument is Python-only (accepted for API compatibility; unused).
-In Python, ``None`` labels correspond to C++ ``nullopt``.
+In Python, unset labels are empty strings (``""``).
 )pydoc"));
 
     auto& labelled_legs = *g_labelled_legs;
 
-    labelled_legs.def(py::init<OptionalLabels>(), py::arg("labels"))
-      .def_readwrite("num_legs", &LabelledLegs::num_legs)
-      .def_property_readonly("is_fully_labelled",
-                             &LabelledLegs::is_fully_labelled,
-                             DOC(lasyten, LabelledLegs, is_fully_labelled))
-      .def_property(
-        "labels",
-        &LabelledLegs::labels,
-        [](LabelledLegs& self, OptionalLabels labels) { self.set_labels(std::move(labels)); },
-        DOC(lasyten, LabelledLegs, labels))
-      // Python free functions often access ``_labels``; keep as alias until those are converted.
-      .def_property(
-        "_labels",
-        &LabelledLegs::labels,
-        [](LabelledLegs& self, OptionalLabels labels) { self.set_labels(std::move(labels)); })
-      .def_property_readonly("_labelmap",
-                             [](LabelledLegs const& self) {
-                                 // Expose the C++ label→index map to Python (used by free
-                                 // functions / tests).
-                                 py::dict out;
-                                 for (auto const& [lab, idx] : self.labelmap()) {
-                                     out[py::cast(lab)] = idx;
-                                 }
-                                 return out;
-                             })
-      .def("test_sanity", &LabelledLegs::test_sanity, DOC(lasyten, LabelledLegs, test_sanity))
-      .def("get_leg_idcs",
-           &py_get_leg_idcs,
-           py::arg("idcs"),
-           DOC(lasyten, LabelledLegs, get_leg_idcs))
+    labelled_legs.def(py::init<LegLabelList>(), py::arg("labels"))
+      .def_property_readonly("num_legs", &LegLabels::num_legs)
+      .def_property_readonly("is_fully_labelled", &LegLabels::is_fully_labelled)
+      .def("as_list", &LegLabels::as_list, DOC(lasyten, LegLabels, as_list))
+      .def("test_sanity", &LegLabels::test_sanity)
       .def(
-        "has_label",
-        [](LabelledLegs const& self, py::args args) {
-            if (args.size() == 0) {
-                throw py::value_error("has_label() requires at least one label");
-            }
-            return self.has_label(args_as_strings(args));
-        },
-        DOC(lasyten, LabelledLegs, has_label))
-      .def(
-        "labels_are",
-        [](LabelledLegs const& self, py::args args, bool planar) {
-            return self.labels_are(args_as_strings(args), planar);
-        },
-        py::kw_only(),
-        py::arg("planar") = false,
-        DOC(lasyten, LabelledLegs, labels_are))
-      .def(
-        "relabel",
-        [](LabelledLegs& self, std::map<std::string, std::string> const& mapping)
-          -> LabelledLegs& { return self.relabel(mapping); },
-        py::arg("mapping"),
-        py::return_value_policy::reference,
-        DOC(lasyten, LabelledLegs, relabel))
-      .def(
-        "set_label",
-        [](LabelledLegs& self, int64 pos, py::object label) -> LabelledLegs& {
-            return self.set_label(pos, as_leg_label(label));
-        },
-        py::arg("pos"),
-        py::arg("label"),
-        py::return_value_policy::reference,
-        DOC(lasyten, LabelledLegs, set_label))
-      .def(
-        "set_labels",
-        [](LabelledLegs& self, OptionalLabels labels) -> LabelledLegs& {
-            return self.set_labels(std::move(labels));
+        "set",
+        [](LegLabels& self, LegLabelList labels) -> LegLabels& {
+            return self.set(std::move(labels));
         },
         py::arg("labels"),
         py::return_value_policy::reference,
-        DOC(lasyten, LabelledLegs, set_labels));
+        DOC(lasyten, LegLabels, set))
+      .def(
+        "update",
+        [](LegLabels& self, std::map<std::string, std::string> const& mapping) -> LegLabels& {
+            return self.update(mapping);
+        },
+        py::arg("mapping"),
+        py::return_value_policy::reference,
+        DOC(lasyten, LegLabels, update))
+      .def("index", &py_index, py::arg("idx"), DOC(lasyten, LegLabels, index))
+      .def("indices", &py_indices, py::arg("idcs"), DOC(lasyten, LegLabels, indices))
+      .def("has",
+           [](LegLabels const& self, py::args args) {
+               if (args.size() == 0) {
+                   throw py::value_error("has() requires at least one label");
+               }
+               return self.has(args_as_strings(args));
+           })
+      .def(
+        "are",
+        [](LegLabels const& self, py::args args, bool planar) {
+            return self.are(args_as_strings(args), planar);
+        },
+        py::kw_only(),
+        py::arg("planar") = false,
+        DOC(lasyten, LegLabels, are))
+      .def("__len__", &LegLabels::size)
+      .def("__getitem__",
+           [](LegLabels const& self, py::object key) -> py::object {
+               if (py::isinstance<py::str>(key)) {
+                   return py::cast(
+                     static_cast<std::string const&>(self[self.index(key.cast<std::string>())]));
+               }
+               if (py::isinstance<py::int_>(key)) {
+                   return py::cast(static_cast<std::string const&>(self[key.cast<int64>()]));
+               }
+               throw py::type_error("LegLabels indices must be int or str");
+           })
+      .def("__setitem__",
+           [](LegLabels& self, py::object key, py::object value) {
+               std::string lab = as_leg_label(value);
+               if (py::isinstance<py::str>(key)) {
+                   self[key.cast<std::string>()] = std::move(lab);
+               } else if (py::isinstance<py::int_>(key)) {
+                   self[key.cast<int64>()] = std::move(lab);
+               } else {
+                   throw py::type_error("LegLabels indices must be int or str");
+               }
+           })
+      .def("__contains__",
+           [](LegLabels const& self, py::object key) {
+               if (!py::isinstance<py::str>(key)) {
+                   return false;
+               }
+               return self.has(key.cast<std::string>());
+           })
+      .def(
+        "__eq__",
+        [](LegLabels const& self, py::object other) {
+            if (py::isinstance<LegLabels>(other)) {
+                return self == other.cast<LegLabels const&>();
+            }
+            try {
+                return self == other.cast<LegLabelList>();
+            } catch (py::cast_error const&) {
+                return false;
+            }
+        },
+        py::is_operator())
+      .def("save_hdf5",
+           lasyten::hdf5::wrap_save_hdf5_const<LegLabels>(),
+           py::arg("hdf5_saver"),
+           py::arg("h5gr"),
+           py::arg("subpath"))
+      .def_static("from_hdf5",
+                  lasyten::hdf5::wrap_from_hdf5<LegLabels>(),
+                  py::arg("hdf5_loader"),
+                  py::arg("h5gr"),
+                  py::arg("subpath"));
 }
 
 } // namespace lasyten

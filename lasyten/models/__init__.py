@@ -19,18 +19,30 @@ from .couplings import (
     spin_field_coupling,
     spin_spin_coupling,
 )
-from .degrees_of_freedom import AnyonDOF, BosonicDOF, ClockDOF, FermionicDOF, Site, SpinDOF
+from .degrees_of_freedom import (
+    AnyonDOF,
+    BosonicDOF,
+    ClockDOF,
+    DegreeOfFreedom,
+    FermionicDOF,
+    OccupationDOF,
+    Site,
+    SpinDOF,
+)
 from .sites import (
     AnyonSite,
     ClockSite,
     FibonacciAnyonSite,
     GoldenSite,
+    GroupedSite,
     IsingAnyonSite,
     SpinHalfFermionSite,
     SpinlessBosonSite,
     SpinlessFermionSite,
     SpinSite,
     SU2kSpin1Site,
+    group_sites,
+    set_common_symmetry,
 )
 
 
@@ -42,10 +54,13 @@ __all__ = [
     'ClockDOF',
     'ClockSite',
     'Coupling',
+    'DegreeOfFreedom',
     'FermionicDOF',
     'FibonacciAnyonSite',
     'GoldenSite',
+    'GroupedSite',
     'IsingAnyonSite',
+    'OccupationDOF',
     'SU2kSpin1Site',
     'Site',
     'SpinDOF',
@@ -60,12 +75,14 @@ __all__ = [
     'clock_field_coupling',
     'density_density_interaction',
     'gold_coupling',
+    'group_sites',
     'heisenberg_coupling',
     'hopping',
     'onsite_interaction',
     'onsite_pairing',
     'pairing',
     'sector_projection_coupling',
+    'set_common_symmetry',
     'spin_field_coupling',
     'spin_spin_coupling',
 ]

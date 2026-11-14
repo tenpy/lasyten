@@ -120,7 +120,7 @@ bind_no_symmetry_backend(py::module_& m)
       [](NoSymmetryBackend& self,
          TensorCPtr tensor,
          std::vector<std::vector<int64>> leg_idcs_combine,
-         std::vector<LegPipe::Ptr> pipes,
+         std::vector<Leg::Ptr> pipes,
          TensorProduct::Ptr new_codomain,
          TensorProduct::Ptr new_domain) {
           return py_block(self.combine_legs(

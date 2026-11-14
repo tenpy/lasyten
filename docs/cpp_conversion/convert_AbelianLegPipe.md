@@ -13,13 +13,13 @@
 
 ## Design notes
 
-### Diamond MI
+### Inheritance (after #254 spaces MI refactor)
 
 ```cpp
-class AbelianLegPipe : public LegPipe, public ElementarySpace
+class AbelianLegPipe : public ElementarySpace  // pipe fields composed, not LegPipe base
 ```
 
-Single virtual `Leg` / `LegOrSpace`. `prepare(...)` computes sectors/maps/`basis_perm`; delegated ctor runs `LegPipe` then `ElementarySpace` (second `init_leg` wins).
+See [convert_spaces_MI.md](convert_spaces_MI.md). `prepare(...)` computes sectors/maps/`basis_perm`; ctor initializes `ElementarySpace` then composed `legs` / fusion maps.
 
 ### Members
 

@@ -102,18 +102,20 @@ def test_site(np_random, block_backend, symmetry_backend, use_sym):
     assert site.get_hc_op_name('op3_renamed') == 'op3_renamed'
     site.test_sanity()
 
-    # if use_sym:
-    #     leg2 = leg.drop_symmetry(1)
-    #     leg2 = leg2.change_symmetry(symmetry=z3_symmetry, sector_map=lambda s: s % 3)
-    # else:
-    #     leg2 = leg
-    # leg2.test_sanity()
-    # site2 = copy.deepcopy(site)
-    # site2.change_leg(leg2)
-    # for name in ['silly_op', 'op2', 'op3']:
-    #     site_op = site.onsite_operators[name].to_numpy()
-    #     site2_op = site2.onsite_operators[name].to_numpy()
-    #     npt.assert_equal(site_op, site2_op)
+    ops_before = {
+        name: site.onsite_operators[name].to_numpy(understood_braiding=True)
+        for name in ['silly_op', 'op2', 'op3_renamed']
+    }
+    if use_sym:
+        # Dropping all symmetry always preserves dense operators.
+        leg2 = site.leg.drop_symmetry()
+    else:
+        leg2 = site.leg
+    leg2.test_sanity()
+    site.change_leg(leg2)
+    for name, expected in ops_before.items():
+        npt.assert_equal(site.onsite_operators[name].to_numpy(understood_braiding=True), expected)
+    site.test_sanity()
 
 
 def test_site_rejects_out_of_range_state_label(block_backend):
@@ -139,7 +141,7 @@ def test_spin_site(any_backend, spin):
         site = sites.SpinSite(spin, conserve, backend=any_backend, use_test_su2=(conserve == 'SU(2)'))
         site.test_sanity()
 
-        sz = site.spin_vector[:, :, 2]
+        sz = site.spin.spin_vector[:, :, 2]
         down = site.state_labels['down']
         up = site.state_labels['up']
         npt.assert_almost_equal(sz[down, down], -1 * spin)
@@ -267,10 +269,10 @@ def test_spinless_boson_site(any_backend, np_random, Nmax):
         site.test_sanity()
 
         vac = site.state_labels['vac']
-        npt.assert_almost_equal(site.n_tot[vac, vac], 0)
+        npt.assert_almost_equal(site.occupation.n_tot[vac, vac], 0)
         for i in range(Nmax):
             state = site.state_labels[str(i)]
-            npt.assert_almost_equal(site.n_tot[state, state], i)
+            npt.assert_almost_equal(site.occupation.n_tot[state, state], i)
 
         expect_ops = dict(Id=True, N0=True, N=True, Ntot=True)
         expect_ops.update(N0N0=True, NN=True, NtotNtot=True)
@@ -308,12 +310,12 @@ def test_spinless_boson_site(any_backend, np_random, Nmax):
         site.test_sanity()
 
         vac = site.state_labels['vac']
-        npt.assert_almost_equal(site.n_tot[vac, vac], 0)
+        npt.assert_almost_equal(site.occupation.n_tot[vac, vac], 0)
         for i in range(Nmax):
             for j in range(Nmax2):
                 state = site.state_labels[f'({i}, {j})']
-                npt.assert_almost_equal(site.number_operators[state, state, 0], i)
-                npt.assert_almost_equal(site.number_operators[state, state, 1], j)
+                npt.assert_almost_equal(site.occupation.number_operators[state, state, 0], i)
+                npt.assert_almost_equal(site.occupation.number_operators[state, state, 1], j)
 
         expect_ops = dict(Id=True, N0=True, N1=True, Ntot=True)
         expect_ops.update(N0N0=True, N1N1=True, NtotNtot=True)
@@ -341,17 +343,17 @@ def test_spinless_fermion_site(block_backend, np_random, num_species):
 
         vac = site.state_labels['vac']
         assert site.state_labels['empty'] == vac
-        npt.assert_almost_equal(site.n_tot[vac, vac], 0)
+        npt.assert_almost_equal(site.occupation.n_tot[vac, vac], 0)
         if num_species == 1:
             assert site.state_labels['0'] == vac
             state = site.state_labels['1']
             assert site.state_labels['full'] == state
-            npt.assert_almost_equal(site.n_tot[state, state], 1)
+            npt.assert_almost_equal(site.occupation.n_tot[state, state], 1)
         else:
             for occupations in it.product([0, 1], repeat=num_species):
                 state = site.state_labels[str(occupations)]
                 for k in range(num_species):
-                    npt.assert_almost_equal(site.number_operators[state, state, k], occupations[k])
+                    npt.assert_almost_equal(site.occupation.number_operators[state, state, k], occupations[k])
 
         expect_ops = {f'N{k}': True for k in range(num_species)}
         expect_ops.update(Id=True, Ntot=True, Ptot=True, NtotNtot=True)
@@ -392,9 +394,9 @@ def test_spin_half_fermion_site(block_backend, np_random):
         assert site.state_labels['full'] == site.state_labels['(1, 1)']
         for occupations in it.product([0, 1], repeat=2):
             state = site.state_labels[str(occupations)]
-            npt.assert_almost_equal(site.number_operators[state, state, 0], occupations[0])  # spin up
-            npt.assert_almost_equal(site.number_operators[state, state, 1], occupations[1])  # spin down
-            npt.assert_almost_equal(site.spin_vector[state, state, 2], 0.5 * (occupations[0] - occupations[1]))
+            npt.assert_almost_equal(site.occupation.number_operators[state, state, 0], occupations[0])  # spin up
+            npt.assert_almost_equal(site.occupation.number_operators[state, state, 1], occupations[1])  # spin down
+            npt.assert_almost_equal(site.spin.spin_vector[state, state, 2], 0.5 * (occupations[0] - occupations[1]))
             npt.assert_almost_equal(
                 site.get_op('NupNdown').to_numpy(understood_braiding=True)[state, state],
                 occupations[0] * occupations[1],
@@ -444,7 +446,7 @@ def test_clock_site(any_backend, q):
         site = sites.ClockSite(q=q, conserve=conserve, backend=any_backend)
         site.test_sanity()
 
-        z = site.clock_operators[:, :, 1]
+        z = site.clock.clock_operators[:, :, 1]
         up = site.state_labels['up']
         npt.assert_almost_equal(z[up, up], 1)
         if q % 2 == 0:
@@ -465,3 +467,222 @@ def test_clock_site(any_backend, q):
 
         site_list.append(site)
     check_same_operators(site_list)
+
+
+def test_site_dofs_registry_allows_multiple_spins(block_backend):
+    """Named DOF registry can hold multiple SpinDOFs (grouping / valley foreshadowing)."""
+    backend = backends.get_backend('no_symmetry', block_backend=block_backend)
+    site_a = sites.SpinSite(S=0.5, conserve='None', backend=backend)
+    site_b = sites.SpinSite(S=1.0, conserve='None', backend=backend)
+    combined = degrees_of_freedom.Site(leg=site_a.leg, backend=backend)
+    combined.set_dof('0.spin', site_a.spin)
+    combined.set_dof('1.spin', site_b.spin)
+    assert '0.spin' in combined.dofs
+    assert '1.spin' in combined.dofs
+    assert combined.spin is None  # conventional key unused
+    assert combined.dofs['0.spin'] is site_a.spin
+    assert combined.dofs['1.spin'].spin_vector.shape[-1] == 3
+
+
+def _factor_names(site):
+    return tuple(f.descriptive_name for f in site.symmetry.factors)
+
+
+def _ops_as_numpy(site):
+    return {name: op.to_numpy(understood_braiding=True) for name, op in site.onsite_operators.items()}
+
+
+def test_set_common_symmetry_duplicate_site_rejected(block_backend):
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    spin = sites.SpinSite(0.5, 'Sz', backend=backend)
+    with pytest.raises(ValueError, match='same object multiple times'):
+        sites.set_common_symmetry([spin, spin])
+
+
+@pytest.mark.parametrize('mode', ['by_name', 'same'])
+def test_set_common_symmetry_by_name(block_backend, mode):
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    spin = sites.SpinSite(0.5, 'Sz', backend=backend)
+    ferm = sites.SpinHalfFermionSite(conserve_N='N', conserve_S='Sz', backend=backend)
+    spin_ops = _ops_as_numpy(spin)
+    ferm_ops = _ops_as_numpy(ferm)
+
+    sites.set_common_symmetry([spin, ferm], mode)
+
+    assert spin.symmetry.is_equivalent_to(ferm.symmetry, strict_ordering=True)
+    assert _factor_names(spin) == ('2*Sz', 'total_fermion_occupation', 'total_fermion_parity')
+    spin.test_sanity()
+    ferm.test_sanity()
+    for name, op in spin_ops.items():
+        npt.assert_equal(spin.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    for name, op in ferm_ops.items():
+        npt.assert_equal(ferm.onsite_operators[name].to_numpy(understood_braiding=True), op)
+
+
+def test_set_common_symmetry_independent(block_backend):
+    backend = backends.get_backend('abelian', block_backend=block_backend)
+    s1 = sites.SpinSite(0.5, 'Sz', backend=backend)
+    s2 = sites.SpinSite(1.0, 'Sz', backend=backend)
+    s1_ops = _ops_as_numpy(s1)
+    s2_ops = _ops_as_numpy(s2)
+
+    sites.set_common_symmetry([s1, s2], 'independent')
+
+    assert s1.symmetry.is_equivalent_to(s2.symmetry, strict_ordering=True)
+    # Same descriptive_name '2*Sz' but independent keeps both factors.
+    assert len(s1.symmetry.factors) == 2
+    assert _factor_names(s1) == ('2*Sz', '2*Sz')
+    s1.test_sanity()
+    s2.test_sanity()
+    for name, op in s1_ops.items():
+        npt.assert_equal(s1.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    for name, op in s2_ops.items():
+        npt.assert_equal(s2.onsite_operators[name].to_numpy(understood_braiding=True), op)
+
+
+def test_set_common_symmetry_drop(block_backend):
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    spin = sites.SpinSite(0.5, 'Sz', backend=backend)
+    ferm = sites.SpinlessFermionSite(conserve='N', backend=backend)
+    spin_ops = _ops_as_numpy(spin)
+    ferm_ops = _ops_as_numpy(ferm)
+
+    sites.set_common_symmetry([spin, ferm], 'drop')
+
+    assert len(spin.symmetry.factors) == 1
+    assert isinstance(spin.symmetry.factors[0], lasyten.NoSymmetry)
+    assert spin.symmetry.is_equivalent_to(ferm.symmetry)
+    spin.test_sanity()
+    ferm.test_sanity()
+    for name, op in spin_ops.items():
+        npt.assert_equal(spin.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    for name, op in ferm_ops.items():
+        npt.assert_equal(ferm.onsite_operators[name].to_numpy(understood_braiding=True), op)
+
+
+def test_set_common_symmetry_list_combo(block_backend):
+    """Explicit linear combination (v1-style), e.g. total 2*Sz from fermion + spin."""
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    ferm = sites.SpinHalfFermionSite(conserve_N='N', conserve_S='Sz', backend=backend)
+    spin = sites.SpinSite(0.5, 'Sz', backend=backend)
+    ferm_ops = _ops_as_numpy(ferm)
+    spin_ops = _ops_as_numpy(spin)
+
+    # SpinHalfFermionSite factors: 2*Sz, total_fermion_occupation, total_fermion_parity
+    # SpinSite factors: 2*Sz
+    new_symmetry = lasyten.U1('2*Sz').as_Symmetry()
+    sites.set_common_symmetry(
+        [ferm, spin],
+        [[(1, 0, 0), (1, 1, 0)]],  # 2*Sz_f + 2*Sz_spin
+        new_symmetry=new_symmetry,
+    )
+
+    assert _factor_names(ferm) == ('2*Sz',)
+    assert ferm.symmetry.is_equivalent_to(spin.symmetry, strict_ordering=True)
+    ferm.test_sanity()
+    spin.test_sanity()
+    for name, op in ferm_ops.items():
+        npt.assert_equal(ferm.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    for name, op in spin_ops.items():
+        npt.assert_equal(spin.onsite_operators[name].to_numpy(understood_braiding=True), op)
+
+
+def test_set_common_symmetry_ferm_bos_combo(block_backend):
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    ferm = sites.SpinlessFermionSite(conserve='N', backend=backend)
+    bos = sites.SpinlessBosonSite(Nmax=2, conserve='N', backend=backend)
+    ferm_ops = _ops_as_numpy(ferm)
+    bos_ops = _ops_as_numpy(bos)
+
+    # Fermion: U1(N) + FermionParity; Boson: U1(N). Keep N_f + 2 N_b only (drop parity).
+    new_symmetry = lasyten.U1('N_f + 2 N_b').as_Symmetry()
+    sites.set_common_symmetry(
+        [ferm, bos],
+        [[(1, 0, 0), (2, 1, 0)]],
+        new_symmetry=new_symmetry,
+    )
+
+    assert _factor_names(ferm) == ('N_f + 2 N_b',)
+    assert ferm.symmetry.is_equivalent_to(bos.symmetry, strict_ordering=True)
+    for name, op in ferm_ops.items():
+        npt.assert_equal(ferm.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    for name, op in bos_ops.items():
+        npt.assert_equal(bos.onsite_operators[name].to_numpy(understood_braiding=True), op)
+    ferm.test_sanity()
+    bos.test_sanity()
+
+
+@pytest.mark.parametrize('symmetry_combine', ['same', 'drop', 'independent'])
+def test_grouped_site_spins(block_backend, symmetry_combine):
+    backend = backends.get_backend('abelian', block_backend=block_backend)
+    s0 = sites.SpinSite(0.5, 'Sz', backend=backend)
+    s1 = sites.SpinSite(0.5, 'Sz', backend=backend)
+
+    g = sites.GroupedSite([s0, s1], symmetry_combine=symmetry_combine)
+    g.test_sanity()
+    assert g.n_sites == 2
+    assert g.labels == ['0', '1']
+    assert 'Sz0' in g.onsite_operators
+    assert 'Sz1' in g.onsite_operators
+    assert '0.spin' in g.dofs
+    assert '1.spin' in g.dofs
+    assert g.spin is None
+    assert g.dofs['0.spin'].spin_vector.shape[0] == g.dim
+
+    # Ops match kroneckerproduct of the (possibly remapped) constituent sites.
+    ws = g.sites
+    expected0 = g.kroneckerproduct([ws[0].onsite_operators['Sz'], ws[1].onsite_operators['Id']])
+    expected1 = g.kroneckerproduct([ws[0].onsite_operators['Id'], ws[1].onsite_operators['Sz']])
+    assert lasyten.almost_equal(g.onsite_operators['Sz0'], expected0)
+    assert lasyten.almost_equal(g.onsite_operators['Sz1'], expected1)
+    assert 'up_0 down_1' in g.state_labels or 'down_0 up_1' in g.state_labels
+
+
+def test_group_sites_chunking(block_backend):
+    backend = backends.get_backend('abelian', block_backend=block_backend)
+    chain = [sites.SpinSite(0.5, 'Sz', backend=backend) for _ in range(5)]
+    grouped = sites.group_sites(chain, n=2, symmetry_combine='same')
+    assert len(grouped) == 3
+    assert grouped[0].n_sites == 2
+    assert grouped[1].n_sites == 2
+    assert grouped[2].n_sites == 1
+    for g in grouped:
+        g.test_sanity()
+
+
+def test_grouped_site_dof_coupling(block_backend):
+    from lasyten.models import couplings
+
+    backend = backends.get_backend('abelian', block_backend=block_backend)
+    s0 = sites.SpinSite(0.5, 'None', backend=backend)
+    s1 = sites.SpinSite(0.5, 'None', backend=backend)
+    g = sites.GroupedSite([s0, s1], symmetry_combine='same')
+    # On-site field on first embedded spin of a single grouped site
+    coup = couplings.spin_field_coupling([g], hx=1.0, dof='0.spin')
+    coup.test_sanity()
+    # Two-site heisenberg between two grouped sites' first spins
+    g2 = sites.GroupedSite(
+        [sites.SpinSite(0.5, 'None', backend=backend), sites.SpinSite(0.5, 'None', backend=backend)],
+        symmetry_combine='same',
+    )
+    coup2 = couplings.heisenberg_coupling([g, g2], J=1.0, dof=['0.spin', '0.spin'])
+    coup2.test_sanity()
+
+
+def test_grouped_site_after_set_common_symmetry(block_backend):
+    backend = backends.get_backend('fusion_tree', block_backend=block_backend)
+    ferm = sites.SpinHalfFermionSite(conserve_N='N', conserve_S='Sz', backend=backend)
+    spin = sites.SpinSite(0.5, 'Sz', backend=backend)
+    sites.set_common_symmetry([ferm, spin], 'by_name')
+    g = sites.GroupedSite([ferm, spin], labels=['e', 'i'], symmetry_combine='same')
+    g.test_sanity()
+    assert g.n_sites == 2
+    assert 'e.spin' in g.dofs or 'e.occupation' in g.dofs
+
+
+def test_grouped_site_same_rejects_mismatched_symmetry(block_backend):
+    backend = backends.get_backend('abelian', block_backend=block_backend)
+    s0 = sites.SpinSite(0.5, 'Sz', backend=backend)
+    s1 = sites.SpinSite(0.5, 'parity', backend=backend)
+    with pytest.raises(ValueError, match='equivalent symmetries'):
+        sites.GroupedSite([s0, s1], symmetry_combine='same')

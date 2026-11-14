@@ -36,24 +36,26 @@ py_bool_dtype()
 ElementarySpace::Ptr
 as_elementary_space(Space::Ptr obj)
 {
-    if (std::dynamic_pointer_cast<LegPipe>(obj)) {
-        throw std::invalid_argument("Mask is not defined on LegPipes.");
-    }
     auto es = std::dynamic_pointer_cast<ElementarySpace>(obj);
     if (!es) {
         throw std::invalid_argument("Expected ElementarySpace.");
     }
+    if (es->is_pipe()) {
+        throw std::invalid_argument("Mask is not defined on LegPipes.");
+    }
     return es;
+}
+
+[[nodiscard]] Leg
+leg_from_space(Space::Ptr const& space)
+{
+    return Leg{ as_elementary_space(space) };
 }
 
 BlockBackend::LegCPtr
 as_leg_cptr(Space::Ptr const& space)
 {
-    auto es = std::dynamic_pointer_cast<ElementarySpace>(space);
-    if (!es) {
-        throw std::invalid_argument("Expected ElementarySpace for Mask leg.");
-    }
-    return std::static_pointer_cast<Leg const>(es);
+    return leg_from_space(space);
 }
 
 /// Invert each bool entry of a block (replaces ``operator.invert`` via numpy).
@@ -122,15 +124,13 @@ make_mask(TensorBackend::DataPtr data,
           Space::Ptr space_out,
           bool is_projection,
           TensorBackend::Ptr backend,
-          std::optional<OptionalLabels> labels)
+          std::optional<LegLabelList> labels)
 {
     as_elementary_space(space_in);
     as_elementary_space(space_out);
     auto [codomain, domain, backend_tp, symmetry] = Tensor::_init_parse_args(
-      std::make_shared<TensorProduct>(
-        std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(space_out) }),
-      std::make_shared<TensorProduct>(
-        std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(space_in) }),
+      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ leg_from_space(space_out) }),
+      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ leg_from_space(space_in) }),
       std::move(backend));
     auto labs = Tensor::_init_parse_labels(std::move(labels), codomain, domain);
     auto device_s = backend_tp->get_device_from_data(data);
@@ -161,12 +161,12 @@ Mask::Mask(TensorBackend::DataPtr data_in,
            bool is_projection_in,
            TensorBackend::Ptr backend_in,
            Symmetry::Ptr symmetry_in,
-           OptionalLabels labels_in,
+           LegLabelList labels_in,
            std::string device_in)
-  : Tensor(std::make_shared<TensorProduct>(
-             std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(space_out) }),
+  : Tensor(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
+             Leg{ std::dynamic_pointer_cast<ElementarySpace>(space_out) } }),
            std::make_shared<TensorProduct>(
-             std::vector<Leg::Ptr>{ std::dynamic_pointer_cast<Leg>(space_in) }),
+             std::vector<Leg::Ptr>{ Leg{ std::dynamic_pointer_cast<ElementarySpace>(space_in) } }),
            std::move(backend_in),
            std::move(symmetry_in),
            std::move(labels_in),
@@ -175,14 +175,14 @@ Mask::Mask(TensorBackend::DataPtr data_in,
   , is_projection(is_projection_in)
   , data(std::move(data_in))
 {
-    assert(backend->is_correct_data_type(data));
-    if (py::isinstance<LegPipe>(py::cast(space_in)) ||
-        py::isinstance<LegPipe>(py::cast(space_out))) {
-        throw std::invalid_argument("Mask is not defined on LegPipes.");
-    }
-    if (!std::dynamic_pointer_cast<ElementarySpace>(space_in) ||
-        !std::dynamic_pointer_cast<ElementarySpace>(space_out)) {
+    check(backend->is_correct_data_type(data), "Mask: incorrect backend data type");
+    auto es_in = std::dynamic_pointer_cast<ElementarySpace>(space_in);
+    auto es_out = std::dynamic_pointer_cast<ElementarySpace>(space_out);
+    if (!es_in || !es_out) {
         throw std::invalid_argument("Expected ElementarySpace.");
+    }
+    if (es_in->is_pipe() || es_out->is_pipe()) {
+        throw std::invalid_argument("Mask is not defined on LegPipes.");
     }
     if (is_projection) {
         if (!(space_dim(*space_in) >= space_dim(*space_out))) {
@@ -203,9 +203,7 @@ Mask::Mask(TensorBackend::DataPtr data_in,
               "inclusion mask requires the incoming space to be a subspace of the outgoing space");
         }
     }
-    auto es_out = std::dynamic_pointer_cast<ElementarySpace>(space_out);
-    auto es_in = std::dynamic_pointer_cast<ElementarySpace>(space_in);
-    if (!es_out || !es_in || es_out->is_dual != es_in->is_dual) {
+    if (es_out->is_dual != es_in->is_dual) {
         throw std::invalid_argument("mask legs must have matching duality");
     }
 }
@@ -232,18 +230,18 @@ ElementarySpace::Ptr
 Mask::large_leg() const
 {
     if (is_projection) {
-        return std::dynamic_pointer_cast<ElementarySpace>(domain->factors[0]);
+        return domain->factors[0].as_elementary_space();
     }
-    return std::dynamic_pointer_cast<ElementarySpace>(codomain->factors[0]);
+    return codomain->factors[0].as_elementary_space();
 }
 
 ElementarySpace::Ptr
 Mask::small_leg() const
 {
     if (is_projection) {
-        return std::dynamic_pointer_cast<ElementarySpace>(codomain->factors[0]);
+        return codomain->factors[0].as_elementary_space();
     }
-    return std::dynamic_pointer_cast<ElementarySpace>(domain->factors[0]);
+    return domain->factors[0].as_elementary_space();
 }
 
 void
@@ -256,15 +254,19 @@ Mask::test_sanity() const
     // ---
     Tensor::test_sanity();
     backend->test_mask_sanity(std::static_pointer_cast<Mask const>(shared_from_this()));
-    assert(codomain->num_factors == 1 && domain->num_factors == 1);
-    assert(std::dynamic_pointer_cast<ElementarySpace>(codomain->factors[0]));
-    assert(std::dynamic_pointer_cast<ElementarySpace>(domain->factors[0]));
+    check(codomain->num_factors == 1 && domain->num_factors == 1,
+          "Mask::test_sanity: expected single-factor domain and codomain");
+    check(static_cast<bool>(codomain->factors[0].as_elementary_space()),
+          "Mask::test_sanity: codomain factor must be ElementarySpace");
+    check(static_cast<bool>(domain->factors[0].as_elementary_space()),
+          "Mask::test_sanity: domain factor must be ElementarySpace");
     auto large = large_leg();
     auto small = small_leg();
-    assert(large->is_dual == small->is_dual);
-    assert(small->is_subspace_of(*large));
-    assert(dtype == Dtype::Bool);
-    assert(device == backend->get_device_from_data(data));
+    check(large->is_dual == small->is_dual, "Mask::test_sanity: large/small dual mismatch");
+    check(small->is_subspace_of(*large),
+          "Mask::test_sanity: small_leg is not a subspace of large_leg");
+    check(dtype == Dtype::Bool, "Mask::test_sanity: dtype must be bool");
+    check(device == backend->get_device_from_data(data), "Mask::test_sanity: device mismatch");
 
     // check consistency of the basis perm of the small leg.
     if (!large->has_custom_basis_perm()) {
@@ -311,7 +313,7 @@ Mask::Ptr
 Mask::from_eye(Space::Ptr leg,
                bool is_projection_flag,
                TensorBackend::Ptr backend,
-               std::optional<OptionalLabels> labels,
+               std::optional<LegLabelList> labels,
                std::optional<std::string> device)
 {
     auto diag = DiagonalTensor::from_eye(std::move(leg), backend, labels, Dtype::Bool, device);
@@ -326,7 +328,7 @@ Mask::Ptr
 Mask::from_block_mask(BlockBackend::BlockPtr block_mask,
                       Space::Ptr large_leg,
                       TensorBackend::Ptr backend,
-                      std::optional<OptionalLabels> labels,
+                      std::optional<LegLabelList> labels,
                       std::optional<std::string> device)
 {
     if (!large_leg->symmetry->can_be_dropped()) {
@@ -358,7 +360,7 @@ Mask::from_DiagonalTensor(DiagonalTensorCPtr diag)
                                   true,
                                   diag->backend,
                                   diag->symmetry,
-                                  diag->labels(),
+                                  diag->labels.as_list(),
                                   diag->device);
 }
 
@@ -366,7 +368,7 @@ Mask::Ptr
 Mask::from_indices(py::object indices,
                    Space::Ptr large_leg,
                    TensorBackend::Ptr backend,
-                   std::optional<OptionalLabels> labels,
+                   std::optional<LegLabelList> labels,
                    std::optional<std::string> device)
 {
     backend = resolve_backend(std::move(backend), large_leg);
@@ -394,7 +396,7 @@ Mask::from_random(Space::Ptr large_leg_in,
                   TensorBackend::Ptr backend,
                   float64 p_keep,
                   int64 min_keep,
-                  std::optional<OptionalLabels> labels,
+                  std::optional<LegLabelList> labels,
                   std::optional<std::string> device,
                   py::object np_random)
 {
@@ -511,7 +513,7 @@ Mask::from_random(Space::Ptr large_leg_in,
 Mask::Ptr
 Mask::from_zero(Space::Ptr large_leg,
                 TensorBackend::Ptr backend,
-                std::optional<OptionalLabels> labels,
+                std::optional<LegLabelList> labels,
                 std::optional<std::string> device)
 {
     backend = resolve_backend(std::move(backend), large_leg);
@@ -545,7 +547,7 @@ Mask::as_DiagonalTensor(Dtype out_dtype)
       large_leg(),
       backend,
       symmetry,
-      labels());
+      labels.as_list());
 }
 
 SymmetricTensorPtr
@@ -580,7 +582,7 @@ Mask::as_SymmetricTensor(bool /*guarantee_copy*/,
     auto new_data = backend->full_data_from_mask(
       std::static_pointer_cast<Mask const>(shared_from_this()), out_dtype);
     return std::make_shared<SymmetricTensor>(
-      new_data, codomain, domain, backend, symmetry, labels());
+      new_data, codomain, domain, backend, symmetry, labels.as_list());
 }
 
 Mask::Ptr
@@ -618,7 +620,7 @@ Mask::_binary_operand(MaskCPtr other, BlockBinaryFn func, std::string const& ope
     }
     auto [data_out, small] = same->mask_binary_operand(
       std::static_pointer_cast<Mask const>(shared_from_this()), other, std::move(func));
-    auto labs = _get_matching_labels(labels(), other->labels());
+    auto labs = _get_matching_labels(labels.as_list(), other->labels.as_list());
     return make_mask(data_out, large_leg(), small, is_projection, same, labs);
 }
 
@@ -638,7 +640,7 @@ Mask::_unary_operand(BlockUnaryFn func)
 
     auto [data_out, small] =
       backend->mask_unary_operand(std::static_pointer_cast<Mask const>(shared_from_this()), func);
-    return make_mask(data_out, large_leg(), small, true, backend, labels());
+    return make_mask(data_out, large_leg(), small, true, backend, labels.as_list());
 }
 
 Tensor::Ptr
@@ -660,23 +662,23 @@ Mask::copy(bool deep, std::optional<std::string> device_opt, std::optional<Dtype
     auto space_in = is_projection ? large_leg() : small_leg();
     auto space_out = is_projection ? small_leg() : large_leg();
     // domain is space_in, codomain is space_out
-    space_in = std::dynamic_pointer_cast<ElementarySpace>(domain->factors[0]);
-    space_out = std::dynamic_pointer_cast<ElementarySpace>(codomain->factors[0]);
+    space_in = domain->factors[0].as_elementary_space();
+    space_out = codomain->factors[0].as_elementary_space();
     return std::make_shared<Mask>(new_data,
                                   space_in,
                                   space_out,
                                   is_projection,
                                   backend,
                                   symmetry,
-                                  labels(),
+                                  labels.as_list(),
                                   backend->get_device_from_data(new_data));
 }
 
 Tensor::Ptr
 Mask::dagger() const
 {
-    auto labs = labels();
-    OptionalLabels dual_rev;
+    auto labs = labels.as_list();
+    LegLabelList dual_rev;
     dual_rev.reserve(labs.size());
     for (auto it = labs.rbegin(); it != labs.rend(); ++it) {
         dual_rev.push_back(_dual_leg_label(*it));
@@ -800,7 +802,7 @@ Mask::to_backend(TensorBackend::Ptr new_backend,
                                   is_projection,
                                   new_backend,
                                   symmetry,
-                                  labels(),
+                                  labels.as_list(),
                                   device_s);
 }
 
@@ -858,7 +860,7 @@ Mask::to_dense_block(std::optional<std::vector<std::variant<int64, std::string>>
         }
     }
     if (leg_order.has_value()) {
-        auto idcs = get_leg_idcs(*leg_order);
+        auto idcs = labels.indices(*leg_order);
         res = bb->permute_axes(res, idcs);
     }
     return res;
@@ -896,7 +898,7 @@ Mask::save_hdf5(lasyten::hdf5::Saver& saver,
     hdf5_io::h5_set_attr(h5gr.getId(), "num_legs", static_cast<std::int64_t>(num_legs));
     hdf5_export::save_f64_vector(saver, subpath + "shape", shape);
     hdf5_io::h5_set_attr(h5gr.getId(), "is_projection", is_projection);
-    hdf5_export::save_optional_labels(saver, subpath + "labels", _labels);
+    hdf5_export::save_leg_labels(saver, subpath + "labels", labels.as_list());
 }
 
 Mask::Ptr
@@ -919,11 +921,11 @@ Mask::from_hdf5(lasyten::hdf5::Loader& loader, HighFive::Group& h5gr, std::strin
         proj = space_dim(*space_in) >= space_dim(*space_out);
     }
 
-    OptionalLabels labels_in(2, std::nullopt);
+    LegLabelList labels_in(2, "");
     if (hdf5_io::h5_contains(loader.root(), subpath + "labels")) {
-        labels_in = hdf5_export::load_optional_labels(loader, subpath + "labels");
+        labels_in = hdf5_export::load_leg_labels(loader, subpath + "labels");
         if (labels_in.empty()) {
-            labels_in.assign(2, std::nullopt);
+            labels_in.assign(2, "");
         }
     }
 

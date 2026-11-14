@@ -65,26 +65,25 @@ vector_to_array(std::vector<int64> const& v)
 
 } // namespace
 
-Leg::Leg(Symmetry::Ptr symmetry_,
-         float64 dim_,
-         bool is_dual_,
-         std::optional<std::vector<int64>> basis_perm)
-{
-    init_leg(std::move(symmetry_), dim_, is_dual_, std::move(basis_perm));
-}
+namespace {
 
 void
-Leg::init_leg(Symmetry::Ptr symmetry_,
-              float64 dim_,
-              bool is_dual_,
-              std::optional<std::vector<int64>> basis_perm)
+init_axis_fields(Symmetry::Ptr& symmetry,
+                 float64& dim,
+                 bool& is_dual,
+                 std::optional<std::vector<int64>>& basis_perm_field,
+                 std::optional<std::vector<int64>>& inverse_basis_perm_field,
+                 Symmetry::Ptr symmetry_,
+                 float64 dim_,
+                 bool is_dual_,
+                 std::optional<std::vector<int64>> basis_perm)
 {
     symmetry = std::move(symmetry_);
     dim = dim_;
     is_dual = is_dual_;
     if (!basis_perm) {
-        _basis_perm = std::nullopt;
-        _inverse_basis_perm = std::nullopt;
+        basis_perm_field = std::nullopt;
+        inverse_basis_perm_field = std::nullopt;
     } else {
         if (!symmetry->can_be_dropped()) {
             throw SymmetryError(std::format("basis_perm is meaningless for {}.", symmetry->str()));
@@ -93,152 +92,115 @@ Leg::init_leg(Symmetry::Ptr symmetry_,
             throw std::invalid_argument(
               std::format("basis_perm length {} does not match dim {}", basis_perm->size(), dim));
         }
-        _basis_perm = std::move(basis_perm);
-        _inverse_basis_perm = inverse_permutation(*_basis_perm);
+        basis_perm_field = std::move(basis_perm);
+        inverse_basis_perm_field = inverse_permutation(*basis_perm_field);
     }
 }
 
 void
-Leg::test_sanity() const
+test_axis_sanity(Symmetry::Ptr const& symmetry,
+                 float64 dim,
+                 std::optional<std::vector<int64>> const& basis_perm,
+                 std::optional<std::vector<int64>> const& inverse_basis_perm)
 {
-    // --- hints from Python Leg.test_sanity ---
-    // is a permutation
-    // ---
     if (!symmetry->can_be_dropped()) {
-        assert(!_basis_perm);
+        check(!basis_perm, "basis_perm is only allowed for droppable symmetries");
     }
-    if (!_basis_perm) {
-        assert(!_inverse_basis_perm);
+    if (!basis_perm) {
+        check(!inverse_basis_perm, "inverse_basis_perm set without basis_perm");
     } else {
-        assert(_inverse_basis_perm);
+        check(static_cast<bool>(inverse_basis_perm), "basis_perm requires inverse_basis_perm");
         auto const n = dim_as_size(dim);
-        assert(_basis_perm->size() == n);
-        assert(_inverse_basis_perm->size() == n);
-        // is a permutation
-        assert(std::unordered_set<int64>(_basis_perm->begin(), _basis_perm->end()).size() == n);
-        assert(std::unordered_set<int64>(_inverse_basis_perm->begin(), _inverse_basis_perm->end())
-                 .size() == n);
+        check(basis_perm->size() == n, "basis_perm has wrong length");
+        check(inverse_basis_perm->size() == n, "inverse_basis_perm has wrong length");
+        check(std::unordered_set<int64>(basis_perm->begin(), basis_perm->end()).size() == n,
+              "basis_perm is not a permutation");
+        check(std::unordered_set<int64>(inverse_basis_perm->begin(), inverse_basis_perm->end())
+                  .size() == n,
+              "inverse_basis_perm is not a permutation");
         for (std::size_t i = 0; i < n; ++i) {
-            assert((*_basis_perm)[static_cast<std::size_t>((*_inverse_basis_perm)[i])] ==
-                   static_cast<int64>(i));
+            check((*basis_perm)[static_cast<std::size_t>((*inverse_basis_perm)[i])] ==
+                    static_cast<int64>(i),
+                  "basis_perm and inverse_basis_perm are inconsistent");
         }
     }
 }
 
-ElementarySpace::Ptr
-Leg::as_ElementarySpace(bool is_dual_)
-{
-    // --- hints from Python Leg.as_ElementarySpace ---
-    // can be overridden for performance
-    // ---
-    // can be overridden for performance
-    return as_space_obj()->as_ElementarySpace(is_dual_);
-}
-
-std::vector<int64>
-Leg::basis_perm() const
+[[nodiscard]] std::vector<int64>
+axis_basis_perm(Symmetry::Ptr const& symmetry,
+                float64 dim,
+                std::optional<std::vector<int64>> const& basis_perm)
 {
     if (!symmetry->can_be_dropped()) {
         throw SymmetryError(std::format("basis_perm is meaningless for {}.", symmetry->str()));
     }
-    if (!_basis_perm) {
+    if (!basis_perm) {
         return arange(dim_as_size(dim));
     }
-    return *_basis_perm;
+    return *basis_perm;
 }
 
 void
-Leg::set_basis_perm(std::optional<std::vector<int64>> basis_perm)
+axis_set_basis_perm(float64 dim,
+                    std::optional<std::vector<int64>>& basis_perm_field,
+                    std::optional<std::vector<int64>>& inverse_basis_perm_field,
+                    std::optional<std::vector<int64>> basis_perm)
 {
     if (!basis_perm) {
-        _basis_perm = std::nullopt;
-        _inverse_basis_perm = std::nullopt;
+        basis_perm_field = std::nullopt;
+        inverse_basis_perm_field = std::nullopt;
         return;
     }
     if (basis_perm->size() != dim_as_size(dim)) {
         throw std::invalid_argument(
           std::format("basis_perm length {} does not match dim {}", basis_perm->size(), dim));
     }
-    _basis_perm = std::move(basis_perm);
-    _inverse_basis_perm = inverse_permutation(*_basis_perm);
+    basis_perm_field = std::move(basis_perm);
+    inverse_basis_perm_field = inverse_permutation(*basis_perm_field);
 }
 
-std::vector<int64>
-Leg::inverse_basis_perm() const
+[[nodiscard]] std::vector<int64>
+axis_inverse_basis_perm(Symmetry::Ptr const& symmetry,
+                        float64 dim,
+                        std::optional<std::vector<int64>> const& inverse_basis_perm)
 {
     if (!symmetry->can_be_dropped()) {
         throw SymmetryError(std::format("basis_perm is meaningless for {}.", symmetry->str()));
     }
-    if (!_inverse_basis_perm) {
+    if (!inverse_basis_perm) {
         return arange(dim_as_size(dim));
     }
-    return *_inverse_basis_perm;
+    return *inverse_basis_perm;
 }
 
 void
-Leg::set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm)
+axis_set_inverse_basis_perm(float64 dim,
+                            std::optional<std::vector<int64>>& basis_perm_field,
+                            std::optional<std::vector<int64>>& inverse_basis_perm_field,
+                            std::optional<std::vector<int64>> inverse_basis_perm)
 {
     if (!inverse_basis_perm) {
-        _basis_perm = std::nullopt;
-        _inverse_basis_perm = std::nullopt;
+        basis_perm_field = std::nullopt;
+        inverse_basis_perm_field = std::nullopt;
         return;
     }
     if (inverse_basis_perm->size() != dim_as_size(dim)) {
         throw std::invalid_argument(std::format(
           "inverse_basis_perm length {} does not match dim {}", inverse_basis_perm->size(), dim));
     }
-    _inverse_basis_perm = std::move(inverse_basis_perm);
-    _basis_perm = inverse_permutation(*_inverse_basis_perm);
+    inverse_basis_perm_field = std::move(inverse_basis_perm);
+    basis_perm_field = inverse_permutation(*inverse_basis_perm_field);
 }
 
-Leg::Ptr
-Leg::shared_leg()
+[[nodiscard]] py::object
+axis_apply_basis_perm(std::optional<std::vector<int64>> const& basis_perm,
+                      std::optional<std::vector<int64>> const& inverse_basis_perm,
+                      py::object arr,
+                      int64 axis,
+                      bool inverse,
+                      bool pre_compose)
 {
-    return std::dynamic_pointer_cast<Leg>(shared_from_this());
-}
-
-std::vector<Leg::Ptr>
-Leg::flat_legs()
-{
-    return { shared_leg() };
-}
-
-std::vector<Leg::Ptr>
-Leg::flat_spaces()
-{
-    return { shared_leg() };
-}
-
-int64
-Leg::num_flat_legs() const
-{
-    return 1;
-}
-
-std::vector<int64>
-Leg::_flat_leg_permutation(int64 offset) const
-{
-    return { offset };
-}
-
-std::string
-Leg::ascii_arrow() const
-{
-    // --- hints from Python Leg.ascii_arrow ---
-    // should have already covered all cases
-    // ---
-    // Subclasses (ElementarySpace / LegPipe) override. Pure Leg should not appear in diagrams.
-    throw std::runtime_error("ascii_arrow not implemented for this Leg subclass");
-}
-
-py::object
-Leg::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose) const
-{
-    // --- hints from Python Leg.apply_basis_perm ---
-    // this implementation assumes _basis_perm. AbelianLegPipe overrides this method.
-    // perm is identity permutation
-    // ---
-    auto const& perm = inverse ? _inverse_basis_perm : _basis_perm;
+    auto const& perm = inverse ? inverse_basis_perm : basis_perm;
     if (!perm) {
         return arr;
     }
@@ -249,7 +211,6 @@ Leg::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose
         }
         return perm_arr[py::make_tuple(arr)];
     }
-    // Native take along `axis` (replaces numpy.take).
     py::array data = py::array::ensure(arr);
     if (!data) {
         throw std::invalid_argument("apply_basis_perm: expected array-like input");
@@ -261,7 +222,6 @@ Leg::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose
     if (axis < 0 || axis >= info.ndim) {
         throw std::invalid_argument("apply_basis_perm: axis out of range");
     }
-    // Use advanced indexing: arrange slices with perm on the chosen axis.
     py::list idx;
     for (py::ssize_t i = 0; i < info.ndim; ++i) {
         if (i == axis) {
@@ -271,6 +231,360 @@ Leg::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose
         }
     }
     return data[py::tuple(idx)];
+}
+
+} // namespace
+
+Leg::Leg(std::shared_ptr<ElementarySpace> es)
+  : impl(std::move(es))
+{
+}
+
+Leg::Leg(std::shared_ptr<LegPipe> pipe)
+  : impl(std::move(pipe))
+{
+}
+
+bool
+Leg::is_pipe() const
+{
+    return std::visit(
+      [](auto const& p) -> bool {
+          if (!p) {
+              return false;
+          }
+          return p->is_pipe();
+      },
+      impl);
+}
+
+bool
+Leg::is_abelian_leg_pipe() const
+{
+    return std::visit(
+      [](auto const& p) -> bool {
+          if (!p) {
+              return false;
+          }
+          return p->is_abelian_leg_pipe();
+      },
+      impl);
+}
+
+ElementarySpace::Ptr
+Leg::as_elementary_space() const
+{
+    if (auto const* es = std::get_if<ElementarySpace::Ptr>(&impl)) {
+        return *es;
+    }
+    return nullptr;
+}
+
+LegPipe::Ptr
+Leg::as_leg_pipe() const
+{
+    if (auto const* pipe = std::get_if<LegPipe::Ptr>(&impl)) {
+        return *pipe;
+    }
+    return nullptr;
+}
+
+Symmetry::Ptr
+Leg::symmetry() const
+{
+    return std::visit(
+      [](auto const& p) -> Symmetry::Ptr {
+          if (!p) {
+              throw std::runtime_error("Leg::symmetry on null Leg");
+          }
+          return p->symmetry;
+      },
+      impl);
+}
+
+float64
+Leg::dim() const
+{
+    return std::visit(
+      [](auto const& p) -> float64 {
+          if (!p) {
+              throw std::runtime_error("Leg::dim on null Leg");
+          }
+          return p->dim;
+      },
+      impl);
+}
+
+bool
+Leg::is_dual() const
+{
+    return std::visit(
+      [](auto const& p) -> bool {
+          if (!p) {
+              throw std::runtime_error("Leg::is_dual on null Leg");
+          }
+          return p->is_dual;
+      },
+      impl);
+}
+
+void
+Leg::test_sanity() const
+{
+    std::visit(
+      [](auto const& p) {
+          if (!p) {
+              throw std::runtime_error("Leg::test_sanity on null Leg");
+          }
+          p->test_sanity();
+      },
+      impl);
+}
+
+Space::Ptr
+Leg::as_space() const
+{
+    return std::visit(
+      [](auto const& p) -> Space::Ptr {
+          if (!p) {
+              throw std::runtime_error("Leg::as_space on null Leg");
+          }
+          if constexpr (std::is_same_v<std::decay_t<decltype(p)>, ElementarySpace::Ptr>) {
+              return p;
+          } else {
+              return p->as_space();
+          }
+      },
+      impl);
+}
+
+ElementarySpace::Ptr
+Leg::as_ElementarySpace(bool is_dual_) const
+{
+    return std::visit(
+      [is_dual_](auto const& p) -> ElementarySpace::Ptr {
+          if (!p) {
+              throw std::runtime_error("Leg::as_ElementarySpace on null Leg");
+          }
+          if constexpr (std::is_same_v<std::decay_t<decltype(p)>, ElementarySpace::Ptr>) {
+              return p->as_ElementarySpace(is_dual_);
+          } else {
+              return p->as_space()->as_ElementarySpace(is_dual_);
+          }
+      },
+      impl);
+}
+
+Leg
+Leg::dual() const
+{
+    return std::visit(
+      [](auto const& p) -> Leg {
+          if (!p) {
+              throw std::runtime_error("Leg::dual on null Leg");
+          }
+          if constexpr (std::is_same_v<std::decay_t<decltype(p)>, ElementarySpace::Ptr>) {
+              // Use virtual dual_space() so AbelianLegPipe / DirectSumSpace keep structure
+              // (dual_es() always constructs a plain ElementarySpace).
+              auto dual_sp = p->dual_space();
+              auto es = std::dynamic_pointer_cast<ElementarySpace>(dual_sp);
+              if (!es) {
+                  throw std::runtime_error(
+                    "Leg::dual: ElementarySpace::dual_space did not return ES");
+              }
+              return es;
+          } else {
+              return p->dual();
+          }
+      },
+      impl);
+}
+
+bool
+Leg::is_trivial() const
+{
+    return std::visit(
+      [](auto const& p) -> bool {
+          if (!p) {
+              throw std::runtime_error("Leg::is_trivial on null Leg");
+          }
+          return p->is_trivial();
+      },
+      impl);
+}
+
+std::vector<int64>
+Leg::basis_perm() const
+{
+    return std::visit(
+      [](auto const& p) {
+          if (!p) {
+              throw std::runtime_error("Leg::basis_perm on null Leg");
+          }
+          return p->basis_perm();
+      },
+      impl);
+}
+
+void
+Leg::set_basis_perm(std::optional<std::vector<int64>> basis_perm)
+{
+    std::visit(
+      [&](auto& p) {
+          if (!p) {
+              throw std::runtime_error("Leg::set_basis_perm on null Leg");
+          }
+          p->set_basis_perm(std::move(basis_perm));
+      },
+      impl);
+}
+
+std::vector<int64>
+Leg::inverse_basis_perm() const
+{
+    return std::visit(
+      [](auto const& p) {
+          if (!p) {
+              throw std::runtime_error("Leg::inverse_basis_perm on null Leg");
+          }
+          return p->inverse_basis_perm();
+      },
+      impl);
+}
+
+void
+Leg::set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm)
+{
+    std::visit(
+      [&](auto& p) {
+          if (!p) {
+              throw std::runtime_error("Leg::set_inverse_basis_perm on null Leg");
+          }
+          p->set_inverse_basis_perm(std::move(inverse_basis_perm));
+      },
+      impl);
+}
+
+bool
+Leg::has_custom_basis_perm() const
+{
+    return std::visit(
+      [](auto const& p) -> bool {
+          if (!p) {
+              return false;
+          }
+          return p->has_custom_basis_perm();
+      },
+      impl);
+}
+
+std::vector<Leg>
+Leg::flat_legs() const
+{
+    return std::visit(
+      [](auto const& p) {
+          if (!p) {
+              throw std::runtime_error("Leg::flat_legs on null Leg");
+          }
+          return p->flat_legs();
+      },
+      impl);
+}
+
+std::vector<Leg>
+Leg::flat_spaces() const
+{
+    return std::visit(
+      [](auto const& p) {
+          if (!p) {
+              throw std::runtime_error("Leg::flat_spaces on null Leg");
+          }
+          return p->flat_spaces();
+      },
+      impl);
+}
+
+int64
+Leg::num_flat_legs() const
+{
+    return std::visit(
+      [](auto const& p) -> int64 {
+          if (!p) {
+              throw std::runtime_error("Leg::num_flat_legs on null Leg");
+          }
+          return p->num_flat_legs();
+      },
+      impl);
+}
+
+std::vector<int64>
+Leg::_flat_leg_permutation(int64 offset) const
+{
+    return std::visit(
+      [offset](auto const& p) {
+          if (!p) {
+              throw std::runtime_error("Leg::_flat_leg_permutation on null Leg");
+          }
+          return p->_flat_leg_permutation(offset);
+      },
+      impl);
+}
+
+std::string
+Leg::ascii_arrow() const
+{
+    return std::visit(
+      [](auto const& p) {
+          if (!p) {
+              throw std::runtime_error("Leg::ascii_arrow on null Leg");
+          }
+          return p->ascii_arrow();
+      },
+      impl);
+}
+
+py::object
+Leg::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose) const
+{
+    return std::visit(
+      [&](auto const& p) {
+          if (!p) {
+              throw std::runtime_error("Leg::apply_basis_perm on null Leg");
+          }
+          return p->apply_basis_perm(arr, axis, inverse, pre_compose);
+      },
+      impl);
+}
+
+bool
+Leg::operator==(Leg const& other) const
+{
+    auto const* a_es = std::get_if<ElementarySpace::Ptr>(&impl);
+    auto const* b_es = std::get_if<ElementarySpace::Ptr>(&other.impl);
+    if (a_es && b_es) {
+        if (!*a_es || !*b_es) {
+            return static_cast<bool>(*a_es) == static_cast<bool>(*b_es);
+        }
+        // Call through Space::operator== so AbelianLegPipe / DirectSumSpace overrides run.
+        Space const& a = **a_es;
+        Space const& b = **b_es;
+        return a == b;
+    }
+    auto const* a_lp = std::get_if<LegPipe::Ptr>(&impl);
+    auto const* b_lp = std::get_if<LegPipe::Ptr>(&other.impl);
+    if (a_lp && b_lp) {
+        if (!*a_lp || !*b_lp) {
+            return static_cast<bool>(*a_lp) == static_cast<bool>(*b_lp);
+        }
+        return (**a_lp) == (**b_lp);
+    }
+    return false;
+}
+
+Leg::
+operator bool() const
+{
+    return std::visit([](auto const& p) { return static_cast<bool>(p); }, impl);
 }
 
 namespace {
@@ -399,50 +713,60 @@ Space::test_sanity() const
     // slices
     // slices should be consecutive
     // ---
-    assert(dim >= 0.);
+    check(dim >= 0., "Space::test_sanity: negative dim");
     // sectors
     if (static_cast<int64>(sector_decomposition.size()) != num_sectors ||
         sector_decomposition.sector_ind_len() != symmetry->sector_ind_len) {
         throw std::runtime_error("wrong sectors.shape");
     }
-    assert(symmetry->are_valid_sectors(sector_decomposition));
+    check(symmetry->are_valid_sectors(sector_decomposition),
+          "Space::test_sanity: invalid sectors");
     {
         std::vector<std::int64_t> ones(static_cast<std::size_t>(num_sectors), 1);
         auto const [unique, um, perm] = sector_decomposition.unique_sorted(ones);
-        assert(static_cast<int64>(unique.size()) == num_sectors);
+        check(static_cast<int64>(unique.size()) == num_sectors,
+              "Space::test_sanity: duplicate sectors");
         (void)um;
         (void)perm;
     }
     if (sector_order == "sorted") {
-        assert(is_identity_lexsort(sector_decomposition.lexsort_indices()));
+        check(is_identity_lexsort(sector_decomposition.lexsort_indices()),
+              "Space::test_sanity: sectors not sorted");
     } else if (sector_order == "dual_sorted") {
         auto expect_sorted = symmetry->dual_sectors(sector_decomposition);
-        assert(is_identity_lexsort(expect_sorted.lexsort_indices()));
+        check(is_identity_lexsort(expect_sorted.lexsort_indices()),
+              "Space::test_sanity: dual sectors not dual_sorted");
     } else if (!sector_order) {
         // nothing to check
     } else {
         throw std::runtime_error(std::format("Invalid sector_order: {}", *sector_order));
     }
     // multiplicities
-    assert(multiplicities.size() == static_cast<std::size_t>(num_sectors));
-    assert(std::ranges::all_of(multiplicities, [](int64 m) { return m > 0; }));
+    check(multiplicities.size() == static_cast<std::size_t>(num_sectors),
+          "Space::test_sanity: multiplicities size mismatch");
+    check(std::ranges::all_of(multiplicities, [](int64 m) { return m > 0; }),
+          "Space::test_sanity: non-positive multiplicity");
     if (symmetry->can_be_dropped()) {
-        assert(slices);
-        assert(sector_dims);
-        assert(slices->size() == static_cast<std::size_t>(num_sectors));
+        check(static_cast<bool>(slices), "Space::test_sanity: missing slices");
+        check(static_cast<bool>(sector_dims), "Space::test_sanity: missing sector_dims");
+        check(slices->size() == static_cast<std::size_t>(num_sectors),
+              "Space::test_sanity: slices size mismatch");
         auto expect_dims = symmetry->batch_sector_dim(sector_decomposition);
-        assert(*sector_dims == expect_dims);
+        check(*sector_dims == expect_dims, "Space::test_sanity: sector_dims mismatch");
         for (std::size_t i = 0; i < static_cast<std::size_t>(num_sectors); ++i) {
-            assert((*slices)[i][1] - (*slices)[i][0] == (*sector_dims)[i] * multiplicities[i]);
+            check((*slices)[i][1] - (*slices)[i][0] == (*sector_dims)[i] * multiplicities[i],
+                  "Space::test_sanity: slice width mismatch");
         }
         // slices should be consecutive
         if (num_sectors > 0) {
-            assert((*slices)[0][0] == 0);
+            check((*slices)[0][0] == 0, "Space::test_sanity: slices do not start at 0");
             for (std::size_t i = 1; i < static_cast<std::size_t>(num_sectors); ++i) {
-                assert((*slices)[i][0] == (*slices)[i - 1][1]);
+                check((*slices)[i][0] == (*slices)[i - 1][1],
+                      "Space::test_sanity: slices not consecutive");
             }
-            assert((*slices)[static_cast<std::size_t>(num_sectors) - 1][1] ==
-                   static_cast<int64>(dim));
+            check((*slices)[static_cast<std::size_t>(num_sectors) - 1][1] ==
+                    static_cast<int64>(dim),
+                  "Space::test_sanity: slices do not cover dim");
         }
     }
 }
@@ -608,18 +932,7 @@ Space::as_ElementarySpace(bool is_dual_)
 Space::Ptr
 Space::shared_space()
 {
-    // --- hints from Python ElementarySpace.from_defining_sectors ---
-    // sort sectors
-    // combine duplicate sectors (does not affect basis_perm)
-    // the convention is that for sectors with dim > 1, all copies of the first
-    // state appear, then all copies of the second state, etc. At this point,
-    // this order is not yet fully respected
-    // updated basis_slices after sorting defining_sectors
-    // take the basis_perm associated with the first states and make them contiguous,
-    // then go to the second state, etc.
-    // [:-1] to exclude len
-    // ---
-    return std::dynamic_pointer_cast<Space>(shared_from_this());
+    return shared_from_this();
 }
 
 Space::Ptr
@@ -663,11 +976,11 @@ Space::total_multiplicity() const
 namespace {
 
 [[nodiscard]] std::optional<std::vector<int64>>
-combined_basis_perm(std::vector<Leg::Ptr> const& legs, bool combine_cstyle)
+combined_basis_perm(std::vector<Leg> const& legs, bool combine_cstyle)
 {
     bool any_custom = false;
     for (auto const& leg : legs) {
-        if (leg->has_custom_basis_perm()) {
+        if (leg.has_custom_basis_perm()) {
             any_custom = true;
             break;
         }
@@ -678,15 +991,31 @@ combined_basis_perm(std::vector<Leg::Ptr> const& legs, bool combine_cstyle)
     std::vector<std::vector<int64>> perms;
     perms.reserve(legs.size());
     for (auto const& leg : legs) {
-        perms.push_back(leg->basis_perm());
+        perms.push_back(leg.basis_perm());
     }
     return combine_permutations(perms, combine_cstyle);
 }
 
 } // namespace
 
-// note: Leg is a virtual base and can therefore not be initialized here, see Leg::init_leg.
-LegPipe::LegPipe(std::vector<Leg::Ptr> legs_, bool is_dual_, bool combine_cstyle_)
+void
+LegPipe::init_axis(Symmetry::Ptr symmetry_,
+                   float64 dim_,
+                   bool is_dual_,
+                   std::optional<std::vector<int64>> basis_perm)
+{
+    init_axis_fields(symmetry,
+                     dim,
+                     is_dual,
+                     _basis_perm,
+                     _inverse_basis_perm,
+                     std::move(symmetry_),
+                     dim_,
+                     is_dual_,
+                     std::move(basis_perm));
+}
+
+LegPipe::LegPipe(std::vector<Leg> legs_, bool is_dual_, bool combine_cstyle_)
   : legs(std::move(legs_))
   , num_legs(static_cast<int64>(legs.size()))
   , combine_cstyle(combine_cstyle_)
@@ -694,44 +1023,44 @@ LegPipe::LegPipe(std::vector<Leg::Ptr> legs_, bool is_dual_, bool combine_cstyle
     if (num_legs <= 0) {
         throw std::invalid_argument("LegPipe requires at least one leg");
     }
-    auto const& symmetry0 = legs.at(0)->symmetry;
+    auto const symmetry0 = legs.at(0).symmetry();
     float64 dim_prod = 1.;
     for (auto const& leg : legs) {
-        if (!leg->symmetry->equals(*symmetry0)) {
+        if (!leg.symmetry()->equals(*symmetry0)) {
             throw std::invalid_argument("all legs of a LegPipe must have the same symmetry");
         }
-        dim_prod *= leg->dim;
+        dim_prod *= leg.dim();
     }
-    init_leg(symmetry0, dim_prod, is_dual_, combined_basis_perm(legs, combine_cstyle));
+    init_axis(symmetry0, dim_prod, is_dual_, combined_basis_perm(legs, combine_cstyle));
 }
 
 void
 LegPipe::test_sanity() const
 {
     for (auto const& leg : legs) {
-        if (!leg->symmetry->equals(*symmetry)) {
+        if (!leg.symmetry()->equals(*symmetry)) {
             throw std::invalid_argument("all legs of a LegPipe must have the same symmetry");
         }
-        leg->test_sanity();
+        leg.test_sanity();
     }
-    Leg::test_sanity();
+    test_axis_sanity(symmetry, dim, _basis_perm, _inverse_basis_perm);
 }
 
 Space::Ptr
-LegPipe::as_space_obj()
+LegPipe::as_space() const
 {
     // Factors stay as Legs (ElementarySpace / nested LegPipe). Nested pipes must not be
-    // converted to TensorProduct here — TensorProduct factors are Leg::Ptr only.
+    // converted to TensorProduct here — TensorProduct factors are Leg only.
     return std::make_shared<TensorProduct>(legs, symmetry);
 }
 
-Leg::Ptr
-LegPipe::dual_leg() const
+Leg
+LegPipe::dual() const
 {
-    std::vector<Leg::Ptr> dual_legs;
+    std::vector<Leg> dual_legs;
     dual_legs.reserve(legs.size());
     for (auto it = legs.rbegin(); it != legs.rend(); ++it) {
-        dual_legs.push_back((*it)->dual_leg());
+        dual_legs.push_back(it->dual());
     }
     return std::make_shared<LegPipe>(std::move(dual_legs), !is_dual, !combine_cstyle);
 }
@@ -739,26 +1068,50 @@ LegPipe::dual_leg() const
 bool
 LegPipe::is_trivial() const
 {
-    return std::ranges::all_of(legs, [](Leg::Ptr const& leg) { return leg->is_trivial(); });
+    return std::ranges::all_of(legs, [](Leg const& leg) { return leg.is_trivial(); });
 }
 
-std::vector<Leg::Ptr>
-LegPipe::flat_legs()
+std::vector<int64>
+LegPipe::basis_perm() const
 {
-    std::vector<Leg::Ptr> out;
+    return axis_basis_perm(symmetry, dim, _basis_perm);
+}
+
+void
+LegPipe::set_basis_perm(std::optional<std::vector<int64>> /*basis_perm*/)
+{
+    throw py::type_error(std::format("Can not set basis_perm for {}.", "LegPipe"));
+}
+
+std::vector<int64>
+LegPipe::inverse_basis_perm() const
+{
+    return axis_inverse_basis_perm(symmetry, dim, _inverse_basis_perm);
+}
+
+void
+LegPipe::set_inverse_basis_perm(std::optional<std::vector<int64>> /*inverse_basis_perm*/)
+{
+    throw py::type_error(std::format("Can not set basis_perm for {}.", "LegPipe"));
+}
+
+std::vector<Leg>
+LegPipe::flat_legs() const
+{
+    std::vector<Leg> out;
     for (auto const& leg : legs) {
-        auto part = leg->flat_legs();
+        auto part = leg.flat_legs();
         out.insert(out.end(), part.begin(), part.end());
     }
     return out;
 }
 
-std::vector<Leg::Ptr>
-LegPipe::flat_spaces()
+std::vector<Leg>
+LegPipe::flat_spaces() const
 {
-    std::vector<Leg::Ptr> out;
+    std::vector<Leg> out;
     for (auto const& leg : legs) {
-        auto part = leg->flat_spaces();
+        auto part = leg.flat_spaces();
         out.insert(out.end(), part.begin(), part.end());
     }
     return out;
@@ -769,7 +1122,7 @@ LegPipe::num_flat_legs() const
 {
     int64 n = 0;
     for (auto const& leg : legs) {
-        n += leg->num_flat_legs();
+        n += leg.num_flat_legs();
     }
     return n;
 }
@@ -785,7 +1138,7 @@ LegPipe::_flat_leg_permutation(int64 offset) const
         }
         return perm;
     }
-    std::vector<Leg::Ptr> ordered = legs;
+    std::vector<Leg> ordered = legs;
     if (!combine_cstyle) {
         std::reverse(ordered.begin(), ordered.end());
     }
@@ -794,29 +1147,17 @@ LegPipe::_flat_leg_permutation(int64 offset) const
     int64 running = offset;
     for (auto const& leg : ordered) {
         offsets.push_back(running);
-        running += leg->num_flat_legs();
+        running += leg.num_flat_legs();
     }
     if (!combine_cstyle) {
         std::reverse(offsets.begin(), offsets.end());
     }
     std::vector<int64> perm;
     for (std::size_t i = 0; i < legs.size(); ++i) {
-        auto part = legs[i]->_flat_leg_permutation(offsets[i]);
+        auto part = legs[i]._flat_leg_permutation(offsets[i]);
         perm.insert(perm.end(), part.begin(), part.end());
     }
     return perm;
-}
-
-void
-LegPipe::set_basis_perm(std::optional<std::vector<int64>> /*basis_perm*/)
-{
-    throw py::type_error(std::format("Can not set basis_perm for {}.", "LegPipe"));
-}
-
-void
-LegPipe::set_inverse_basis_perm(std::optional<std::vector<int64>> /*inverse_basis_perm*/)
-{
-    throw py::type_error(std::format("Can not set basis_perm for {}.", "LegPipe"));
 }
 
 std::string
@@ -825,39 +1166,45 @@ LegPipe::ascii_arrow() const
     return "║";
 }
 
-bool
-LegPipe::operator==(Leg const& other) const
+py::object
+LegPipe::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose) const
 {
-    auto const* o = dynamic_cast<LegPipe const*>(&other);
-    if (o == nullptr) {
+    return axis_apply_basis_perm(
+      _basis_perm, _inverse_basis_perm, arr, axis, inverse, pre_compose);
+}
+
+bool
+LegPipe::operator==(LegPipe const& other) const
+{
+    if (is_dual != other.is_dual) {
         return false;
     }
-    if (is_abelian_leg_pipe() != o->is_abelian_leg_pipe()) {
+    if (combine_cstyle != other.combine_cstyle) {
         return false;
     }
-    if (is_dual != o->is_dual) {
-        return false;
-    }
-    if (combine_cstyle != o->combine_cstyle) {
-        return false;
-    }
-    if (num_legs != o->num_legs) {
+    if (num_legs != other.num_legs) {
         return false;
     }
     for (std::size_t i = 0; i < legs.size(); ++i) {
-        if (!(*legs[i] == *o->legs[i])) {
+        if (!(legs[i] == other.legs[i])) {
             return false;
         }
     }
     return true;
 }
 
-Leg::Ptr
+Leg
 LegPipe::operator[](int64 idx) const
 {
     auto const n = static_cast<int64>(legs.size());
     auto const i = to_valid_idx(idx, n);
     return legs[static_cast<std::size_t>(i)];
+}
+
+LegPipe::Ptr
+LegPipe::shared_pipe()
+{
+    return shared_from_this();
 }
 
 std::string
@@ -1043,8 +1390,27 @@ optional_perm_from_py(py::object obj)
 
 } // namespace
 
-// note: Leg is a virtual base and can therefore not be initialized here, see Leg::init_leg.
-// This is also convenient, since the dim is only computed by the Space constructor.
+void
+ElementarySpace::init_axis(std::optional<std::vector<int64>> basis_perm)
+{
+    // Space::symmetry / Space::dim already set by the Space base constructor.
+    if (!basis_perm) {
+        _basis_perm = std::nullopt;
+        _inverse_basis_perm = std::nullopt;
+        return;
+    }
+    if (!Space::symmetry->can_be_dropped()) {
+        throw SymmetryError(
+          std::format("basis_perm is meaningless for {}.", Space::symmetry->str()));
+    }
+    if (basis_perm->size() != dim_as_size(Space::dim)) {
+        throw std::invalid_argument(std::format(
+          "basis_perm length {} does not match dim {}", basis_perm->size(), Space::dim));
+    }
+    _basis_perm = std::move(basis_perm);
+    _inverse_basis_perm = inverse_permutation(*_basis_perm);
+}
+
 ElementarySpace::ElementarySpace(Symmetry::Ptr symmetry_,
                                  SectorArray defining_sectors_,
                                  std::optional<std::vector<int64>> multiplicities_,
@@ -1056,25 +1422,29 @@ ElementarySpace::ElementarySpace(Symmetry::Ptr symmetry_,
           is_dual_ ? std::optional<std::string>{ "dual_sorted" }
                    : std::optional<std::string>{ "sorted" })
   , defining_sectors(std::move(defining_sectors_))
+  , is_dual(is_dual_)
 {
     if (!symmetry_->are_valid_sectors(defining_sectors)) {
         throw std::invalid_argument("defining_sectors contains invalid sectors for this symmetry");
     }
-    init_leg(Space::symmetry, Space::dim, is_dual_, std::move(basis_perm_));
+    init_axis(std::move(basis_perm_));
 }
 
 void
 ElementarySpace::test_sanity() const
 {
-    assert(static_cast<int64>(defining_sectors.size()) == num_sectors);
-    assert(defining_sectors.sector_ind_len() == Space::symmetry->sector_ind_len);
+    check(static_cast<int64>(defining_sectors.size()) == num_sectors,
+          "ElementarySpace::test_sanity: defining_sectors size mismatch");
+    check(defining_sectors.sector_ind_len() == Space::symmetry->sector_ind_len,
+          "ElementarySpace::test_sanity: defining_sectors ind_len mismatch");
     if (is_dual) {
-        assert(sector_order == "dual_sorted");
+        check(sector_order == "dual_sorted",
+              "ElementarySpace::test_sanity: dual space must be dual_sorted");
     } else {
-        assert(sector_order == "sorted");
+        check(sector_order == "sorted", "ElementarySpace::test_sanity: ket space must be sorted");
     }
     Space::test_sanity();
-    Leg::test_sanity();
+    test_axis_sanity(Space::symmetry, Space::dim, _basis_perm, _inverse_basis_perm);
 }
 
 ElementarySpace::Ptr
@@ -1239,7 +1609,7 @@ ElementarySpace::from_largest_common_subspace(std::vector<Space::Ptr> const& spa
     // from_sector_decomposition potentially introduces a meaningless basis_perm,
     // which we want to ignore here.
     // OPTIMIZE (JU) then dont compute it in the first place?
-    res->Leg::set_basis_perm(std::nullopt);
+    res->set_basis_perm(std::nullopt);
     return res;
 }
 
@@ -1405,7 +1775,7 @@ ElementarySpace::Ptr
 ElementarySpace::shared_es() const
 {
     return std::const_pointer_cast<ElementarySpace>(
-      std::dynamic_pointer_cast<const ElementarySpace>(shared_from_this()));
+      std::dynamic_pointer_cast<ElementarySpace const>(shared_from_this()));
 }
 
 SectorArray
@@ -1533,20 +1903,6 @@ ElementarySpace::repr(bool show_symmetry, bool one_line) const
 }
 
 bool
-ElementarySpace::operator==(Leg const& other) const
-{
-    // --- hints from Python ElementarySpace.__eq__ ---
-    // check this first to safely compare later
-    // both permutations are trivial, thus equal
-    // ---
-    auto const* o = dynamic_cast<ElementarySpace const*>(&other);
-    if (o == nullptr) {
-        return false;
-    }
-    return equals_es(*o);
-}
-
-bool
 ElementarySpace::operator==(Space const& other) const
 {
     auto const* o = dynamic_cast<ElementarySpace const*>(&other);
@@ -1632,7 +1988,7 @@ ElementarySpace::change_symmetry(Symmetry::Ptr symmetry, SectorMapFn sector_map,
 
 ElementarySpace::Ptr
 ElementarySpace::direct_sum(std::vector<Ptr> const& others,
-                            std::optional<OptionalLabels> summand_labels) const
+                            std::optional<LegLabelList> summand_labels) const
 {
     std::vector<Ptr> all;
     all.reserve(1 + others.size());
@@ -1686,12 +2042,6 @@ ElementarySpace::dual_space() const
     return dual_es();
 }
 
-Leg::Ptr
-ElementarySpace::dual_leg() const
-{
-    return dual_es();
-}
-
 ElementarySpace::Ptr
 ElementarySpace::dual_es() const
 {
@@ -1723,7 +2073,9 @@ ElementarySpace::parse_index(int64 idx) const
         }
     }
     auto const sector_idx = static_cast<int64>(lo) - 1;
-    assert(sector_idx >= 0);
+    if (sector_idx < 0) {
+        throw std::invalid_argument("ElementarySpace::parse_index: index out of range");
+    }
     auto const multiplicity_idx = idx - sl[static_cast<std::size_t>(sector_idx)][0];
     return { sector_idx, multiplicity_idx };
 }
@@ -1845,22 +2197,72 @@ ElementarySpace::with_is_dual(bool is_dual_) const
     return with_opposite_duality();
 }
 
-Space::Ptr
-ElementarySpace::as_space_obj()
-{
-    return shared_es();
-}
-
 bool
 ElementarySpace::is_trivial() const
 {
     return Space::is_trivial();
 }
 
+std::vector<Leg>
+ElementarySpace::flat_legs() const
+{
+    return { Leg{ shared_es() } };
+}
+
+std::vector<Leg>
+ElementarySpace::flat_spaces() const
+{
+    return { Leg{ shared_es() } };
+}
+
+int64
+ElementarySpace::num_flat_legs() const
+{
+    return 1;
+}
+
+std::vector<int64>
+ElementarySpace::_flat_leg_permutation(int64 offset) const
+{
+    return { offset };
+}
+
 std::string
 ElementarySpace::ascii_arrow() const
 {
     return is_dual ? "^" : "v";
+}
+
+std::vector<int64>
+ElementarySpace::basis_perm() const
+{
+    return axis_basis_perm(Space::symmetry, Space::dim, _basis_perm);
+}
+
+void
+ElementarySpace::set_basis_perm(std::optional<std::vector<int64>> basis_perm)
+{
+    axis_set_basis_perm(Space::dim, _basis_perm, _inverse_basis_perm, std::move(basis_perm));
+}
+
+std::vector<int64>
+ElementarySpace::inverse_basis_perm() const
+{
+    return axis_inverse_basis_perm(Space::symmetry, Space::dim, _inverse_basis_perm);
+}
+
+void
+ElementarySpace::set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm)
+{
+    axis_set_inverse_basis_perm(
+      Space::dim, _basis_perm, _inverse_basis_perm, std::move(inverse_basis_perm));
+}
+
+py::object
+ElementarySpace::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose) const
+{
+    return axis_apply_basis_perm(
+      _basis_perm, _inverse_basis_perm, arr, axis, inverse, pre_compose);
 }
 
 void
@@ -1938,12 +2340,12 @@ dss_cumsum_with_leading_zero(std::vector<int64> const& mults)
     return out;
 }
 
-[[nodiscard]] std::pair<std::vector<ElementarySpace::Ptr>, OptionalLabels>
+[[nodiscard]] std::pair<std::vector<ElementarySpace::Ptr>, LegLabelList>
 flatten_direct_sum_spaces(std::vector<ElementarySpace::Ptr> const& spaces,
-                          OptionalLabels const& labels)
+                          LegLabelList const& labels)
 {
     std::vector<ElementarySpace::Ptr> flat;
-    OptionalLabels flat_labels;
+    LegLabelList flat_labels;
     flat.reserve(spaces.size());
     flat_labels.reserve(spaces.size());
     for (std::size_t i = 0; i < spaces.size(); ++i) {
@@ -1952,12 +2354,12 @@ flatten_direct_sum_spaces(std::vector<ElementarySpace::Ptr> const& spaces,
         if (!s) {
             throw std::invalid_argument("DirectSumSpace summands must be non-null");
         }
-        if (std::dynamic_pointer_cast<LegPipe>(s)) {
+        if (s->is_pipe()) {
             throw std::invalid_argument(
               "DirectSumSpace summands must be plain ElementarySpaces (not pipes)");
         }
         if (auto dss = std::dynamic_pointer_cast<DirectSumSpace>(s)) {
-            if (label) {
+            if (!label.empty()) {
                 throw std::invalid_argument(
                   "Can not attach an explicit summand label to a nested DirectSumSpace summand; "
                   "its own summand_labels are propagated to the flattened slots instead.");
@@ -1976,18 +2378,18 @@ flatten_direct_sum_spaces(std::vector<ElementarySpace::Ptr> const& spaces,
 
 /// Duplicate entries (ignoring unset labels) and invalid-syntax labels raise.
 void
-validate_summand_labels(OptionalLabels const& labels)
+validate_summand_labels(LegLabelList const& labels)
 {
     std::unordered_set<std::string> seen;
     for (auto const& l : labels) {
-        if (!l) {
+        if (l.empty()) {
             continue;
         }
         if (!is_valid_leg_label(l)) {
-            throw std::invalid_argument(std::format("Invalid summand label: {}", *l));
+            throw std::invalid_argument(std::format("Invalid summand label: {}", l));
         }
-        if (!seen.insert(*l).second) {
-            throw std::invalid_argument(std::format("Duplicate summand label: {}", *l));
+        if (!seen.insert(l).second) {
+            throw std::invalid_argument(std::format("Duplicate summand label: {}", l));
         }
     }
 }
@@ -1997,10 +2399,9 @@ validate_summand_labels(OptionalLabels const& labels)
 DirectSumSpace::Prepared
 DirectSumSpace::prepare(std::vector<ElementarySpace::Ptr> spaces_in,
                         bool is_dual_,
-                        std::optional<OptionalLabels> summand_labels_in)
+                        std::optional<LegLabelList> summand_labels_in)
 {
-    OptionalLabels labels_in =
-      summand_labels_in.value_or(OptionalLabels(spaces_in.size(), std::nullopt));
+    LegLabelList labels_in = summand_labels_in.value_or(LegLabelList(spaces_in.size(), ""));
     if (labels_in.size() != spaces_in.size()) {
         throw std::invalid_argument("summand_labels must have the same length as spaces");
     }
@@ -2066,15 +2467,15 @@ DirectSumSpace::DirectSumSpace(Prepared prepared, bool is_dual_)
   , summand_labels(std::move(prepared.summand_labels))
 {
     for (std::size_t i = 0; i < summand_labels.size(); ++i) {
-        if (summand_labels[i]) {
-            _summand_labelmap[*summand_labels[i]] = static_cast<int64>(i);
+        if (!summand_labels[i].empty()) {
+            _summand_labelmap[summand_labels[i]] = static_cast<int64>(i);
         }
     }
 }
 
 DirectSumSpace::DirectSumSpace(std::vector<ElementarySpace::Ptr> spaces_,
                                bool is_dual_,
-                               std::optional<OptionalLabels> summand_labels_)
+                               std::optional<LegLabelList> summand_labels_)
   : DirectSumSpace(prepare(std::move(spaces_), is_dual_, std::move(summand_labels_)), is_dual_)
 {
 }
@@ -2082,7 +2483,7 @@ DirectSumSpace::DirectSumSpace(std::vector<ElementarySpace::Ptr> spaces_,
 DirectSumSpace::Ptr
 DirectSumSpace::from_spaces(std::vector<ElementarySpace::Ptr> spaces_,
                             bool is_dual_,
-                            std::optional<OptionalLabels> summand_labels_)
+                            std::optional<LegLabelList> summand_labels_)
 {
     return std::make_shared<DirectSumSpace>(
       std::move(spaces_), is_dual_, std::move(summand_labels_));
@@ -2100,7 +2501,7 @@ DirectSumSpace::get_summand_idx(SummandRef which) const
                 if (i > 0) {
                     available += ", ";
                 }
-                available += summand_labels[i] ? *summand_labels[i] : std::string("None");
+                available += summand_labels[i].empty() ? std::string("None") : summand_labels[i];
             }
             throw std::invalid_argument(
               std::format("No summand with label {}. Labels are [{}]", label, available));
@@ -2150,7 +2551,7 @@ DirectSumSpace::test_sanity() const
         if (s->is_direct_sum_space()) {
             throw std::logic_error("DirectSumSpace::test_sanity: nested DirectSumSpace");
         }
-        if (std::dynamic_pointer_cast<LegPipe>(s)) {
+        if (s->is_pipe()) {
             throw std::logic_error("DirectSumSpace::test_sanity: pipe summand");
         }
         if (s->is_dual != is_dual) {
@@ -2206,12 +2607,6 @@ DirectSumSpace::as_plain_ElementarySpace() const
                                                   /*unique_sectors=*/true);
 }
 
-Space::Ptr
-DirectSumSpace::as_space_obj()
-{
-    return shared_dss();
-}
-
 ElementarySpace::Ptr
 DirectSumSpace::as_ElementarySpace(bool is_dual_)
 {
@@ -2220,12 +2615,6 @@ DirectSumSpace::as_ElementarySpace(bool is_dual_)
 
 Space::Ptr
 DirectSumSpace::dual_space() const
-{
-    return dual_dss();
-}
-
-Leg::Ptr
-DirectSumSpace::dual_leg() const
 {
     return dual_dss();
 }
@@ -2296,16 +2685,6 @@ DirectSumSpace::with_opposite_duality() const
         new_spaces.push_back(s->with_opposite_duality());
     }
     return from_spaces(std::move(new_spaces), !is_dual, summand_labels);
-}
-
-bool
-DirectSumSpace::operator==(Leg const& other) const
-{
-    auto const* o = dynamic_cast<DirectSumSpace const*>(&other);
-    if (o == nullptr) {
-        return false;
-    }
-    return equals_dss(*o);
 }
 
 bool
@@ -2410,7 +2789,7 @@ DirectSumSpace::save_hdf5(lasyten::hdf5::Saver& saver,
         hdf5_export::save_elementary_space(spaces_saver, std::to_string(i), spaces[i]);
     }
     hdf5_io::h5_set_attr(h5gr.getId(), "is_direct_sum_space", true);
-    hdf5_export::save_optional_labels(saver, subpath + "summand_labels", summand_labels);
+    hdf5_export::save_leg_labels(saver, subpath + "summand_labels", summand_labels);
 }
 
 DirectSumSpace::Ptr
@@ -2429,12 +2808,11 @@ DirectSumSpace::from_hdf5(lasyten::hdf5::Loader& loader,
     }
     auto const is_dual_attr = hdf5_io::h5_get_attr_int64(h5gr.getId(), "is_dual");
     bool const is_dual = is_dual_attr.value_or(0) != 0;
-    std::optional<OptionalLabels> summand_labels_;
+    std::optional<LegLabelList> summand_labels_;
     if (hdf5_io::h5_contains(loader.root(), subpath + "summand_labels")) {
-        auto labs = hdf5_export::load_optional_labels(loader, subpath + "summand_labels");
-        summand_labels_ = labs.empty() && !spaces_.empty()
-                            ? OptionalLabels(spaces_.size(), std::nullopt)
-                            : std::move(labs);
+        auto labs = hdf5_export::load_leg_labels(loader, subpath + "summand_labels");
+        summand_labels_ =
+          labs.empty() && !spaces_.empty() ? LegLabelList(spaces_.size(), "") : std::move(labs);
     }
     auto obj = from_spaces(std::move(spaces_), is_dual, std::move(summand_labels_));
     loader.memorize_load(h5gr.getId(), std::static_pointer_cast<void>(obj));
@@ -2445,31 +2823,31 @@ namespace {
 
 /// The symmetry of a :class:`TensorProduct` factor.
 [[nodiscard]] Symmetry::Ptr
-factor_symmetry(Leg::Ptr const& factor)
+factor_symmetry(Leg const& factor)
 {
-    return factor->symmetry;
+    return factor.symmetry();
 }
 
-[[nodiscard]] Leg::Ptr
-factor_change_symmetry(Leg::Ptr const& factor,
+[[nodiscard]] Leg
+factor_change_symmetry(Leg const& factor,
                        Symmetry::Ptr const& symmetry,
                        SectorMapFn const& sector_map,
                        bool injective)
 {
-    if (auto space = std::dynamic_pointer_cast<Space>(factor)) {
-        auto changed = space->change_symmetry(symmetry, sector_map, injective);
-        auto leg = std::dynamic_pointer_cast<Leg>(changed);
-        if (!leg) {
+    if (auto es = factor.as_elementary_space()) {
+        auto changed = es->change_symmetry(symmetry, sector_map, injective);
+        auto out = std::dynamic_pointer_cast<ElementarySpace>(changed);
+        if (!out) {
             throw std::invalid_argument(
               "change_symmetry on a TensorProduct factor must yield a Leg");
         }
-        return leg;
+        return out;
     }
-    auto pipe = std::dynamic_pointer_cast<LegPipe>(factor);
+    auto pipe = factor.as_leg_pipe();
     if (!pipe) {
         throw std::invalid_argument("TensorProduct factor is not a Leg");
     }
-    std::vector<Leg::Ptr> new_legs;
+    std::vector<Leg> new_legs;
     new_legs.reserve(pipe->legs.size());
     for (auto const& leg : pipe->legs) {
         new_legs.push_back(factor_change_symmetry(leg, symmetry, sector_map, injective));
@@ -2477,23 +2855,23 @@ factor_change_symmetry(Leg::Ptr const& factor,
     return std::make_shared<LegPipe>(std::move(new_legs), pipe->is_dual, pipe->combine_cstyle);
 }
 
-[[nodiscard]] Leg::Ptr
-factor_drop_symmetry(Leg::Ptr const& factor, std::optional<std::vector<int64>> const& which)
+[[nodiscard]] Leg
+factor_drop_symmetry(Leg const& factor, std::optional<std::vector<int64>> const& which)
 {
-    if (auto space = std::dynamic_pointer_cast<Space>(factor)) {
-        auto changed = space->drop_symmetry(which);
-        auto leg = std::dynamic_pointer_cast<Leg>(changed);
-        if (!leg) {
+    if (auto es = factor.as_elementary_space()) {
+        auto changed = es->drop_symmetry(which);
+        auto out = std::dynamic_pointer_cast<ElementarySpace>(changed);
+        if (!out) {
             throw std::invalid_argument(
               "drop_symmetry on a TensorProduct factor must yield a Leg");
         }
-        return leg;
+        return out;
     }
-    auto pipe = std::dynamic_pointer_cast<LegPipe>(factor);
+    auto pipe = factor.as_leg_pipe();
     if (!pipe) {
         throw std::invalid_argument("TensorProduct factor is not a Leg");
     }
-    std::vector<Leg::Ptr> new_legs;
+    std::vector<Leg> new_legs;
     new_legs.reserve(pipe->legs.size());
     for (auto const& leg : pipe->legs) {
         new_legs.push_back(factor_drop_symmetry(leg, which));
@@ -2646,7 +3024,7 @@ calc_sectors_of_factors(Symmetry const& symmetry, std::vector<Leg::Ptr> const& f
     // LegPipes do not have sectors -> flatten them for the purpose of calculating sectors
     std::vector<Space::Ptr> spaces;
     for (auto const& factor : factors) {
-        for (auto const& leg : factor->flat_spaces()) {
+        for (auto const& leg : factor.flat_spaces()) {
             // need the sector decomposition of each factor. easiest way: convert to Space
             // OPTIMIZE is this optimal? should we store the as_Space() for later use?
             spaces.push_back(as_space(leg));
@@ -2658,12 +3036,9 @@ calc_sectors_of_factors(Symmetry const& symmetry, std::vector<Leg::Ptr> const& f
 } // namespace
 
 Space::Ptr
-as_space(Leg::Ptr const& leg)
+as_space(Leg const& leg)
 {
-    if (auto space = std::dynamic_pointer_cast<Space>(leg)) {
-        return space;
-    }
-    return leg->as_space_obj();
+    return leg.as_space();
 }
 
 TensorProduct::Prepared
@@ -2721,9 +3096,10 @@ TensorProduct::TensorProduct(std::vector<Leg::Ptr> factors_,
 void
 TensorProduct::test_sanity() const
 {
-    assert(static_cast<int64>(factors.size()) == num_factors);
+    check(static_cast<int64>(factors.size()) == num_factors,
+          "TensorProduct::test_sanity: factors size mismatch");
     for (auto const& factor : factors) {
-        factor->test_sanity();
+        factor.test_sanity();
     }
     Space::test_sanity();
 }
@@ -2765,7 +3141,7 @@ TensorProduct::dual_space() const
     std::vector<Leg::Ptr> dual_factors;
     dual_factors.reserve(factors.size());
     for (auto it = factors.rbegin(); it != factors.rend(); ++it) {
-        dual_factors.push_back((*it)->dual());
+        dual_factors.push_back(it->dual());
     }
     return std::make_shared<TensorProduct>(
       std::move(dual_factors), symmetry, std::move(sectors), std::move(mults));
@@ -2852,8 +3228,8 @@ TensorProduct::drop_symmetry(std::optional<std::vector<int64>> which)
 bool
 TensorProduct::has_pipes() const
 {
-    return std::ranges::any_of(
-      factors, [](Leg::Ptr const& f) { return std::dynamic_pointer_cast<LegPipe>(f) != nullptr; });
+    return std::ranges::any_of(factors,
+                               [](Leg const& f) { return static_cast<bool>(f) && f.is_pipe(); });
 }
 
 std::vector<Leg::Ptr>
@@ -2861,7 +3237,7 @@ TensorProduct::flat_legs() const
 {
     std::vector<Leg::Ptr> out;
     for (auto const& factor : factors) {
-        auto part = factor->flat_legs();
+        auto part = factor.flat_legs();
         out.insert(out.end(), part.begin(), part.end());
     }
     return out;
@@ -2872,7 +3248,7 @@ TensorProduct::flat_spaces() const
 {
     std::vector<Leg::Ptr> out;
     for (auto const& factor : factors) {
-        auto part = factor->flat_spaces();
+        auto part = factor.flat_spaces();
         out.insert(out.end(), part.begin(), part.end());
     }
     return out;
@@ -2883,7 +3259,7 @@ TensorProduct::num_flat_legs() const
 {
     int64 n = 0;
     for (auto const& factor : factors) {
-        n += factor->num_flat_legs();
+        n += factor.num_flat_legs();
     }
     return n;
 }
@@ -2895,7 +3271,7 @@ TensorProduct::flat_legs_nesting() const
     std::vector<std::vector<int64>> res;
     res.reserve(factors.size());
     for (auto const& factor : factors) {
-        auto const num = factor->num_flat_legs();
+        auto const num = factor.num_flat_legs();
         std::vector<int64> idcs(static_cast<std::size_t>(num));
         std::iota(idcs.begin(), idcs.end(), i);
         res.push_back(std::move(idcs));
@@ -2910,9 +3286,9 @@ TensorProduct::flat_leg_idcs(int64 i) const
     i = to_valid_idx(i, num_factors);
     int64 start = 0;
     for (int64 k = 0; k < i; ++k) {
-        start += factors[static_cast<std::size_t>(k)]->num_flat_legs();
+        start += factors[static_cast<std::size_t>(k)].num_flat_legs();
     }
-    auto const num = factors[static_cast<std::size_t>(i)]->num_flat_legs();
+    auto const num = factors[static_cast<std::size_t>(i)].num_flat_legs();
     std::vector<int64> res(static_cast<std::size_t>(num));
     std::iota(res.begin(), res.end(), start);
     return res;
@@ -2987,7 +3363,7 @@ TensorProduct::iter_tree_blocks(SectorArray const& coupled) const
     //          is that ok performance wise or should we have special case iterators?
     std::vector<std::uint8_t> are_dual;
     for (auto const& leg : flat_legs()) {
-        are_dual.push_back(leg->is_dual ? 1 : 0);
+        are_dual.push_back(leg.is_dual() ? 1 : 0);
     }
     auto const uncoupled_items = iter_uncoupled();
     std::vector<TreeBlockItem> out;
@@ -3173,7 +3549,7 @@ TensorProduct::operator==(Space const& other) const
         return false;
     }
     for (std::size_t i = 0; i < factors.size(); ++i) {
-        if (!(*factors[i] == *o->factors[i])) {
+        if (!(factors[i] == o->factors[i])) {
             return false;
         }
     }
@@ -3390,9 +3766,9 @@ grid_entry(int64 m,
 
 /// The legs of an :class:`AbelianLegPipe` must all be :class:`ElementarySpace`\ s.
 [[nodiscard]] ElementarySpace::Ptr
-as_es_leg(Leg::Ptr const& leg)
+as_es_leg(Leg const& leg)
 {
-    auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
+    auto es = leg.as_elementary_space();
     if (!es) {
         throw py::type_error("The legs of an AbelianLegPipe must be ElementarySpaces.");
     }
@@ -3517,8 +3893,7 @@ AbelianLegPipe::prepare(std::vector<ElementarySpace::Ptr> const& legs,
 
     auto basis_perm = calc_basis_perm(legs, combine_cstyle, dim, unique_mults, block_ind_map);
 
-    std::vector<Leg::Ptr> leg_ptrs(legs.begin(), legs.end());
-    return { std::move(leg_ptrs),
+    return { legs,
              std::move(symmetry),
              std::move(unique_sectors),
              std::move(unique_mults),
@@ -3529,15 +3904,15 @@ AbelianLegPipe::prepare(std::vector<ElementarySpace::Ptr> const& legs,
              std::move(block_ind_map) };
 }
 
-// note: the LegPipe base sets a combined basis_perm, which the ElementarySpace base then
-// overwrites with the fusion basis_perm. This matches the order of the Python constructor.
 AbelianLegPipe::AbelianLegPipe(Prepared prepared, bool is_dual_, bool combine_cstyle_)
-  : LegPipe(prepared.legs, is_dual_, combine_cstyle_)
-  , ElementarySpace(prepared.symmetry,
+  : ElementarySpace(prepared.symmetry,
                     prepared.defining_sectors,
                     prepared.multiplicities,
                     is_dual_,
                     prepared.basis_perm)
+  , legs(std::move(prepared.legs))
+  , num_legs(static_cast<int64>(legs.size()))
+  , combine_cstyle(combine_cstyle_)
   , sector_strides(std::move(prepared.sector_strides))
   , fusion_outcomes_sort(std::move(prepared.fusion_outcomes_sort))
   , block_ind_map_slices(std::move(prepared.block_ind_map_slices))
@@ -3660,12 +4035,7 @@ AbelianLegPipe::calc_basis_perm(std::vector<ElementarySpace::Ptr> const& legs,
 std::vector<ElementarySpace::Ptr>
 AbelianLegPipe::es_legs() const
 {
-    std::vector<ElementarySpace::Ptr> out;
-    out.reserve(legs.size());
-    for (auto const& leg : legs) {
-        out.push_back(as_es_leg(leg));
-    }
-    return out;
+    return legs;
 }
 
 std::vector<int64>
@@ -3693,32 +4063,48 @@ AbelianLegPipe::test_sanity() const
     // C style grid -> lexsorted after reversing column order (see notes)
     // F style grid -> is lexsorted
     // ---
-    auto const es = es_legs();
-    for (auto const& leg : es) {
-        if (auto const* nested = dynamic_cast<LegPipe const*>(leg.get()); nested != nullptr) {
-            assert(nested->is_abelian_leg_pipe());
+    if (num_legs <= 0 || static_cast<std::size_t>(num_legs) != legs.size()) {
+        throw std::invalid_argument("AbelianLegPipe requires at least one leg");
+    }
+    auto const& symmetry0 = Space::symmetry;
+    for (auto const& leg : legs) {
+        if (!leg->Space::symmetry->equals(*symmetry0)) {
+            throw std::invalid_argument(
+              "all legs of an AbelianLegPipe must have the same symmetry");
+        }
+        // Nested pipes must themselves be abelian pipes (composed on ElementarySpace).
+        if (leg->is_pipe()) {
+            check(leg->is_abelian_leg_pipe(),
+                  "AbelianLegPipe::test_sanity: nested pipe must be AbelianLegPipe");
         }
         leg->test_sanity();
     }
     auto const n = static_cast<std::size_t>(num_legs);
     // check sector_strides
-    assert(sector_strides.size() == n);
+    check(sector_strides.size() == n, "AbelianLegPipe::test_sanity: sector_strides size mismatch");
     std::vector<int64> legs_num_sectors(n);
     int64 nblocks = 1;
     for (std::size_t i = 0; i < n; ++i) {
-        legs_num_sectors[i] = es[i]->num_sectors;
+        legs_num_sectors[i] = legs[i]->num_sectors;
         nblocks *= legs_num_sectors[i];
     }
-    assert(sector_strides == make_stride(legs_num_sectors, combine_cstyle));
+    check(sector_strides == make_stride(legs_num_sectors, combine_cstyle),
+          "AbelianLegPipe::test_sanity: sector_strides mismatch");
     // check block_ind_map_slices
     // note: we do not check for full correctness, just for consistency as slices
-    assert(block_ind_map_slices.size() == static_cast<std::size_t>(num_sectors) + 1);
-    assert(block_ind_map_slices.front() == 0);
-    assert(block_ind_map_slices.back() == nblocks);
-    assert(std::ranges::is_sorted(block_ind_map_slices));
+    check(block_ind_map_slices.size() == static_cast<std::size_t>(num_sectors) + 1,
+          "AbelianLegPipe::test_sanity: block_ind_map_slices size mismatch");
+    check(block_ind_map_slices.front() == 0,
+          "AbelianLegPipe::test_sanity: block_ind_map_slices must start at 0");
+    check(block_ind_map_slices.back() == nblocks,
+          "AbelianLegPipe::test_sanity: block_ind_map_slices must end at nblocks");
+    check(std::ranges::is_sorted(block_ind_map_slices),
+          "AbelianLegPipe::test_sanity: block_ind_map_slices not sorted");
     // check block_ind_map
-    assert(block_ind_map.nrows() == static_cast<std::size_t>(nblocks));
-    assert(block_ind_map.ncols() == 3 + n);
+    check(block_ind_map.nrows() == static_cast<std::size_t>(nblocks),
+          "AbelianLegPipe::test_sanity: block_ind_map rows mismatch");
+    check(block_ind_map.ncols() == 3 + n,
+          "AbelianLegPipe::test_sanity: block_ind_map cols mismatch");
     // the rows are sorted first by J, then by the i, in C-style order if combine_cstyle
     // (see the class docstring). Equivalently, the keys built below are non-decreasing.
     auto const sort_key = [&](std::size_t m) {
@@ -3733,29 +4119,25 @@ AbelianLegPipe::test_sanity() const
         if (m > 0) {
             auto const prev = sort_key(m - 1);
             auto const cur = sort_key(m);
-            assert(std::ranges::lexicographical_compare(prev, cur));
+            check(std::ranges::lexicographical_compare(prev, cur),
+                  "AbelianLegPipe::test_sanity: block_ind_map not sorted");
         }
         if (m > 0 && block_ind_map(m, 2 + n) == block_ind_map(m - 1, 2 + n)) {
-            assert(block_ind_map(m, 0) == block_ind_map(m - 1, 1));
+            check(block_ind_map(m, 0) == block_ind_map(m - 1, 1),
+                  "AbelianLegPipe::test_sanity: block_ind_map slices not consecutive");
         } else {
-            assert(block_ind_map(m, 0) == 0);
+            check(block_ind_map(m, 0) == 0,
+                  "AbelianLegPipe::test_sanity: block_ind_map sector offset must be 0");
         }
         std::vector<Sector> uncoupled(n);
         for (std::size_t i = 0; i < n; ++i) {
             uncoupled[i] =
-              es[i]->sector_decomposition[static_cast<std::size_t>(block_ind_map(m, 2 + i))];
+              legs[i]->sector_decomposition[static_cast<std::size_t>(block_ind_map(m, 2 + i))];
         }
-        assert(Space::symmetry->multiple_fusion(uncoupled) == sector_decomposition[J]);
+        check(Space::symmetry->multiple_fusion(uncoupled) == sector_decomposition[J],
+              "AbelianLegPipe::test_sanity: fusion outcome mismatch");
     }
-    // call to super class(es)
-    LegPipe::test_sanity();
     ElementarySpace::test_sanity();
-}
-
-Space::Ptr
-AbelianLegPipe::as_space_obj()
-{
-    return shared_es();
 }
 
 ElementarySpace::Ptr
@@ -3770,19 +4152,13 @@ AbelianLegPipe::dual_space() const
     return dual_pipe();
 }
 
-Leg::Ptr
-AbelianLegPipe::dual_leg() const
-{
-    return dual_pipe();
-}
-
 AbelianLegPipe::Ptr
 AbelianLegPipe::dual_pipe() const
 {
     std::vector<ElementarySpace::Ptr> dual_legs;
     dual_legs.reserve(legs.size());
     for (auto it = legs.rbegin(); it != legs.rend(); ++it) {
-        dual_legs.push_back(as_es_leg((*it)->dual_leg()));
+        dual_legs.push_back((*it)->dual_es());
     }
     return std::make_shared<AbelianLegPipe>(std::move(dual_legs), !is_dual, !combine_cstyle);
 }
@@ -3793,16 +4169,76 @@ AbelianLegPipe::is_trivial() const
     return ElementarySpace::is_trivial();
 }
 
-std::vector<Leg::Ptr>
-AbelianLegPipe::flat_spaces()
+std::vector<Leg>
+AbelianLegPipe::flat_legs() const
+{
+    std::vector<Leg> out;
+    for (auto const& leg : legs) {
+        auto part = leg->flat_legs();
+        out.insert(out.end(), part.begin(), part.end());
+    }
+    return out;
+}
+
+std::vector<Leg>
+AbelianLegPipe::flat_spaces() const
 {
     // --- hints from Python AbelianLegPipe.flat_spaces ---
     // Unlike the plain LegPipe, we do not need to flatten AbelianLegPipes, if we just
     // want to flatten until we get spaces
     // ---
-    // Unlike the plain LegPipe, we do not need to flatten AbelianLegPipes, if we just
-    // want to flatten until we get spaces
-    return { shared_leg() };
+    return { Leg{ shared_es() } };
+}
+
+int64
+AbelianLegPipe::num_flat_legs() const
+{
+    int64 n = 0;
+    for (auto const& leg : legs) {
+        n += leg->num_flat_legs();
+    }
+    return n;
+}
+
+std::vector<int64>
+AbelianLegPipe::_flat_leg_permutation(int64 offset) const
+{
+    if (num_legs == num_flat_legs()) {
+        std::vector<int64> perm(static_cast<std::size_t>(num_legs));
+        std::iota(perm.begin(), perm.end(), offset);
+        if (!combine_cstyle) {
+            std::reverse(perm.begin(), perm.end());
+        }
+        return perm;
+    }
+    std::vector<ElementarySpace::Ptr> ordered = legs;
+    if (!combine_cstyle) {
+        std::reverse(ordered.begin(), ordered.end());
+    }
+    std::vector<int64> offsets;
+    offsets.reserve(ordered.size());
+    int64 running = offset;
+    for (auto const& leg : ordered) {
+        offsets.push_back(running);
+        running += leg->num_flat_legs();
+    }
+    if (!combine_cstyle) {
+        std::reverse(offsets.begin(), offsets.end());
+    }
+    std::vector<int64> perm;
+    for (std::size_t i = 0; i < legs.size(); ++i) {
+        auto part = legs[i]->_flat_leg_permutation(offsets[i]);
+        perm.insert(perm.end(), part.begin(), part.end());
+    }
+    return perm;
+}
+
+Leg::Ptr
+AbelianLegPipe::operator[](int64 idx) const
+{
+    auto const n = static_cast<int64>(legs.size());
+    auto const i = to_valid_idx(idx, n);
+    return legs[static_cast<std::size_t>(i)];
 }
 
 std::string
@@ -3836,7 +4272,7 @@ AbelianLegPipe::from_independent_symmetries(std::vector<Ptr> const& independent_
         std::vector<Ptr> pipes;
         group.reserve(independent_descriptions.size());
         for (auto const& description : independent_descriptions) {
-            auto leg = as_es_leg(description->legs[k]);
+            auto leg = description->legs[k];
             if (auto pipe = std::dynamic_pointer_cast<AbelianLegPipe>(leg)) {
                 pipes.push_back(std::move(pipe));
             }
@@ -3942,21 +4378,29 @@ AbelianLegPipe::with_opposite_duality() const
 }
 
 bool
-AbelianLegPipe::operator==(Leg const& other) const
-{
-    // note: LegPipe::operator== already compares combine_cstyle and checks that both sides
-    // are (not) AbelianLegPipes.
-    return LegPipe::operator==(other);
-}
-
-bool
 AbelianLegPipe::operator==(Space const& other) const
 {
-    auto const* o = dynamic_cast<LegPipe const*>(&other);
+    auto const* o = dynamic_cast<AbelianLegPipe const*>(&other);
     if (o == nullptr) {
         return false;
     }
-    return LegPipe::operator==(*o);
+    if (is_dual != o->is_dual) {
+        return false;
+    }
+    if (combine_cstyle != o->combine_cstyle) {
+        return false;
+    }
+    if (num_legs != o->num_legs) {
+        return false;
+    }
+    for (std::size_t i = 0; i < legs.size(); ++i) {
+        Space const& a = *legs[i];
+        Space const& b = *o->legs[i];
+        if (!(a == b)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::string
@@ -4132,22 +4576,22 @@ AbelianLegPipe::from_hdf5(lasyten::hdf5::Loader& loader,
 namespace {
 
 [[nodiscard]] bool
-is_plain_leg_pipe(Leg::Ptr const& leg)
+is_plain_leg_pipe(Leg const& leg)
 {
-    // Python: ``not isinstance(leg, ElementarySpace) and isinstance(leg, LegPipe)``.
-    // AbelianLegPipe is both, so it takes the ElementarySpace path.
-    return static_cast<bool>(std::dynamic_pointer_cast<LegPipe>(leg)) &&
-           !static_cast<bool>(std::dynamic_pointer_cast<ElementarySpace>(leg));
+    // Plain nesting pipe only (FusionTree / default backend). AbelianLegPipe is a composed
+    // ElementarySpace pipe and takes the ElementarySpace path.
+    return static_cast<bool>(leg) && leg.is_pipe() && !leg.is_abelian_leg_pipe();
 }
 
 [[nodiscard]] std::size_t
 leg_dim_as_size(Leg const& leg)
 {
-    if (!(leg.dim >= 0.) || std::floor(leg.dim) != leg.dim) {
+    auto const dim = leg.dim();
+    if (!(dim >= 0.) || std::floor(dim) != dim) {
         throw std::invalid_argument(
-          std::format("leg dimension must be a non-negative integer, got {}", leg.dim));
+          std::format("leg dimension must be a non-negative integer, got {}", dim));
     }
-    return static_cast<std::size_t>(leg.dim);
+    return static_cast<std::size_t>(dim);
 }
 
 /// Dense ND complex buffer for LegPipe swap_gate composition (rank may exceed FusionSymbol's 4).
@@ -4426,7 +4870,7 @@ nd_reshape(NdComplex const& src, std::vector<std::size_t> new_shape, bool cstyle
 } // namespace
 
 FusionSymbol
-swap_gate(Leg::Ptr V, Leg::Ptr W)
+swap_gate(Leg V, Leg W)
 {
     // --- hints from Python swap_gate ---
     // special case: pipes
@@ -4444,18 +4888,18 @@ swap_gate(Leg::Ptr V, Leg::Ptr W)
     if (!V || !W) {
         throw py::type_error("swap_gate requires two legs");
     }
-    if (!V->symmetry->equals(*W->symmetry)) {
+    if (!V.symmetry()->equals(*W.symmetry())) {
         throw SymmetryError("Incompatible symmetries.");
     }
-    if (!V->symmetry->can_be_dropped()) {
+    if (!V.symmetry()->can_be_dropped()) {
         throw SymmetryError(
-          std::format("braid can not be written as array for {}.", V->symmetry->str()));
+          std::format("braid can not be written as array for {}.", V.symmetry()->str()));
     }
-    auto const dV = leg_dim_as_size(*V);
-    auto const dW = leg_dim_as_size(*W);
+    auto const dV = leg_dim_as_size(V);
+    auto const dW = leg_dim_as_size(W);
 
     if (is_plain_leg_pipe(V)) {
-        auto pipe = std::dynamic_pointer_cast<LegPipe>(V);
+        auto pipe = V.as_leg_pipe();
         auto const& legs = pipe->legs;
         NdComplex res = fusion_symbol_to_nd(swap_gate(legs.back(), W));
         int n = 0;
@@ -4468,7 +4912,7 @@ swap_gate(Leg::Ptr V, Leg::Ptr W)
           nd_reshape(res, { dW, dV, dW, dV }, /*cstyle=*/pipe->combine_cstyle));
     }
     if (is_plain_leg_pipe(W)) {
-        auto pipe = std::dynamic_pointer_cast<LegPipe>(W);
+        auto pipe = W.as_leg_pipe();
         auto const& legs = pipe->legs;
         NdComplex res = fusion_symbol_to_nd(swap_gate(V, legs.front()));
         for (std::size_t n = 1; n < legs.size(); ++n) {
@@ -4492,8 +4936,8 @@ swap_gate(Leg::Ptr V, Leg::Ptr W)
           nd_reshape(res, { dW, dV, dW, dV }, /*cstyle=*/pipe->combine_cstyle));
     }
 
-    auto Ves = std::dynamic_pointer_cast<ElementarySpace>(V);
-    auto Wes = std::dynamic_pointer_cast<ElementarySpace>(W);
+    auto Ves = V.as_elementary_space();
+    auto Wes = W.as_elementary_space();
     if (!Ves || !Wes) {
         throw py::type_error("swap_gate expects ElementarySpace or LegPipe legs");
     }
@@ -4590,17 +5034,17 @@ swap_gate(Leg::Ptr V, Leg::Ptr W)
 }
 
 FusionSymbol
-twist_gate_diag(Leg::Ptr V)
+twist_gate_diag(Leg V)
 {
     if (!V) {
         throw py::type_error("twist_gate_diag requires a leg");
     }
-    if (!V->symmetry->can_be_dropped()) {
+    if (!V.symmetry()->can_be_dropped()) {
         throw SymmetryError(
-          std::format("twist can not be written as array for {}.", V->symmetry->str()));
+          std::format("twist can not be written as array for {}.", V.symmetry()->str()));
     }
     if (is_plain_leg_pipe(V)) {
-        auto pipe = std::dynamic_pointer_cast<LegPipe>(V);
+        auto pipe = V.as_leg_pipe();
         FusionSymbol res = twist_gate_diag(pipe->legs.front());
         for (std::size_t n = 1; n < pipe->legs.size(); ++n) {
             FusionSymbol next = twist_gate_diag(pipe->legs[n]);
@@ -4647,11 +5091,11 @@ twist_gate_diag(Leg::Ptr V)
     }
 
     // ElementarySpace or AbelianLegPipe
-    auto Ves = std::dynamic_pointer_cast<ElementarySpace>(V);
+    auto Ves = V.as_elementary_space();
     if (!Ves) {
         throw py::type_error("twist_gate_diag expects ElementarySpace or LegPipe");
     }
-    auto const dV = static_cast<std::size_t>(leg_dim_as_size(*Ves));
+    auto const dV = static_cast<std::size_t>(leg_dim_as_size(Leg{ Ves }));
     if (!Ves->slices) {
         throw SymmetryError(
           std::format("twist can not be written as array for {}.", Ves->Space::symmetry->str()));
@@ -4688,14 +5132,14 @@ twist_gate_diag(Leg::Ptr V)
 }
 
 FusionSymbol
-twist_gate(Leg::Ptr V)
+twist_gate(Leg V)
 {
     if (!V) {
         throw py::type_error("twist_gate requires a leg");
     }
-    if (!V->symmetry->can_be_dropped()) {
+    if (!V.symmetry()->can_be_dropped()) {
         throw SymmetryError(
-          std::format("twist can not be written as array for {}.", V->symmetry->str()));
+          std::format("twist can not be written as array for {}.", V.symmetry()->str()));
     }
     auto diag = twist_gate_diag(std::move(V));
     auto const n = diag.extent(0);
@@ -4707,18 +5151,18 @@ twist_gate(Leg::Ptr V)
 }
 
 std::vector<int64>
-flat_leg_permutation(std::vector<Leg::Ptr> const& legs)
+flat_leg_permutation(std::vector<Leg> const& legs)
 {
     std::vector<int64> offsets(legs.size(), 0);
     int64 running = 0;
     for (std::size_t i = 0; i < legs.size(); ++i) {
         offsets[i] = running;
-        running += legs[i]->num_flat_legs();
+        running += legs[i].num_flat_legs();
     }
     std::vector<int64> perm;
     perm.reserve(static_cast<std::size_t>(running));
     for (std::size_t i = 0; i < legs.size(); ++i) {
-        auto part = legs[i]->_flat_leg_permutation(offsets[i]);
+        auto part = legs[i]._flat_leg_permutation(offsets[i]);
         perm.insert(perm.end(), part.begin(), part.end());
     }
     return perm;

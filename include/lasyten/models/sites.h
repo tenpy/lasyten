@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace lasyten {
 
@@ -30,7 +31,9 @@ namespace lasyten {
 ///     Conserves nothing by default.
 /// use_test_su2 : bool
 ///     If True and ``conserve`` is SU(2), use test-only ``_SU2`` instead of ``SUN(N=2)``.
-class SpinSite : public SpinDOF
+///
+/// The spin operators live on ``dofs["spin"]`` (`SpinDOF`).
+class SpinSite : public Site
 {
   public:
     using Ptr = std::shared_ptr<SpinSite>;
@@ -53,7 +56,6 @@ class SpinSite : public SpinDOF
     [[nodiscard]] py::dict hdf5_init_kwargs() const override;
 
   private:
-    /// Temporary data for virtual-base initialization; lives only during construction.
     struct Prepared
     {
         ElementarySpace::Ptr leg;
@@ -75,31 +77,8 @@ class SpinSite : public SpinDOF
 
 /// Site for (possibly multiple) spinless bosons.
 ///
-/// TODO describe onsite operators
-///
-/// @param Nmax The maximum occupation of each of the boson species. An `int` corresponds to a
-/// single boson species. Otherwise, the number of boson species corresponds to `len(Nmax)`.
-/// @param conserve The symmetry to be conserved. We can conserve::  - total particle number sum_k
-/// N_k (``conserve == 'N'``). - individual particle numbers N_k (``conserve[i] == 'N'``). - total
-/// parity (sum_i N_k) % 2 (``conserve == 'parity'``). - individual parities N_k % 2 (``conserve[i]
-/// == 'parity'``). - nothing (``conserve == 'None'`` or ``conserve[i] == 'None'``).  A `Literal`
-/// corresponds to symmetries involving all boson species, such as the total particle number
-/// (``conserve == 'N'``) or the total parity (``conserve == 'parity'``). For a sequence, the entry
-/// ``conserve[i]`` corresponds to the symmetry of boson species `k`, such that, e.g.,
-/// ``conserve[k] == 'N'`` signifies that its particle number is conserved.  Conserves nothing by
-/// default.
-/// @param filling Average total filling (that is, filling of all species together). Used to define
-/// the on-site operators ``dN`` and ``dNdN`` if ``filling is not None``.
-///
-/// Attributes:
-///
-/// conserve : Literal['N', 'parity', 'None'] | list[Literal['N', 'parity', 'None']]
-///     The conserved symmetry, see above.
-/// filling : float | None
-///     Average total filling.
-/// num_species, Nmax, creators, annihilators
-///     see `BosonicDOF`
-class SpinlessBosonSite : public BosonicDOF
+/// Occupation data lives on ``dofs["occupation"]`` (`BosonicDOF`).
+class SpinlessBosonSite : public Site
 {
   public:
     using Ptr = std::shared_ptr<SpinlessBosonSite>;
@@ -137,40 +116,8 @@ class SpinlessBosonSite : public BosonicDOF
 
 /// Site for (possibly multiple) spinless fermions.
 ///
-/// TODO describe onsite operators
-///
-/// .. todo ::
-///     For now, assume that the symmetry needs to capture the fermionic statistics.
-///     Do not think about JW strings yet...
-///     That is also the reason why NoSymmetry is not an option here
-///
-/// @param num_species Number of fermion species.
-/// @param conserve The symmetry to be conserved. We can conserve::  - total fermion number sum_i
-/// N_k (``conserve == 'N'``). - individual fermion numbers N_k (``conserve[i] == 'N'``). - total
-/// fermion parity (sum_i N_k) % 2 (``conserve == 'parity'``). - individual fermion parities N_k %
-/// 2 (``conserve[i] == 'parity'``). - nothing for an individual fermion (``conserve[i] ==
-/// 'None'``); .  A `Literal` corresponds to symmetries involving all fermion species, such as the
-/// total fermion number (``conserve == 'N'``) or the total fermion parity (``conserve ==
-/// 'parity'``). For a sequence, the entry ``conserve[k]`` corresponds to the symmetry of fermion
-/// species `k`, such that, e.g., ``conserve[k] == 'N'`` signifies that its fermion number is
-/// conserved.  Note that the total fermion parity is always conserved. It is thus always part of
-/// the symmetry. Hence, ``conserve == 'None'`` is not a valid value. On the other hand, ``conserve
-/// = ['None']`` is interpreted as valid and the resulting symmetry conserves the fermionic parity.
-/// Conserves total fermion parity by default.
-/// @param filling Average total filling (that is, filling of all species together). Used to define
-/// the on-site operators ``dN`` and ``dNdN`` if ``filling is not None``.
-///
-/// Attributes:
-///
-/// num_species : int
-///     Number of fermion species.
-/// conserve : Literal['N', 'parity'] | list[Literal['N', 'parity', 'None']]
-///     The conserved symmetry, see above.
-/// filling : float, optional
-///     Average total filling.
-/// creators, annihilators
-///     see `FermionicDOF`
-class SpinlessFermionSite : public FermionicDOF
+/// Occupation data lives on ``dofs["occupation"]`` (`FermionicDOF`).
+class SpinlessFermionSite : public Site
 {
   public:
     using Ptr = std::shared_ptr<SpinlessFermionSite>;
@@ -208,40 +155,8 @@ class SpinlessFermionSite : public FermionicDOF
 
 /// Site for spin-1/2 fermions.
 ///
-/// TODO describe onsite operators
-///
-/// @param conserve_N The fermion symmetry to be conserved. We can conserve::  - total fermion
-/// number N_up + N_down (``conserve == 'N'``). - total fermion parity (N_up + N_down) % 2
-/// (``conserve == 'parity'``).  Note that the total fermion parity is always conserved and is thus
-/// always part of the total symmetry. Hence, ``conserve == 'None'`` is not a valid choice.
-/// Conserves total fermion parity by default.
-/// @param conserve_S The spin symmetry to be conserved. We can conserve::  - SU(2), the full spin
-/// rotation symmetry (production ``SUN(N=2)`` by default; pass ``use_test_su2=True`` for
-/// test-only ``_SU2``). - Sz (= U(1) symmetry), with sector labels corresponding to ``2 * Sz``.
-/// - Sz parity (= Z_2 symmetry), with sector labels corresponding to ``(Sz + S_tot) % 2``. -
-/// nothing. Conserves nothing by default.
-/// @param filling Average total filling (that is, filling of spin up and spin down fermions
-/// together). Used to define the on-site operators ``dN`` and ``dNdN`` if ``filling is not None``.
-/// @param use_test_su2 If True and ``conserve_S`` is SU(2), use test-only ``_SU2`` instead of
-/// ``SUN(N=2)``.
-///
-/// Attributes:
-///
-/// conserve_N : Literal['N', 'parity']
-///     The conserved symmetry, see above.
-/// conserve_S : Literal['SU(2)', 'Sz', 'parity', 'None']
-///     The conserved spin symmetry, see above.
-/// filling : float, optional
-///     Average total filling.
-/// use_test_su2 : bool
-///     If True and ``conserve_S`` is SU(2), use test-only ``_SU2`` instead of ``SUN(N=2)``.
-/// creators, annihilators
-///     see `FermionicDOF`
-/// spin_vector
-///     see `SpinDOF`
-class SpinHalfFermionSite
-  : public SpinDOF
-  , public FermionicDOF
+/// Registers both ``dofs["spin"]`` (`SpinDOF`) and ``dofs["occupation"]`` (`FermionicDOF`).
+class SpinHalfFermionSite : public Site
 {
   public:
     using Ptr = std::shared_ptr<SpinHalfFermionSite>;
@@ -288,18 +203,8 @@ class SpinHalfFermionSite
 
 /// Class for sites that have a single quantum clock degree of freedom.
 ///
-/// TODO describe onsite operators
-///
-/// @param q Number of states per site.
-/// @param conserve The symmetry to be conserved. We can conserve::  - Z_N symmetry. - nothing.
-///
-/// Attributes:
-///
-/// conserve : Literal['Z_N', 'None']
-///     The conserved symmetry, see above.
-/// q, clock_operators
-///     see `ClockDOF`
-class ClockSite : public ClockDOF
+/// Clock data lives on ``dofs["clock"]`` (`ClockDOF`).
+class ClockSite : public Site
 {
   public:
     using Ptr = std::shared_ptr<ClockSite>;
@@ -333,12 +238,8 @@ class ClockSite : public ClockDOF
 
 /// Class for anyon models where the local Hilbert space contains all sectors once.
 ///
-/// @param symmetry The symmetry describing the anyons.
-/// @param sector_names The sector names that appear in the onsite projection operators. The `i`th
-/// operator is called `f'P_{sector_names[i]}'` and projects onto the `i`th sector in
-/// `leg.sector_decomposition`. For `None` entries (default), no projection operators are
-/// constructed.
-class AnyonSite : public AnyonDOF
+/// Anyon data lives on ``dofs["anyon"]`` (`AnyonDOF`).
+class AnyonSite : public Site
 {
   public:
     using Ptr = std::shared_ptr<AnyonSite>;
@@ -352,18 +253,13 @@ class AnyonSite : public AnyonDOF
     [[nodiscard]] py::dict hdf5_init_kwargs() const override;
 
   protected:
-    /// Initialize from an already-built local space (shared by Site and AnyonDOF).
+    /// Initialize from an already-built local space.
     AnyonSite(ElementarySpace::Ptr leg,
               TensorBackend::Ptr backend,
               std::optional<std::string> default_device);
 };
 
 /// Class for sites containing the trivial and the Fibonacci / tau sectors.
-///
-/// Projectors onto the onsite vacuum and tau sectors are automatically constructed
-/// and are named `'P_vac'` and `'P_tau'`, respectively.
-///
-/// @param handedness The handedness of the anyons.
 class FibonacciAnyonSite : public AnyonSite
 {
   public:
@@ -389,12 +285,6 @@ class FibonacciAnyonSite : public AnyonSite
 };
 
 /// Class for sites containing the trivial, the Ising / sigma, and the fermion / psi sectors.
-///
-/// Projectors onto the onsite vacuum, sigma and psi sectors are automatically constructed and are
-/// named `'P_vac'`, `'P_sigma'`, and `'P_psi'`, respectively.
-///
-/// @param `nu` Specifies the Ising anyons as different `nu` correspond to different topological
-/// twists.
 class IsingAnyonSite : public AnyonSite
 {
   public:
@@ -421,9 +311,7 @@ class IsingAnyonSite : public AnyonSite
 };
 
 /// Class for Fibonacci anyon models where the local Hilbert space only contains the tau sector.
-///
-/// @param handedness The handedness of the anyons.
-class GoldenSite : public AnyonDOF
+class GoldenSite : public Site
 {
   public:
     using Ptr = std::shared_ptr<GoldenSite>;
@@ -443,10 +331,7 @@ class GoldenSite : public AnyonDOF
 };
 
 /// Class for SU(2)_k anyon models where the local Hilbert space only contains the spin-1 sector.
-///
-/// @param k Level of the SU(2)_k anyon model / symmetry.
-/// @param handedness The handedness of the anyons.
-class SU2kSpin1Site : public AnyonDOF
+class SU2kSpin1Site : public Site
 {
   public:
     using Ptr = std::shared_ptr<SU2kSpin1Site>;
@@ -467,5 +352,59 @@ class SU2kSpin1Site : public AnyonDOF
                   TensorBackend::Ptr backend,
                   std::optional<std::string> default_device);
 };
+
+/// Group several sites into one larger local Hilbert space (pipe physical leg).
+///
+/// Onsite operators of constituent site ``i`` are Kronecker-embedded as ``opname + labels[i]``.
+/// Degrees of freedom are registered under ``"{label}.{kind}"`` (e.g. ``"0.spin"``) with dense
+/// arrays embedded into the grouped dimension. Abelian symmetries only (``AbelianLegPipe``).
+///
+/// For ``symmetry_combine='same'``, constituents must already share a compatible symmetry
+/// (call `set_common_symmetry` first if needed). ``'drop'`` / ``'independent'`` clone and remap
+/// legs before piping; the caller's original sites are not mutated.
+class GroupedSite : public Site
+{
+  public:
+    using Ptr = std::shared_ptr<GroupedSite>;
+
+    int64 n_sites{};
+    std::vector<Site::Ptr> sites;
+    std::vector<std::string> labels;
+    std::string symmetry_combine;
+
+    GroupedSite(std::vector<Site::Ptr> sites,
+                std::optional<std::vector<std::string>> labels = std::nullopt,
+                std::string symmetry_combine = "same");
+
+    /// Kronecker product of one operator per ungrouped site (labels ``p``, ``p*``).
+    [[nodiscard]] SymmetricTensorPtr kroneckerproduct(std::vector<SymmetricTensorPtr> ops) const;
+
+    [[nodiscard]] std::string repr() const;
+
+  private:
+    struct Prepared
+    {
+        AbelianLegPipe::Ptr pipe;
+        std::map<std::string, int64> state_labels;
+        std::vector<Site::Ptr> working_sites;
+        std::vector<std::string> labels;
+        std::string symmetry_combine;
+        TensorBackend::Ptr backend;
+        std::string default_device;
+    };
+    static Prepared prepare(std::vector<Site::Ptr> sites,
+                            std::optional<std::vector<std::string>> labels,
+                            std::string symmetry_combine);
+    GroupedSite(Prepared&& prepared);
+    void add_kronecker_onsite_ops();
+    void register_embedded_dofs();
+};
+
+/// Group each ``n`` consecutive sites into a `GroupedSite`.
+[[nodiscard]] std::vector<GroupedSite::Ptr> group_sites(
+  std::vector<Site::Ptr> const& sites,
+  int64 n = 2,
+  std::optional<std::vector<std::string>> labels = std::nullopt,
+  std::string symmetry_combine = "same");
 
 } // namespace lasyten

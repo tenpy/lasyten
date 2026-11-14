@@ -70,7 +70,7 @@ bind_tensors_constructors(py::module_& m)
               if (!domain.is_none()) {
                   dom = tensor_product_from_python(domain, t->symmetry);
               }
-              std::optional<OptionalLabels> labs;
+              std::optional<LegLabelList> labs;
               if (!labels.is_none()) {
                   labs = parse_tensor_init_labels(labels, t->codomain, t->domain);
               }
@@ -118,7 +118,7 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
           std::optional<int64> legs_pos_opt;
           std::optional<int64> codomain_pos_opt;
           std::optional<int64> domain_pos_opt;
-          OptionalLabel label_opt = std::nullopt;
+          std::string label_opt = "";
           if (!legs_pos.is_none()) {
               legs_pos_opt = legs_pos.cast<int64>();
           }
@@ -158,8 +158,8 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
       [](py::object grid,
          py::object labels,
          py::object dtype,
-         std::optional<OptionalLabels> row_labels,
-         std::optional<OptionalLabels> col_labels,
+         std::optional<LegLabelList> row_labels,
+         std::optional<LegLabelList> col_labels,
          std::optional<std::vector<ElementarySpace::Ptr>> row_summands,
          std::optional<std::vector<ElementarySpace::Ptr>> col_summands) {
           std::optional<Dtype> dtype_opt;
@@ -183,7 +183,7 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
                                       std::move(row_summands),
                                       std::move(col_summands));
           if (!labels.is_none()) {
-              res->set_labels(parse_tensor_init_labels(labels, res->codomain, res->domain));
+              res->labels.set(parse_tensor_init_labels(labels, res->codomain, res->domain));
           }
           return HiddenLegTensor::maybe_wrap(std::dynamic_pointer_cast<SymmetricTensor>(res));
       },

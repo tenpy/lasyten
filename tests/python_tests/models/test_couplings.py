@@ -33,8 +33,8 @@ def check_coupling(coupling_cls, site_num: int, invalid_site_nums: list[int], bo
             _ = coupling_cls(site_list, **kwargs)
 
 
-def generate_spin_dofs(backend: backends.TensorBackend) -> list[degrees_of_freedom.SpinDOF]:
-    """Return a list of `SpinDOF` sites whose symmetries are consistent with `backend`."""
+def generate_spin_dofs(backend: backends.TensorBackend) -> list[degrees_of_freedom.Site]:
+    """Return a list of sites with a spin DOF whose symmetries are consistent with `backend`."""
     site_list = []
     for spin in [0.5, 1, 1.5, 2]:
         site_list.append(sites.SpinSite(S=spin, conserve='None', backend=backend))
@@ -60,8 +60,8 @@ def generate_spin_dofs(backend: backends.TensorBackend) -> list[degrees_of_freed
 
 def generate_bosonic_dofs(
     backend: backends.TensorBackend, conserve: Sequence[Literal['N', 'parity', 'None']] = ['N', 'parity', 'None']
-) -> list[degrees_of_freedom.BosonicDOF]:
-    """Return a list of `BosonicDOF` sites whose symmetries are consistent with `backend`."""
+) -> list[degrees_of_freedom.Site]:
+    """Return a list of sites with a bosonic occupation DOF whose symmetries are consistent with `backend`."""
     site_list = []
     for Nmax in [[3], [3, 2]]:
         if isinstance(backend, backends.NoSymmetryBackend):
@@ -77,8 +77,8 @@ def generate_bosonic_dofs(
 
 def generate_fermionic_dofs(
     backend: backends.TensorBackend, conserve: Sequence[Literal['N', 'parity']] = ['N', 'parity']
-) -> list[degrees_of_freedom.FermionicDOF]:
-    """Return a list of `FermionicDOF` sites whose symmetries are consistent with `backend`."""
+) -> list[degrees_of_freedom.Site]:
+    """Return a list of sites with a fermionic occupation DOF whose symmetries are consistent with `backend`."""
     site_list = []
     if isinstance(backend, (backends.NoSymmetryBackend, backends.AbelianBackend)):
         # fermionic exchange cannot be encoded
@@ -110,8 +110,8 @@ def generate_fermionic_dofs(
     return site_list
 
 
-def generate_clock_dofs(backend: backends.TensorBackend) -> list[degrees_of_freedom.ClockDOF]:
-    """Return a list of `ClockDOF` sites whose symmetries are consistent with `backend`."""
+def generate_clock_dofs(backend: backends.TensorBackend) -> list[degrees_of_freedom.Site]:
+    """Return a list of sites with a clock DOF whose symmetries are consistent with `backend`."""
     site_list = []
     for q in [2, 3, 4]:
         site_list.append(sites.ClockSite(q, conserve='None', backend=backend))
@@ -120,7 +120,7 @@ def generate_clock_dofs(backend: backends.TensorBackend) -> list[degrees_of_free
     return site_list
 
 
-def generate_anyon_dofs(block_backend: lasyten.block_backends.BlockBackend) -> list[degrees_of_freedom.AnyonDOF]:
+def generate_anyon_dofs(block_backend: lasyten.block_backends.BlockBackend) -> list[degrees_of_freedom.Site]:
     """Return a list of `AnyonDOF` sites."""
     backend = backends.get_backend('fusion_tree', block_backend=block_backend)
     site_list = [
@@ -198,7 +198,7 @@ def test_spin_spin_coupling(any_backend, np_random):
             if site1 == site2:
                 # commutation relation
                 tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-                tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+                tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
                 assert tensors.almost_equal(tensor_commuted, tensor)
 
             # check eigenvalues of special cases
@@ -237,8 +237,8 @@ def test_spin_spin_coupling_ladder_coefficients(any_backend):
     Jpp, Jmp, Jpm, Jmm = 1 + 2j, 3 + 4j, 5 + 6j, 7 + 8j
     coupling = couplings.spin_spin_coupling([site0, site1], Jpp=Jpp, Jmp=Jmp, Jpm=Jpm, Jmm=Jmm)
 
-    sx0, sy0 = site0.spin_vector[:, :, 0], site0.spin_vector[:, :, 1]
-    sx1, sy1 = site1.spin_vector[:, :, 0], site1.spin_vector[:, :, 1]
+    sx0, sy0 = site0.spin.spin_vector[:, :, 0], site0.spin.spin_vector[:, :, 1]
+    sx1, sy1 = site1.spin.spin_vector[:, :, 0], site1.spin.spin_vector[:, :, 1]
     sp0, sm0 = sx0 + 1j * sy0, sx0 - 1j * sy0
     sp1, sm1 = sx1 + 1j * sy1, sx1 - 1j * sy1
     expected = (
@@ -303,7 +303,7 @@ def test_aklt_coupling(any_backend, np_random):
             if site1 == site2:
                 # commutation relation
                 tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-                tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+                tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
                 assert tensors.almost_equal(tensor_commuted, tensor)
 
             if isinstance(site1, sites.SpinSite):
@@ -349,7 +349,7 @@ def test_chiral_3spin_coupling(any_backend, np_random):
                 # cyclic permutation relation
                 tensor_commuted = tensors.permute_legs(tensor, codomain=[2, 0, 1], domain=[3, 5, 4])
                 relabel = {'p2': 'p0', 'p1': 'p2', 'p0': 'p1', 'p2*': 'p0*', 'p1*': 'p2*', 'p0*': 'p1*'}
-                tensor_commuted.relabel(relabel)
+                tensor_commuted.labels.update(relabel)
                 assert tensors.almost_equal(tensor_commuted, tensor)
 
     check_coupling(couplings.chiral_3spin_coupling, site_num=3, invalid_site_nums=[1, 2], boson_fermion_mixing=False)
@@ -369,8 +369,8 @@ def test_chemical_potential(any_backend, np_random):
 
     for site in all_sites:
         mu = np_random.random()
-        species = np_random.integers(1, site.num_species + 1)
-        species = np_random.choice(range(site.num_species), size=species, replace=False)
+        species = np_random.integers(1, site.occupation.num_species + 1)
+        species = np_random.choice(range(site.occupation.num_species), size=species, replace=False)
         if isinstance(site, sites.SpinHalfFermionSite):
             if site.conserve_S in ['SU(2)'] and len(species) == 1:
                 species = np.append(species, 1 - species[0])
@@ -380,7 +380,11 @@ def test_chemical_potential(any_backend, np_random):
         # hermiticity
         assert tensors.almost_equal(tensor.hc, tensor)
         # check eigenvalues
-        Nmax = site.Nmax if isinstance(site, sites.SpinlessBosonSite) else [1] * site.num_species
+        Nmax = (
+            site.occupation.Nmax
+            if isinstance(site.occupation, degrees_of_freedom.BosonicDOF)
+            else [1] * site.occupation.num_species
+        )
         expect_evs = []
         for occupations in it.product(*[list(range(n + 1)) for n in Nmax]):
             expect_evs.append(-mu * sum([occupations[k] for k in species]))
@@ -402,8 +406,8 @@ def test_onsite_interaction(any_backend, np_random):
 
     for site in all_sites:
         U = np_random.random()
-        species = np_random.integers(1, site.num_species + 1)
-        species = np_random.choice(range(site.num_species), size=species, replace=False)
+        species = np_random.integers(1, site.occupation.num_species + 1)
+        species = np_random.choice(range(site.occupation.num_species), size=species, replace=False)
         if isinstance(site, sites.SpinHalfFermionSite):
             if site.conserve_S in ['SU(2)'] and len(species) == 1:
                 species = np.append(species, 1 - species[0])
@@ -413,7 +417,11 @@ def test_onsite_interaction(any_backend, np_random):
         # hermiticity
         assert tensors.almost_equal(tensor.hc, tensor)
         # check eigenvalues
-        Nmax = site.Nmax if isinstance(site, sites.SpinlessBosonSite) else [1] * site.num_species
+        Nmax = (
+            site.occupation.Nmax
+            if isinstance(site.occupation, degrees_of_freedom.BosonicDOF)
+            else [1] * site.occupation.num_species
+        )
         expect_evs = []
         for occupations in it.product(*[list(range(n + 1)) for n in Nmax]):
             n = sum([occupations[k] for k in species])
@@ -437,10 +445,10 @@ def test_density_density_interaction(any_backend, np_random):
 
     for site in all_sites:
         V = np_random.random()
-        species1 = np_random.integers(1, site.num_species + 1)
-        species1 = np_random.choice(range(site.num_species), size=species1, replace=False)
-        species2 = np_random.integers(1, site.num_species + 1)
-        species2 = np_random.choice(range(site.num_species), size=species2, replace=False)
+        species1 = np_random.integers(1, site.occupation.num_species + 1)
+        species1 = np_random.choice(range(site.occupation.num_species), size=species1, replace=False)
+        species2 = np_random.integers(1, site.occupation.num_species + 1)
+        species2 = np_random.choice(range(site.occupation.num_species), size=species2, replace=False)
         if isinstance(site, sites.SpinHalfFermionSite) and site.conserve_S in ['SU(2)']:
             species1 = species2 = [0, 1]
         coupling = couplings.density_density_interaction([site] * 2, V, species1, species2)
@@ -451,10 +459,14 @@ def test_density_density_interaction(any_backend, np_random):
         if all(species1 == species2):
             # commutation relation
             tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-            tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+            tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
             assert tensors.almost_equal(tensor_commuted, tensor)
         # check eigenvalues
-        Nmax = site.Nmax if isinstance(site, sites.SpinlessBosonSite) else [1] * site.num_species
+        Nmax = (
+            site.occupation.Nmax
+            if isinstance(site.occupation, degrees_of_freedom.BosonicDOF)
+            else [1] * site.occupation.num_species
+        )
         n1 = []
         n2 = []
         for occupations in it.product(*[list(range(n + 1)) for n in Nmax]):
@@ -483,10 +495,10 @@ def test_hopping(any_backend, np_random):
 
     for site in all_sites:
         t = np_random.random()
-        species1 = np_random.integers(1, site.num_species + 1)
-        species1 = np_random.choice(range(site.num_species), size=species1, replace=False)
-        species2 = np_random.integers(1, site.num_species + 1)
-        species2 = np_random.choice(range(site.num_species), size=species2, replace=False)
+        species1 = np_random.integers(1, site.occupation.num_species + 1)
+        species1 = np_random.choice(range(site.occupation.num_species), size=species1, replace=False)
+        species2 = np_random.integers(1, site.occupation.num_species + 1)
+        species2 = np_random.choice(range(site.occupation.num_species), size=species2, replace=False)
         if len(species1) != len(species2):
             limit = min(len(species1), len(species2))
             species1 = species1[:limit]
@@ -519,7 +531,7 @@ def test_hopping(any_backend, np_random):
             # a_0_k^\dagger a_1_l + hc -> (exchange legs) -> -1 * a_0_l a_1_k^\dagger + hc
             # = a_1_k^\dagger a_0_l + hc = a_0_l^\dagger a_1_k + hc
             tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-            tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+            tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
             assert tensors.almost_equal(tensor_commuted, tensor)
 
     check_coupling(couplings.hopping, site_num=2, invalid_site_nums=[1, 3], boson_fermion_mixing=True)
@@ -536,10 +548,10 @@ def test_pairing(any_backend, np_random):
 
     for site in all_sites:
         Delta = np_random.random()
-        species1 = np_random.integers(1, site.num_species + 1)
-        species1 = np_random.choice(range(site.num_species), size=species1, replace=False)
-        species2 = np_random.integers(1, site.num_species + 1)
-        species2 = np_random.choice(range(site.num_species), size=species2, replace=False)
+        species1 = np_random.integers(1, site.occupation.num_species + 1)
+        species1 = np_random.choice(range(site.occupation.num_species), size=species1, replace=False)
+        species2 = np_random.integers(1, site.occupation.num_species + 1)
+        species2 = np_random.choice(range(site.occupation.num_species), size=species2, replace=False)
         if len(species1) != len(species2):
             limit = min(len(species1), len(species2))
             species1 = species1[:limit]
@@ -573,8 +585,8 @@ def test_pairing(any_backend, np_random):
         if symmetric:
             # commutation relation
             tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-            tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
-            assert tensors.almost_equal(tensor_commuted, site.anti_commute_sign * tensor)
+            tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+            assert tensors.almost_equal(tensor_commuted, site.occupation.anti_commute_sign * tensor)
 
     check_coupling(couplings.pairing, site_num=2, invalid_site_nums=[1, 3], boson_fermion_mixing=True)
 
@@ -590,10 +602,10 @@ def test_onsite_pairing(any_backend, np_random):
 
     for site in all_sites:
         Delta = np_random.random()
-        species1 = np_random.integers(1, site.num_species + 1)
-        species1 = np_random.choice(range(site.num_species), size=species1, replace=False)
-        species2 = np_random.integers(1, site.num_species + 1)
-        species2 = np_random.choice(range(site.num_species), size=species2, replace=False)
+        species1 = np_random.integers(1, site.occupation.num_species + 1)
+        species1 = np_random.choice(range(site.occupation.num_species), size=species1, replace=False)
+        species2 = np_random.integers(1, site.occupation.num_species + 1)
+        species2 = np_random.choice(range(site.occupation.num_species), size=species2, replace=False)
         if len(species1) != len(species2):
             limit = min(len(species1), len(species2))
             species1 = species1[:limit]
@@ -615,7 +627,7 @@ def test_onsite_pairing(any_backend, np_random):
         assert tensors.almost_equal(tensor.hc, tensor)
         # trace is zero
         npt.assert_almost_equal(tensors.trace(tensor).to_numpy(), 0)
-        if isinstance(site, degrees_of_freedom.FermionicDOF):
+        if isinstance(site.occupation, degrees_of_freedom.FermionicDOF):
             # default case is trivial for fermions
             coupling = couplings.onsite_pairing([site], Delta=1)
             coupling.test_sanity()
@@ -645,7 +657,7 @@ def test_clock_clock_coupling(any_backend, np_random):
         npt.assert_almost_equal(tensors.trace(tensor).to_numpy(), 0)
         # commutation relation
         tensor_commuted = tensors.permute_legs(tensor, codomain=[1, 0], domain=[2, 3])
-        tensor_commuted.relabel({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
+        tensor_commuted.labels.update({'p0': 'p1', 'p1': 'p0', 'p0*': 'p1*', 'p1*': 'p0*'})
         assert tensors.almost_equal(tensor_commuted, tensor)
 
     check_coupling(couplings.clock_clock_coupling, site_num=2, invalid_site_nums=[1, 3], boson_fermion_mixing=False)
@@ -1144,9 +1156,9 @@ def _asym_hopping_dense_block(site):
     :func:`~lasyten.models.couplings._quadratic_coupling_numpy`: the *first* (left) operand carries
     the JW-string factor.
     """
-    creator = site.get_creator_numpy(species=0, include_JW=True)
-    annihilator = site.get_annihilator_numpy(species=0, include_JW=True)
-    return (creator @ site._JW)[:, None, None, :] * annihilator[None, :, :, None]
+    creator = site.occupation.get_creator_numpy(species=0, include_JW=True)
+    annihilator = site.occupation.get_annihilator_numpy(species=0, include_JW=True)
+    return (creator @ site.occupation.JW)[:, None, None, :] * annihilator[None, :, :, None]
 
 
 @pytest.mark.parametrize(
@@ -1203,8 +1215,8 @@ def test_coupling_permute_matches_direct_permute_legs(site_factory, label):
     }
     tensor_direct = permute_legs(coupling.to_tensor(), codomain=['p1', 'p0'], domain=['p1*', 'p0*'], levels=level_dict)
     # relabel to the same p{new_pos} convention Coupling.permute uses (site formerly at 1 is now p0)
-    tensor_direct = tensor_direct.relabel({'p0': 'q1', 'p1': 'q0', 'p0*': 'q1*', 'p1*': 'q0*'})
-    tensor_direct = tensor_direct.relabel({'q0': 'p0', 'q1': 'p1', 'q0*': 'p0*', 'q1*': 'p1*'})
+    tensor_direct.labels.update({'p0': 'q1', 'p1': 'q0', 'p0*': 'q1*', 'p1*': 'q0*'})
+    tensor_direct.labels.update({'q0': 'p0', 'q1': 'p1', 'q0*': 'p0*', 'q1*': 'p1*'})
 
     labels = ['p0', 'p1', 'p0*', 'p1*']
     dim_permuted = permuted.to_tensor().to_numpy(labels, understood_braiding=True)
@@ -1228,9 +1240,9 @@ def test_coupling_permute_exchange_sign(site_factory, expected_sign, label):
     """
 
     site = site_factory()
-    creator = site.get_creator_numpy(species=0, include_JW=True)
-    annihilator = site.get_annihilator_numpy(species=0, include_JW=True)
-    JW = site._JW
+    creator = site.occupation.get_creator_numpy(species=0, include_JW=True)
+    annihilator = site.occupation.get_annihilator_numpy(species=0, include_JW=True)
+    JW = site.occupation.JW
 
     # forward: coupling on [site, site] representing Cd_0 C_1 (JW dressing on the first operand)
     h_fwd = (creator @ JW)[:, None, None, :] * annihilator[None, :, :, None]

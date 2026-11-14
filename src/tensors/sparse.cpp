@@ -27,7 +27,7 @@ same_legs(std::vector<Leg::Ptr> const& legs1, std::vector<Leg::Ptr> const& legs2
         return false;
     }
     for (std::size_t i = 0; i < legs1.size(); ++i) {
-        if (!(*legs1[i] == *legs2[i])) {
+        if (!(legs1[i] == legs2[i])) {
             return false;
         }
     }
@@ -77,27 +77,19 @@ TensorLinearOperator::TensorLinearOperator(SymmetricTensorPtr tensor,
         throw std::invalid_argument("Expected a two-leg tensor");
     }
 
-    std::vector<int64> idcs;
-    if (std::holds_alternative<int64>(which_leg_ref)) {
-        idcs = this->tensor->get_leg_idcs(std::get<int64>(which_leg_ref));
-    } else {
-        idcs = this->tensor->get_leg_idcs(std::get<std::string>(which_leg_ref));
-    }
-    if (idcs.size() != 1) {
-        throw std::invalid_argument("which_leg must refer to a single leg");
-    }
-    this->which_leg = idcs[0];
+    this->which_leg =
+      std::visit([&](auto const& key) { return this->tensor->labels.index(key); }, which_leg_ref);
     this->other_leg = 1 - this->which_leg;
 
     auto legs = this->tensor->legs();
-    auto expected = legs[other_leg]->dual();
-    if (!(*legs[which_leg] == *expected)) {
+    auto expected = legs[other_leg].dual();
+    if (!(legs[which_leg] == expected)) {
         throw std::invalid_argument("Expected contractible legs");
     }
 
     this->vector_legs = { legs[other_leg] };
-    auto labels = this->tensor->labels();
-    this->vector_labels = VectorLabels{ OptionalLabels{ labels[other_leg] } };
+    auto labels = this->tensor->labels.as_list();
+    this->vector_labels = VectorLabels{ LegLabelList{ labels[other_leg] } };
     this->dtype = this->tensor->dtype;
 }
 
@@ -258,7 +250,7 @@ TensorPtr
 ShiftedLinearOperator::to_tensor(TensorBackend::Ptr backend)
 {
     auto res = original_operator->to_tensor(backend);
-    auto sym = vector_legs.empty() ? nullptr : vector_legs[0]->symmetry;
+    auto sym = vector_legs.empty() ? nullptr : vector_legs[0].symmetry();
     auto tp = std::make_shared<TensorProduct>(vector_legs, sym);
     auto identity =
       SymmetricTensor::from_eye(tp, res->backend, vector_labels, res->dtype, res->device);

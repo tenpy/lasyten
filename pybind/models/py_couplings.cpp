@@ -136,6 +136,7 @@ bind_models_couplings(py::module_& m)
           py::arg("Jmp") = complex128{},
           py::arg("Jpm") = complex128{},
           py::arg("Jmm") = complex128{},
+          py::arg("dof") = std::vector<std::string>{},
           DOC(lasyten, spin_spin_coupling));
 
     m.def("spin_field_coupling",
@@ -145,6 +146,7 @@ bind_models_couplings(py::module_& m)
           py::arg("hy") = 0,
           py::arg("hz") = 0,
           py::arg("name") = py::none(),
+          py::arg("dof") = DOF_SPIN,
           DOC(lasyten, spin_field_coupling));
 
     m.def("aklt_coupling",
@@ -152,6 +154,7 @@ bind_models_couplings(py::module_& m)
           py::arg("sites"),
           py::arg("J") = 1,
           py::arg("name") = py::none(),
+          py::arg("dof") = std::vector<std::string>{},
           DOC(lasyten, aklt_coupling));
 
     m.def("heisenberg_coupling",
@@ -159,6 +162,7 @@ bind_models_couplings(py::module_& m)
           py::arg("sites"),
           py::arg("J") = 1,
           py::arg("name") = py::none(),
+          py::arg("dof") = std::vector<std::string>{},
           DOC(lasyten, heisenberg_coupling));
 
     m.def("chiral_3spin_coupling",
@@ -166,6 +170,7 @@ bind_models_couplings(py::module_& m)
           py::arg("sites"),
           py::arg("chi") = 1,
           py::arg("name") = py::none(),
+          py::arg("dof") = std::vector<std::string>{},
           DOC(lasyten, chiral_3spin_coupling));
 
     m.def("chemical_potential",

@@ -22,10 +22,10 @@ Classes and functions imported from the pybind11 module :mod:`lasyten._core`.
 
 .. lasyten-inheritance-diagram::
 
-lasyten.tensors.LabelledLegs
---------------------------
+lasyten.tensors.LegLabels
+-----------------------
 
-.. autoclass:: lasyten.tensors.LabelledLegs
+.. autoclass:: lasyten.tensors.LegLabels
    :members:
    :undoc-members:
    :show-inheritance:

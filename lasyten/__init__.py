@@ -56,7 +56,16 @@ from .symmetries._symmetries import (
     double_semion_category,
     semion_category,
 )
-from .symmetries.spaces import AbelianLegPipe, DirectSumSpace, ElementarySpace, Leg, LegPipe, Space, TensorProduct
+from .symmetries.spaces import (
+    AbelianLegPipe,
+    DirectSumSpace,
+    ElementarySpace,
+    Leg,
+    LegPipe,
+    Space,
+    TensorProduct,
+    is_leg_pipe,
+)
 from .symmetries.trees import FusionTree, fusion_trees
 from .tensors import (
     ChargedTensor,
@@ -221,6 +230,7 @@ __all__ = [
     'horizontal_factorization',
     'imag',
     'inner',
+    'is_leg_pipe',
     'is_scalar',
     'item',
     'krylov_based',

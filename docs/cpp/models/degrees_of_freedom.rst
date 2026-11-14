@@ -8,6 +8,11 @@ Declared in ``include/lasyten/models/degrees_of_freedom.h``.
    :members:
    :undoc-members:
 
+.. doxygenclass:: lasyten::DegreeOfFreedom
+   :project: lasyten
+   :members:
+   :undoc-members:
+
 .. doxygenclass:: lasyten::SpinDOF
    :project: lasyten
    :members:

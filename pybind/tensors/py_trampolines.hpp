@@ -93,11 +93,6 @@ class PyTensor
     {
         PYBIND11_OVERRIDE(std::vector<Dtype> const&, Tensor, forbidden_dtypes);
     }
-
-    Tensor& set_labels(OptionalLabels labels) override
-    {
-        PYBIND11_OVERRIDE(Tensor&, Tensor, set_labels, labels);
-    }
 };
 
 /// pybind11 trampoline for :class:`SymmetricTensor` (Python subclasses e.g. DiagonalTensor).

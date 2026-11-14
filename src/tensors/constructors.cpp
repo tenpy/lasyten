@@ -24,13 +24,13 @@ namespace {
 bool
 legs_equal(Leg::Ptr const& a, Leg::Ptr const& b)
 {
-    return a && b && a->operator==(*b);
+    return a && b && (a == b);
 }
 
 bool
 products_equal(TensorProduct::Ptr const& a, TensorProduct::Ptr const& b)
 {
-    return a && b && a->operator==(*b);
+    return a && b && (a == b);
 }
 
 std::vector<Leg::Ptr>
@@ -69,7 +69,7 @@ factor_slices_equal(std::vector<Leg::Ptr> const& a, std::vector<Leg::Ptr> const&
 TensorPtr
 eye(Space::Ptr leg,
     TensorBackend::Ptr backend,
-    std::optional<OptionalLabels> labels,
+    std::optional<LegLabelList> labels,
     Dtype dtype,
     std::optional<std::string> device,
     bool diagonal)
@@ -87,7 +87,7 @@ tensor(TensorCPtr obj,
        TensorProduct::Ptr codomain,
        TensorProduct::Ptr domain,
        TensorBackend::Ptr backend,
-       std::optional<OptionalLabels> labels,
+       std::optional<LegLabelList> labels,
        std::optional<Dtype> dtype,
        std::optional<std::string> device)
 {
@@ -101,9 +101,9 @@ tensor(TensorCPtr obj,
         throw std::invalid_argument("Mismatching backend");
     }
     TensorPtr out;
-    if (labels.has_value() && *labels != obj->labels()) {
+    if (labels.has_value() && *labels != obj->labels.as_list()) {
         out = std::const_pointer_cast<Tensor>(obj)->copy();
-        out->set_labels(*labels);
+        out->labels.set(*labels);
     } else {
         out = std::const_pointer_cast<Tensor>(obj);
     }
@@ -121,7 +121,7 @@ tensor(BlockBackend::BlockPtr obj,
        TensorProduct::Ptr codomain,
        TensorProduct::Ptr domain,
        TensorBackend::Ptr backend,
-       std::optional<OptionalLabels> labels,
+       std::optional<LegLabelList> labels,
        std::optional<Dtype> dtype,
        std::optional<std::string> device,
        bool understood_braiding)
@@ -142,11 +142,11 @@ add_trivial_leg(TensorCPtr tens,
                 std::optional<int64> legs_pos_opt,
                 std::optional<int64> codomain_pos_opt,
                 std::optional<int64> domain_pos_opt,
-                OptionalLabel label,
+                std::string label,
                 bool is_dual)
 {
-    if (label && tens->has_label(*label)) {
-        throw std::invalid_argument(std::format("Tensor already has label '{}'", *label));
+    if (!label.empty() && tens->labels.has(label)) {
+        throw std::invalid_argument(std::format("Tensor already has label '{}'", label));
     }
 
     // --- hints from Python add_trivial_leg ---
@@ -250,8 +250,8 @@ add_trivial_leg(TensorCPtr tens,
     auto data =
       backend->add_trivial_leg(tens, legs_pos, add_to_domain, co_domain_pos, codomain, domain);
 
-    OptionalLabels labels = tens->labels();
-    OptionalLabels new_labels;
+    LegLabelList labels = tens->labels.as_list();
+    LegLabelList new_labels;
     new_labels.reserve(labels.size() + 1);
     new_labels.insert(new_labels.end(), labels.begin(), labels.begin() + legs_pos);
     new_labels.push_back(label);
@@ -270,14 +270,15 @@ TensorPtr
 zero_like(TensorCPtr tensor)
 {
     if (auto mask = std::dynamic_pointer_cast<Mask const>(tensor)) {
-        return Mask::from_zero(mask->large_leg(), mask->backend, mask->labels(), mask->device);
+        return Mask::from_zero(
+          mask->large_leg(), mask->backend, mask->labels.as_list(), mask->device);
     }
     if (auto diag = std::dynamic_pointer_cast<DiagonalTensor const>(tensor)) {
         return DiagonalTensor::from_zero(
-          diag->leg(), diag->backend, diag->labels(), diag->dtype, diag->device);
+          diag->leg(), diag->backend, diag->labels.as_list(), diag->dtype, diag->device);
     }
     if (auto charged = std::dynamic_pointer_cast<ChargedTensor const>(tensor)) {
-        auto charge = std::dynamic_pointer_cast<ElementarySpace>(charged->charge_leg);
+        auto charge = charged->charge_leg.as_elementary_space();
         if (!charge) {
             throw std::invalid_argument("zero_like: charge_leg must be an ElementarySpace");
         }
@@ -286,24 +287,28 @@ zero_like(TensorCPtr tensor)
                                         charge,
                                         charged->charged_state,
                                         charged->backend,
-                                        charged->labels(),
+                                        charged->labels.as_list(),
                                         charged->dtype,
                                         charged->device);
     }
     if (auto sym = std::dynamic_pointer_cast<SymmetricTensor const>(tensor)) {
         // a HiddenLegTensor keeps the hidden prefix in its labels -> wrap the result again
-        return HiddenLegTensor::maybe_wrap(SymmetricTensor::from_zero(
-          sym->codomain, sym->domain, sym->backend, sym->labels(), sym->dtype, sym->device));
+        return HiddenLegTensor::maybe_wrap(SymmetricTensor::from_zero(sym->codomain,
+                                                                      sym->domain,
+                                                                      sym->backend,
+                                                                      sym->labels.as_list(),
+                                                                      sym->dtype,
+                                                                      sym->device));
     }
     throw py::type_error("Invalid type for tensor.");
 }
 
 TensorPtr
 tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
-                 std::optional<OptionalLabels> labels,
+                 std::optional<LegLabelList> labels,
                  std::optional<Dtype> dtype_opt,
-                 std::optional<OptionalLabels> row_labels,
-                 std::optional<OptionalLabels> col_labels,
+                 std::optional<LegLabelList> row_labels,
+                 std::optional<LegLabelList> col_labels,
                  std::optional<std::vector<ElementarySpace::Ptr>> row_summands,
                  std::optional<std::vector<ElementarySpace::Ptr>> col_summands)
 {
@@ -383,8 +388,8 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
             !factor_slices_equal(factors_slice(op->domain, 0, -1), ref_dom_head)) {
             throw std::runtime_error("inconsistent legs in grid");
         }
-        if (!std::dynamic_pointer_cast<ElementarySpace>((*op->codomain)[0]) ||
-            !std::dynamic_pointer_cast<ElementarySpace>((*op->domain)[-1])) {
+        if (!(*op->codomain)[0].as_elementary_space() ||
+            !(*op->domain)[-1].as_elementary_space()) {
             throw std::runtime_error("stacking legs must be ElementarySpace");
         }
     }
@@ -400,7 +405,7 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
             if (!op) {
                 continue;
             }
-            auto cell_space = std::dynamic_pointer_cast<ElementarySpace>((*op->codomain)[0]);
+            auto cell_space = (*op->codomain)[0].as_elementary_space();
             if (!row_space) {
                 row_space = cell_space;
             } else if (!row_space->equals_es(*cell_space)) {
@@ -426,7 +431,7 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
             if (!op) {
                 continue;
             }
-            auto cell_space = std::dynamic_pointer_cast<ElementarySpace>((*op->domain)[-1]);
+            auto cell_space = (*op->domain)[-1].as_elementary_space();
             if (!col_space) {
                 col_space = cell_space;
             } else if (!col_space->equals_es(*cell_space)) {
@@ -499,7 +504,7 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
                                    std::move(right_mult_slices),
                                    dtype,
                                    device);
-    OptionalLabels labs = labels.value_or(OptionalLabels{});
+    LegLabelList labs = labels.value_or(LegLabelList{});
     if (!labels.has_value()) {
         labs = Tensor::_init_parse_labels(std::nullopt, codomain, domain);
     }
@@ -585,7 +590,7 @@ MaskPtr
 DirectSumSpace::projection_onto_summands(std::optional<std::vector<SummandRef>> keep_indices,
                                          std::optional<std::vector<SummandRef>> discard_indices,
                                          std::shared_ptr<TensorBackend> backend,
-                                         std::optional<OptionalLabels> labels,
+                                         std::optional<LegLabelList> labels,
                                          std::optional<std::string> device) const
 {
     auto kept = select_summand_indices(*this, std::move(keep_indices), std::move(discard_indices));
@@ -632,7 +637,7 @@ MaskPtr
 DirectSumSpace::inclusion_of_summands(std::optional<std::vector<SummandRef>> keep_indices,
                                       std::optional<std::vector<SummandRef>> discard_indices,
                                       std::shared_ptr<TensorBackend> backend,
-                                      std::optional<OptionalLabels> labels,
+                                      std::optional<LegLabelList> labels,
                                       std::optional<std::string> device) const
 {
     auto proj = projection_onto_summands(std::move(keep_indices),
@@ -650,7 +655,7 @@ DirectSumSpace::inclusion_of_summands(std::optional<std::vector<SummandRef>> kee
 MaskPtr
 DirectSumSpace::projection_onto_summand(SummandRef which,
                                         std::shared_ptr<TensorBackend> backend,
-                                        std::optional<OptionalLabels> labels,
+                                        std::optional<LegLabelList> labels,
                                         std::optional<std::string> device) const
 {
     return projection_onto_summands(std::vector<SummandRef>{ std::move(which) },
@@ -663,7 +668,7 @@ DirectSumSpace::projection_onto_summand(SummandRef which,
 MaskPtr
 DirectSumSpace::inclusion_of_summand(SummandRef which,
                                      std::shared_ptr<TensorBackend> backend,
-                                     std::optional<OptionalLabels> labels,
+                                     std::optional<LegLabelList> labels,
                                      std::optional<std::string> device) const
 {
     return inclusion_of_summands(std::vector<SummandRef>{ std::move(which) },
@@ -676,7 +681,7 @@ DirectSumSpace::inclusion_of_summand(SummandRef which,
 SymmetricTensorPtr
 DirectSumSpace::unit_vector_of_summand(int64 i,
                                        std::shared_ptr<TensorBackend> backend,
-                                       std::optional<OptionalLabels> labels,
+                                       std::optional<LegLabelList> labels,
                                        std::optional<Dtype> dtype,
                                        std::optional<std::string> device) const
 {
@@ -706,7 +711,7 @@ DirectSumSpace::unit_vector_of_summand(int64 i,
               "DirectSumSpace::unit_vector_of_summand labels must have length 1 "
               "(the fused DirectSumSpace leg)");
         }
-        out->set_labels(*labels);
+        out->labels.set(*labels);
     }
     return out;
 }
@@ -726,8 +731,8 @@ tensor_grid_cell(TensorCPtr tensor,
     // codomain-side view of the stacking leg so apply_mask works for domain legs.
     auto row_space = tensor->get_leg(row_leg);
     auto col_space = tensor->get_leg(col_leg);
-    auto row_dss = std::dynamic_pointer_cast<DirectSumSpace>(row_space);
-    auto col_dss = std::dynamic_pointer_cast<DirectSumSpace>(col_space);
+    auto row_dss = std::dynamic_pointer_cast<DirectSumSpace>(row_space.as_elementary_space());
+    auto col_dss = std::dynamic_pointer_cast<DirectSumSpace>(col_space.as_elementary_space());
 
     TensorPtr cell = std::const_pointer_cast<Tensor>(tensor);
     if (row_dss) {
@@ -771,12 +776,13 @@ tensor_subgrid(TensorCPtr tensor,
     // Summand labels of the selected rows / cols, if the stacking leg is a DirectSumSpace.
     auto select_labels =
       [&](LegRef leg,
-          std::vector<DirectSumSpace::SummandRef> const& refs) -> std::optional<OptionalLabels> {
-        auto dss = std::dynamic_pointer_cast<DirectSumSpace>(tensor->get_leg(leg));
+          std::vector<DirectSumSpace::SummandRef> const& refs) -> std::optional<LegLabelList> {
+        auto dss =
+          std::dynamic_pointer_cast<DirectSumSpace>(tensor->get_leg(leg).as_elementary_space());
         if (!dss) {
             return std::nullopt;
         }
-        OptionalLabels out;
+        LegLabelList out;
         out.reserve(refs.size());
         for (auto const& ref : refs) {
             out.push_back(
@@ -795,7 +801,7 @@ tensor_subgrid(TensorCPtr tensor,
         }
     }
     return tensor_from_grid(std::move(grid),
-                            tensor->labels(),
+                            tensor->labels.as_list(),
                             std::nullopt,
                             select_labels(row_leg, rows),
                             select_labels(col_leg, cols));
@@ -816,7 +822,8 @@ grid_project(TensorCPtr tensor,
 
     TensorPtr result = std::const_pointer_cast<Tensor>(tensor);
     for (std::size_t i = 0; i < legs.size(); ++i) {
-        auto dss = std::dynamic_pointer_cast<DirectSumSpace>(result->get_leg(legs[i]));
+        auto dss = std::dynamic_pointer_cast<DirectSumSpace>(
+          result->get_leg(legs[i]).as_elementary_space());
         if (!dss) {
             throw std::invalid_argument("grid_project: selected leg is not a DirectSumSpace");
         }

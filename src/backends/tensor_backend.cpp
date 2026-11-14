@@ -64,7 +64,7 @@ legs_equal(std::vector<Leg::Ptr> const& a, std::vector<Leg::Ptr> const& b)
     for (std::size_t i = 0; i < a.size(); ++i) {
         if (a[i] == b[i])
             continue;
-        if (!a[i] || !b[i] || !(*a[i] == *b[i]))
+        if (!a[i] || !b[i] || !(a[i] == b[i]))
             return false;
     }
     return true;
@@ -148,14 +148,38 @@ TensorBackend::test_mask_sanity(MaskCPtr a)
         throw std::runtime_error("wrong tensor data type");
 }
 
-LegPipe::Ptr
-TensorBackend::make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, LegPipe::Ptr pipe)
+Leg::Ptr
+TensorBackend::make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, Leg::Ptr pipe)
 {
     if (pipe) {
-        assert(pipe->combine_cstyle == !is_dual);
-        assert(pipe->is_dual == is_dual);
-        assert(legs_equal(pipe->legs, legs));
-        return pipe;
+        // After the AbelianLegPipe / LegPipe MI removal, pipes may be either a plain LegPipe
+        // or an AbelianLegPipe (ElementarySpace). Both report is_pipe(); only the former is
+        // held in Leg's LegPipe alternative.
+        if (auto ab = std::dynamic_pointer_cast<AbelianLegPipe>(pipe.as_elementary_space())) {
+            if (ab->combine_cstyle != !is_dual) {
+                throw std::invalid_argument(
+                  "make_pipe: AbelianLegPipe combine_cstyle does not match is_dual");
+            }
+            if (ab->is_dual != is_dual) {
+                throw std::invalid_argument("make_pipe: AbelianLegPipe is_dual does not match");
+            }
+            return ab;
+        }
+        auto lp = pipe.as_leg_pipe();
+        if (!lp) {
+            throw std::invalid_argument("make_pipe: expected LegPipe or AbelianLegPipe");
+        }
+        if (lp->combine_cstyle != !is_dual) {
+            throw std::invalid_argument(
+              "make_pipe: LegPipe combine_cstyle does not match is_dual");
+        }
+        if (lp->is_dual != is_dual) {
+            throw std::invalid_argument("make_pipe: LegPipe is_dual does not match");
+        }
+        if (!legs_equal(lp->legs, legs)) {
+            throw std::invalid_argument("make_pipe: LegPipe factors do not match legs");
+        }
+        return lp;
     }
     return std::make_shared<LegPipe>(std::move(legs), is_dual, /*combine_cstyle=*/!is_dual);
 }
@@ -365,6 +389,7 @@ get_same_backend(const std::vector<py::object>& objs, std::string error_msg)
     TensorBackend::Ptr backend = objs[0].attr("backend").cast<TensorBackend::Ptr>();
     for (std::size_t i = 1; i < objs.size(); ++i) {
         TensorBackend::Ptr other = objs[i].attr("backend").cast<TensorBackend::Ptr>();
+        // Value equality: HDF5 round-trips reconstruct equivalent backend instances.
         if (!backend || !other || !(*backend == *other))
             throw std::invalid_argument(std::move(error_msg));
     }
@@ -385,6 +410,7 @@ get_same_backend(const std::vector<TensorCPtr>& objs, std::string error_msg)
     TensorBackend::Ptr backend = objs[0]->backend;
     for (std::size_t i = 1; i < objs.size(); ++i) {
         TensorBackend::Ptr const& other = objs[i]->backend;
+        // Value equality: HDF5 round-trips reconstruct equivalent backend instances.
         if (!backend || !other || !(*backend == *other))
             throw std::invalid_argument(std::move(error_msg));
     }

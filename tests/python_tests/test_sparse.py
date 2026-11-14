@@ -251,8 +251,8 @@ def test_NumpyArrayLinearOperator_from_matvec_and_vector(make_compatible_tensor,
         )
         if charged.num_legs == 1 and len(vec.legs) > 1:
             charged = tensors.split_legs(charged, 0)
-        if vec.labels is not None and any(l is not None for l in vec.labels):
-            charged.set_labels(list(vec.labels))
+        if any(vec.labels.as_list()):
+            charged.labels.set(vec.labels.as_list())
         op2, cflat = sparse.NumpyArrayLinearOperator.from_matvec_and_vector(lasyten_matvec, charged)
         npt.assert_allclose(op2.matvec(cflat), op2.tensor_to_flat_array(lasyten_matvec(charged)))
 

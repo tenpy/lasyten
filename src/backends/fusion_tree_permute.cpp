@@ -146,7 +146,7 @@ PermuteLegsInstructionEngine::compare_levels(int64 idx_1, int64 idx_2) const
     if (!level_1.has_value() || !level_2.has_value()) {
         throw BraidChiralityUnspecifiedError("Legs that braid must have specified levels.");
     }
-    if (*level_1 == *level_2) {
+    if (level_1 == level_2) {
         throw BraidChiralityUnspecifiedError("Legs that braid can not have the same level.");
     }
     return *level_1 > *level_2;

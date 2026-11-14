@@ -70,13 +70,13 @@ check_site_count(std::vector<Site::Ptr> const& sites, int64 expected)
 bool
 legs_equal(Leg::Ptr const& a, Leg::Ptr const& b)
 {
-    return a && b && a->operator==(*b);
+    return a && b && (a == b);
 }
 
 Leg::Ptr
 as_leg(ElementarySpace::Ptr space)
 {
-    return std::static_pointer_cast<Leg>(space);
+    return Leg{ std::move(space) };
 }
 
 LevelsSpec
@@ -84,12 +84,12 @@ levels_from_label_dict(SymmetricTensorPtr const& tensor,
                        std::map<std::string, int64> const& level_dict)
 {
     LevelsSpec spec(static_cast<std::size_t>(tensor->num_legs), std::nullopt);
-    auto labels = tensor->labels();
+    auto labels = tensor->labels.as_list();
     for (std::size_t i = 0; i < labels.size(); ++i) {
-        if (!labels[i].has_value()) {
+        if (labels[i].empty()) {
             continue;
         }
-        auto it = level_dict.find(*labels[i]);
+        auto it = level_dict.find(labels[i]);
         if (it != level_dict.end()) {
             spec[i] = it->second;
         }
@@ -153,7 +153,7 @@ swap_adjacent_factors(SymmetricTensorPtr const& Wa, SymmetricTensorPtr const& Wb
                                 std::vector<LegRef>{ "wR" },
                                 std::nullopt,
                                 false));
-    Wa_prepped->relabel({ { "p", "p0" }, { "p*", "p0*" } });
+    Wa_prepped->labels.update({ { "p", "p0" }, { "p*", "p0*" } });
     SymmetricTensorPtr Wb_prepped =
       as_symmetric(permute_legs(Wb,
                                 std::vector<LegRef>{ "wL" },
@@ -178,11 +178,11 @@ swap_adjacent_factors(SymmetricTensorPtr const& Wa, SymmetricTensorPtr const& Wb
                                   true));
 
     auto [left, right] =
-      horizontal_factorization(T, 2, 1, OptionalLabels{ "wR", "wL" }, std::nullopt);
+      horizontal_factorization(T, 2, 1, LegLabelList{ "wR", "wL" }, std::nullopt);
     SymmetricTensorPtr Wleft = as_symmetric(std::move(left));
     SymmetricTensorPtr Wright = as_symmetric(std::move(right));
-    Wleft->relabel({ { "p1", "p" }, { "p1*", "p*" } });
-    Wright->relabel({ { "p0", "p" }, { "p0*", "p*" } });
+    Wleft->labels.update({ { "p1", "p" }, { "p1*", "p*" } });
+    Wright->labels.update({ { "p0", "p" }, { "p0*", "p*" } });
     return { Wleft, Wright };
 }
 
@@ -204,7 +204,8 @@ occupation_jw(OccupationDOF::Ptr const& occ)
     if (auto ferm = std::dynamic_pointer_cast<FermionicDOF>(occ)) {
         return ferm->JW;
     }
-    return numpy().attr("diag")(numpy().attr("ones")(site_dim(occ)));
+    auto d = occ->number_operators.attr("shape").attr("__getitem__")(0).cast<int64>();
+    return numpy().attr("diag")(numpy().attr("ones")(d));
 }
 
 Symmetry::Ptr
@@ -239,13 +240,13 @@ quadratic_coupling_numpy(std::vector<Site::Ptr> const& sites,
                          bool add_hc = true)
 {
     check_site_count(sites, 2);
-    auto occ_i = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
-    auto occ_j = std::dynamic_pointer_cast<OccupationDOF>(sites[1]);
+    auto occ_i = sites[0]->get_occupation();
+    auto occ_j = sites[1]->get_occupation();
     if (!occ_i || !occ_j) {
         throw std::invalid_argument("Expected occupation sites");
     }
-    bool boson_i = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[0]));
-    bool boson_j = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[1]));
+    bool boson_i = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(occ_i));
+    bool boson_j = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(occ_j));
     if (boson_i != boson_j) {
         throw SymmetryError("Bosonic and fermionic sites are incompatible and cannot be combined "
                             "for constructing couplings.");
@@ -272,14 +273,14 @@ quadratic_coupling_numpy(std::vector<Site::Ptr> const& sites,
     if (species_i.empty() || species_j.empty()) {
         auto np = numpy();
         return np
-          .attr("zeros")(
-            py::make_tuple(site_dim(occ_i), site_dim(occ_j), site_dim(occ_j), site_dim(occ_i)))
+          .attr("zeros")(py::make_tuple(
+            site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1]), site_dim(sites[0])))
           .cast<py::array>();
     }
 
     auto np = numpy();
-    py::object h = np.attr("zeros")(
-      py::make_tuple(site_dim(occ_i), site_dim(occ_j), site_dim(occ_j), site_dim(occ_i)));
+    py::object h = np.attr("zeros")(py::make_tuple(
+      site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1]), site_dim(sites[0])));
     py::object jw = occupation_jw(occ_i);
     for (py::ssize_t idx = 0; idx < py::len(species_i); ++idx) {
         py::object k_i = species_i[py::int_(idx)];
@@ -307,18 +308,16 @@ structural_key(Coupling const& coupling)
             shape_list.append(d);
         }
         py::list labels_list;
-        for (auto const& lab : t->labels()) {
-            labels_list.append(lab.has_value() ? py::object(py::str(*lab)) : py::none());
+        for (auto const& lab : t->labels.as_list()) {
+            labels_list.append(py::str(lab));
         }
         py::list codomain_spaces;
         for (auto const& f : t->codomain->factors) {
-            codomain_spaces.append(
-              freeze(py::cast(space_to_dict(std::dynamic_pointer_cast<ElementarySpace>(f)))));
+            codomain_spaces.append(freeze(py::cast(space_to_dict(f.as_elementary_space()))));
         }
         py::list domain_spaces;
         for (auto const& f : t->domain->factors) {
-            domain_spaces.append(
-              freeze(py::cast(space_to_dict(std::dynamic_pointer_cast<ElementarySpace>(f)))));
+            domain_spaces.append(freeze(py::cast(space_to_dict(f.as_elementary_space()))));
         }
         factor_keys.append(py::make_tuple(py::tuple(shape_list),
                                           py::tuple(labels_list),
@@ -373,7 +372,7 @@ space_to_dict(ElementarySpace::Ptr space)
         { "symmetry", py::str(space->Space::symmetry->repr()) },
         { "sectors", sectors },
         { "multiplicities", multiplicities },
-        { "is_dual", py::bool_(space->Leg::is_dual) },
+        { "is_dual", py::bool_(space->is_dual) },
         { "basis_perm", basis_perm },
     };
 }
@@ -439,9 +438,9 @@ Coupling::test_sanity() const
             throw std::runtime_error("Coupling tensor must have 2 codomain and 2 domain legs");
         }
         static std::vector<std::string> const expected_labels = { "wL", "p", "wR", "p*" };
-        auto labels = W->labels();
+        auto labels = W->labels.as_list();
         for (std::size_t j = 0; j < expected_labels.size(); ++j) {
-            if (!labels[j].has_value() || *labels[j] != expected_labels[j]) {
+            if (labels[j] != expected_labels[j]) {
                 throw std::runtime_error("Coupling tensor labels must be ['wL', 'p', 'wR', 'p*']");
             }
         }
@@ -452,7 +451,7 @@ Coupling::test_sanity() const
             throw std::runtime_error("Coupling dual physical leg mismatch");
         }
     }
-    if (!factorization.front()->get_leg("wL")->is_trivial()) {
+    if (!factorization.front()->get_leg("wL").is_trivial()) {
         throw std::runtime_error("Leftmost wL leg must be trivial");
     }
     for (std::size_t i = 0; i + 1 < factorization.size(); ++i) {
@@ -461,7 +460,7 @@ Coupling::test_sanity() const
             throw std::runtime_error("Coupling virtual legs must match between neighbors");
         }
     }
-    if (!factorization.back()->get_leg("wR")->is_trivial()) {
+    if (!factorization.back()->get_leg("wR").is_trivial()) {
         throw std::runtime_error("Rightmost wR leg must be trivial");
     }
 }
@@ -492,7 +491,7 @@ Coupling::from_dense_block(py::object operator_,
     for (std::size_t i = 0; i < sites.size(); ++i) {
         p_labels.push_back(std::format("p{}", i));
     }
-    OptionalLabels labels;
+    LegLabelList labels;
     for (auto const& pl : p_labels) {
         labels.emplace_back(pl);
     }
@@ -540,14 +539,14 @@ Coupling::from_tensor(SymmetricTensorPtr operator_,
     for (std::size_t i = 0; i < sites.size(); ++i) {
         p_labels.push_back(std::format("p{}", i));
     }
-    OptionalLabels expected_labels;
+    LegLabelList expected_labels;
     for (auto const& pl : p_labels) {
         expected_labels.emplace_back(pl);
     }
     for (auto it = p_labels.rbegin(); it != p_labels.rend(); ++it) {
         expected_labels.emplace_back(*it + "*");
     }
-    if (operator_->labels() != expected_labels) {
+    if (operator_->labels.as_list() != expected_labels) {
         throw std::invalid_argument("operator labels do not match expected p-label order");
     }
 
@@ -565,32 +564,33 @@ Coupling::from_tensor(SymmetricTensorPtr operator_,
         SymmetricTensorPtr W =
           as_symmetric(add_trivial_leg(operator_, std::nullopt, 0, std::nullopt, "wL"));
         W = as_symmetric(add_trivial_leg(W, std::nullopt, std::nullopt, 1, "wR"));
-        W->relabel({ { "p0", "p" }, { "p0*", "p*" } });
+        W->labels.update({ { "p0", "p" }, { "p0*", "p*" } });
         factorization = { W };
     } else {
         SymmetricTensorPtr rest = operator_;
         auto [W0, rest0] =
-          horizontal_factorization(rest, 1, 1, OptionalLabels{ "wR", "wL" }, cutoff);
+          horizontal_factorization(rest, 1, 1, LegLabelList{ "wR", "wL" }, cutoff);
         W0 = as_symmetric(W0);
         rest = as_symmetric(rest0);
-        W0->relabel({ { "p0", "p" }, { "p0*", "p*" } });
+        W0->labels.update({ { "p0", "p" }, { "p0*", "p*" } });
         factorization.push_back(
           as_symmetric(add_trivial_leg(W0, std::nullopt, 0, std::nullopt, "wL")));
 
         for (std::size_t i = 1; i + 1 < sites.size(); ++i) {
             auto [Wi, resti] =
-              horizontal_factorization(rest, 2, 1, OptionalLabels{ "wR", "wL" }, cutoff);
+              horizontal_factorization(rest, 2, 1, LegLabelList{ "wR", "wL" }, cutoff);
             Wi = as_symmetric(Wi);
             rest = as_symmetric(resti);
-            Wi->relabel({ { std::format("p{}", i), "p" }, { std::format("p{}*", i), "p*" } });
+            Wi->labels.update(
+              { { std::format("p{}", i), "p" }, { std::format("p{}*", i), "p*" } });
             factorization.push_back(as_symmetric(Wi));
         }
 
         if (rest->num_codomain_legs() != 2 || rest->num_domain_legs() != 1) {
             throw std::runtime_error("Unexpected remaining legs after horizontal factorization");
         }
-        rest->relabel({ { std::format("p{}", sites.size() - 1), "p" },
-                        { std::format("p{}*", sites.size() - 1), "p*" } });
+        rest->labels.update({ { std::format("p{}", sites.size() - 1), "p" },
+                              { std::format("p{}*", sites.size() - 1), "p*" } });
         factorization.push_back(
           as_symmetric(add_trivial_leg(rest, std::nullopt, std::nullopt, 1, "wR")));
     }
@@ -607,7 +607,7 @@ Coupling::to_tensor() const
                                     std::vector<LegRef>{ LegRef{ int64(1) } },
                                     std::nullopt,
                                     false));
-    res->relabel({ { "p", "p0" }, { "p*", "p0*" } });
+    res->labels.update({ { "p", "p0" }, { "p*", "p0*" } });
 
     int64 const num_sites = static_cast<int64>(sites.size());
     for (int64 i = 1; i < num_sites; ++i) {
@@ -718,7 +718,7 @@ Coupling::stretch_with_identities(std::vector<Site::Ptr> const& all_sites,
             tensor = it->second;
         }
         new_factorization.push_back(tensor);
-        wR_space = std::dynamic_pointer_cast<ElementarySpace>(tensor->get_leg_co_domain("wR"));
+        wR_space = tensor->get_leg_co_domain("wR").as_elementary_space();
     }
 
     std::vector<Site::Ptr> new_sites;
@@ -739,9 +739,8 @@ Coupling::elementary_decomposition() const
     std::vector<std::vector<MaskPtr>> masks_R;
     std::vector<std::vector<MaskPtr>> masks_L;
     for (std::size_t b = 0; b + 1 < n; ++b) {
-        auto leg_R = std::dynamic_pointer_cast<ElementarySpace>(factorization[b]->get_leg("wR"));
-        auto leg_L =
-          std::dynamic_pointer_cast<ElementarySpace>(factorization[b + 1]->get_leg("wL"));
+        auto leg_R = factorization[b]->get_leg("wR").as_elementary_space();
+        auto leg_L = factorization[b + 1]->get_leg("wL").as_elementary_space();
         if (!leg_R || !leg_L) {
             throw std::runtime_error("virtual legs must be ElementarySpaces");
         }
@@ -932,6 +931,26 @@ Coupling::repr() const
       "Coupling(name={}, sites=[{}], shapes=[{}])", name_repr, site_names, shapes);
 }
 
+namespace {
+
+std::vector<std::string>
+normalize_spin_dofs(std::vector<std::string> dof, std::size_t n)
+{
+    if (dof.empty()) {
+        return std::vector<std::string>(n, DOF_SPIN);
+    }
+    if (dof.size() == 1 && n > 1) {
+        return std::vector<std::string>(n, dof[0]);
+    }
+    if (dof.size() != n) {
+        throw std::invalid_argument(
+          std::format("dof: expected {} name(s), got {}", n, dof.size()));
+    }
+    return dof;
+}
+
+} // namespace
+
 Coupling
 spin_spin_coupling(std::vector<Site::Ptr> sites,
                    float64 Jx,
@@ -941,17 +960,16 @@ spin_spin_coupling(std::vector<Site::Ptr> sites,
                    complex128 Jpp,
                    complex128 Jmp,
                    complex128 Jpm,
-                   complex128 Jmm)
+                   complex128 Jmm,
+                   std::vector<std::string> dof)
 {
     check_site_count(sites, 2);
-    auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
-    auto spin1 = std::dynamic_pointer_cast<SpinDOF>(sites[1]);
-    if (!spin0 || !spin1) {
-        throw std::invalid_argument("spin_spin_coupling requires SpinDOF sites");
-    }
+    dof = normalize_spin_dofs(std::move(dof), 2);
+    auto spin0 = sites[0]->require_spin(dof[0]);
+    auto spin1 = sites[1]->require_spin(dof[1]);
     auto np = numpy();
-    py::object h = np.attr("zeros")(
-      py::make_tuple(site_dim(spin0), site_dim(spin0), site_dim(spin1), site_dim(spin1)));
+    py::object h = np.attr("zeros")(py::make_tuple(
+      site_dim(sites[0]), site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1])));
     for (int axis = 0; axis < 3; ++axis) {
         float64 pref = axis == 0 ? Jx : (axis == 1 ? Jy : Jz);
         if (pref == 0.) {
@@ -996,15 +1014,13 @@ spin_field_coupling(std::vector<Site::Ptr> sites,
                     float64 hx,
                     float64 hy,
                     float64 hz,
-                    std::optional<std::string> name)
+                    std::optional<std::string> name,
+                    std::string dof)
 {
     check_site_count(sites, 1);
-    auto spin = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
-    if (!spin) {
-        throw std::invalid_argument("spin_field_coupling requires SpinDOF sites");
-    }
+    auto spin = sites[0]->require_spin(dof);
     auto np = numpy();
-    py::object h = np.attr("zeros")(py::make_tuple(site_dim(spin), site_dim(spin)));
+    py::object h = np.attr("zeros")(py::make_tuple(site_dim(sites[0]), site_dim(sites[0])));
     if (hx != 0.) {
         h = np_add(h,
                    np_multiply(py::float_(hx),
@@ -1027,14 +1043,15 @@ spin_field_coupling(std::vector<Site::Ptr> sites,
 }
 
 Coupling
-aklt_coupling(std::vector<Site::Ptr> sites, float64 J, std::optional<std::string> name)
+aklt_coupling(std::vector<Site::Ptr> sites,
+              float64 J,
+              std::optional<std::string> name,
+              std::vector<std::string> dof)
 {
     check_site_count(sites, 2);
-    auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
-    auto spin1 = std::dynamic_pointer_cast<SpinDOF>(sites[1]);
-    if (!spin0 || !spin1) {
-        throw std::invalid_argument("aklt_coupling requires SpinDOF sites");
-    }
+    dof = normalize_spin_dofs(std::move(dof), 2);
+    auto spin0 = sites[0]->require_spin(dof[0]);
+    auto spin1 = sites[1]->require_spin(dof[1]);
     auto np = numpy();
     py::object S_dot_S =
       np.attr("tensordot")(spin0->spin_vector,
@@ -1049,21 +1066,26 @@ aklt_coupling(std::vector<Site::Ptr> sites, float64 J, std::optional<std::string
 }
 
 Coupling
-heisenberg_coupling(std::vector<Site::Ptr> sites, float64 J, std::optional<std::string> name)
+heisenberg_coupling(std::vector<Site::Ptr> sites,
+                    float64 J,
+                    std::optional<std::string> name,
+                    std::vector<std::string> dof)
 {
-    return spin_spin_coupling(sites, J, J, J, name.value_or("S.S"));
+    return spin_spin_coupling(
+      sites, J, J, J, name.value_or("S.S"), {}, {}, {}, {}, std::move(dof));
 }
 
 Coupling
-chiral_3spin_coupling(std::vector<Site::Ptr> sites, float64 chi, std::optional<std::string> name)
+chiral_3spin_coupling(std::vector<Site::Ptr> sites,
+                      float64 chi,
+                      std::optional<std::string> name,
+                      std::vector<std::string> dof)
 {
     check_site_count(sites, 3);
-    auto spin0 = std::dynamic_pointer_cast<SpinDOF>(sites[0]);
-    auto spin1 = std::dynamic_pointer_cast<SpinDOF>(sites[1]);
-    auto spin2 = std::dynamic_pointer_cast<SpinDOF>(sites[2]);
-    if (!spin0 || !spin1 || !spin2) {
-        throw std::invalid_argument("chiral_3spin_coupling requires SpinDOF sites");
-    }
+    dof = normalize_spin_dofs(std::move(dof), 3);
+    auto spin0 = sites[0]->require_spin(dof[0]);
+    auto spin1 = sites[1]->require_spin(dof[1]);
+    auto spin2 = sites[2]->require_spin(dof[2]);
     auto np = numpy();
     py::object SxS = np.attr("cross")(
       spin1->spin_vector.attr("__getitem__")(
@@ -1084,7 +1106,7 @@ chemical_potential(std::vector<Site::Ptr> sites,
                    std::optional<std::string> name)
 {
     check_site_count(sites, 1);
-    auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
+    auto occ = sites[0]->get_occupation();
     if (!occ) {
         throw std::invalid_argument("chemical_potential requires bosonic or fermionic sites");
     }
@@ -1100,7 +1122,7 @@ onsite_interaction(std::vector<Site::Ptr> sites,
                    std::optional<std::string> name)
 {
     check_site_count(sites, 1);
-    auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
+    auto occ = sites[0]->get_occupation();
     if (!occ) {
         throw std::invalid_argument("onsite_interaction requires bosonic or fermionic sites");
     }
@@ -1119,14 +1141,16 @@ density_density_interaction(std::vector<Site::Ptr> sites,
                             std::optional<std::string> name)
 {
     check_site_count(sites, 2);
-    auto occ0 = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
-    auto occ1 = std::dynamic_pointer_cast<OccupationDOF>(sites[1]);
+    auto occ0 = sites[0]->get_occupation();
+    auto occ1 = sites[1]->get_occupation();
     if (!occ0 || !occ1) {
         throw std::invalid_argument(
           "density_density_interaction requires bosonic or fermionic sites");
     }
-    bool boson0 = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[0]));
-    bool boson1 = static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[1]));
+    bool boson0 =
+      static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[0]->get_occupation()));
+    bool boson1 =
+      static_cast<bool>(std::dynamic_pointer_cast<BosonicDOF>(sites[1]->get_occupation()));
     if (boson0 != boson1) {
         throw SymmetryError("Bosonic and fermionic sites are incompatible and cannot be combined "
                             "for constructing couplings.");
@@ -1182,7 +1206,7 @@ onsite_pairing(std::vector<Site::Ptr> sites,
                std::optional<std::string> name)
 {
     check_site_count(sites, 1);
-    auto occ = std::dynamic_pointer_cast<OccupationDOF>(sites[0]);
+    auto occ = sites[0]->get_occupation();
     if (!occ) {
         throw std::invalid_argument("onsite_pairing requires bosonic or fermionic sites");
     }
@@ -1206,7 +1230,7 @@ onsite_pairing(std::vector<Site::Ptr> sites,
     }
 
     auto np = numpy();
-    py::object h = np.attr("zeros")(py::make_tuple(site_dim(occ), site_dim(occ)));
+    py::object h = np.attr("zeros")(py::make_tuple(site_dim(sites[0]), site_dim(sites[0])));
     for (py::ssize_t i = 0; i < py::len(species_1); ++i) {
         py::object k1 = species_1[py::int_(i)];
         py::object k2 = species_2[py::int_(i)];
@@ -1227,8 +1251,8 @@ clock_clock_coupling(std::vector<Site::Ptr> sites,
                      std::optional<std::string> name)
 {
     check_site_count(sites, 2);
-    auto clock0 = std::dynamic_pointer_cast<ClockDOF>(sites[0]);
-    auto clock1 = std::dynamic_pointer_cast<ClockDOF>(sites[1]);
+    auto clock0 = sites[0]->get_clock();
+    auto clock1 = sites[1]->get_clock();
     if (!clock0 || !clock1) {
         throw std::invalid_argument("clock_clock_coupling requires ClockDOF sites");
     }
@@ -1241,8 +1265,8 @@ clock_clock_coupling(std::vector<Site::Ptr> sites,
       clock1->clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 0));
     py::object Z_j =
       clock1->clock_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), 1));
-    py::object h = np.attr("zeros")(
-      py::make_tuple(site_dim(clock0), site_dim(clock1), site_dim(clock1), site_dim(clock0)));
+    py::object h = np.attr("zeros")(py::make_tuple(
+      site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1]), site_dim(sites[0])));
     if (Jx != 0.) {
         h = np_add(h,
                    np_multiply(
@@ -1276,7 +1300,7 @@ clock_field_coupling(std::vector<Site::Ptr> sites,
                      std::optional<std::string> name)
 {
     check_site_count(sites, 1);
-    auto clock = std::dynamic_pointer_cast<ClockDOF>(sites[0]);
+    auto clock = sites[0]->get_clock();
     if (!clock) {
         throw std::invalid_argument("clock_field_coupling requires ClockDOF sites");
     }
@@ -1313,7 +1337,7 @@ sector_projection_coupling(std::vector<Site::Ptr> sites,
         legs.push_back(as_leg(s->leg));
     }
     auto codomain = std::make_shared<TensorProduct>(legs);
-    OptionalLabels labels;
+    LegLabelList labels;
     for (std::size_t i = 0; i < sites.size(); ++i) {
         labels.emplace_back(std::format("p{}", i));
     }

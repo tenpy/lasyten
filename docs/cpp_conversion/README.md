@@ -99,7 +99,7 @@ Skip `block_backends/torch.py` per scope.
 - **lasyten/symmetries/_symmetries.py** — Large (~2.6k lines). Convert in order: exceptions → enums → `BaseSymmetry` (virtual API on `Sector` / `SectorArray`) → `SymmetryFactor` / concrete factors → product `Symmetry` → free functions.
 - **lasyten/symmetries/_su2data.py** — SU2 data (small).
 - **lasyten/symmetries/trees.py** — `FusionTree`, `fusion_trees` (~1k lines).
-- **lasyten/symmetries/spaces.py** — `ElementarySpace`, `Leg`, `LegPipe`, `Space`, `TensorProduct`, `AbelianLegPipe` (~2.2k lines). Depends on symmetries and trees.
+- **lasyten/symmetries/spaces.py** — `ElementarySpace`, `Leg`, `LegPipe`, `Space`, `TensorProduct`, `AbelianLegPipe` (~2.2k lines). Depends on symmetries and trees. MI removed — [convert_spaces_MI.md](convert_spaces_MI.md).
 
 ### Layer 3 — Backends
 
@@ -122,7 +122,7 @@ Overview: [convert_backends.md](convert_backends.md). Branch: `convert_backends`
 
 Branch: `convert_models`. Overview: [convert_models.md](convert_models.md).
 
-- **lasyten/models/degrees_of_freedom.py** — `Site`, DOF classes (`SpinDOF`, `ClockDOF`, `AnyonDOF`, `OccupationDOF`, `BosonicDOF`, `FermionicDOF`), `ALL_SPECIES`. **C++ + monkey-patched** — [convert_Site.md](convert_Site.md).
+- **lasyten/models/degrees_of_freedom.py** — `Site`, `DegreeOfFreedom`, DOF classes (`SpinDOF`, `ClockDOF`, `AnyonDOF`, `OccupationDOF`, `BosonicDOF`, `FermionicDOF`), `ALL_SPECIES`. **C++ + monkey-patched** — [convert_Site.md](convert_Site.md), DOF composition — [convert_SiteDOF.md](convert_SiteDOF.md).
 - **lasyten/models/sites.py** — Concrete sites (`SpinSite`, `SpinlessBosonSite`, `SpinlessFermionSite`, `SpinHalfFermionSite`, anyon sites, …). **C++ + monkey-patched**.
 - **lasyten/models/couplings.py** — `Coupling`, factory functions (`spin_spin_coupling`, `hopping`, …). **C++ + monkey-patched**; `tenpy_models.py` remains Python.
 - **lasyten/models/tenpy_models.py** — TenPy model helpers (~130 lines). **Still Python** (out of scope).

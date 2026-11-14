@@ -211,9 +211,7 @@ load_optional_i64_vector(lasyten::hdf5::Loader& loader, std::string const& path)
 }
 
 void
-save_optional_labels(lasyten::hdf5::Saver& saver,
-                     std::string const& path,
-                     OptionalLabels const& labels)
+save_leg_labels(lasyten::hdf5::Saver& saver, std::string const& path, LegLabelList const& labels)
 {
     HighFive::Group seq_g;
     std::string seq_sub;
@@ -221,29 +219,26 @@ save_optional_labels(lasyten::hdf5::Saver& saver,
       path, hdf5_io::REPR_LIST, static_cast<std::int64_t>(labels.size()), seq_g, seq_sub);
     lasyten::hdf5::Saver seq_saver(seq_g);
     for (std::size_t i = 0; i < labels.size(); ++i) {
-        auto const key = std::to_string(i);
-        if (labels[i]) {
-            seq_saver.save_string(key, *labels[i]);
-        } else {
-            seq_saver.save_none(key);
-        }
+        // Empty string = unset; still stored as a string (not REPR_NONE).
+        seq_saver.save_string(std::to_string(i), labels[i]);
     }
 }
 
-OptionalLabels
-load_optional_labels(lasyten::hdf5::Loader& loader, std::string const& path)
+LegLabelList
+load_leg_labels(lasyten::hdf5::Loader& loader, std::string const& path)
 {
     hid_t id = loader.open(path);
     auto const n = sequence_len(loader, id);
     HighFive::Group seq_g = hdf5_io::group_from_hid(id);
     lasyten::hdf5::Loader seq_loader(seq_g);
-    OptionalLabels out;
+    LegLabelList out;
     out.reserve(static_cast<std::size_t>(n));
     for (std::int64_t i = 0; i < n; ++i) {
         hid_t child = seq_loader.open(std::to_string(i));
         auto type = seq_loader.type_of(child);
+        // Backward compat: older files stored unset labels as HDF5 None.
         if (type == hdf5_io::REPR_NONE) {
-            out.emplace_back(std::nullopt);
+            out.emplace_back("");
         } else {
             out.emplace_back(seq_loader.load_string(child));
         }
@@ -554,10 +549,13 @@ elementary_space_class_name(ElementarySpace const& space)
 char const*
 leg_class_name(Leg const& leg)
 {
-    if (auto const* es = dynamic_cast<ElementarySpace const*>(&leg)) {
+    if (auto es = leg.as_elementary_space()) {
         return elementary_space_class_name(*es);
     }
-    throw std::runtime_error(std::string("hdf5_export: unknown Leg type ") + typeid(leg).name());
+    if (leg.as_leg_pipe()) {
+        return "LegPipe";
+    }
+    throw std::runtime_error("hdf5_export: unknown / null Leg");
 }
 
 } // namespace
@@ -604,24 +602,19 @@ save_leg(lasyten::hdf5::Saver& saver, std::string const& path, Leg::CPtr const& 
         saver.save_none(path);
         return;
     }
-    auto const* cls = leg_class_name(*leg);
-    saver.save_instance(path,
-                        kModule,
-                        cls,
-                        leg.get(),
-                        [&](lasyten::hdf5::Saver& s, HighFive::Group& g, std::string const& sub) {
-                            if (auto es = std::dynamic_pointer_cast<ElementarySpace const>(leg)) {
-                                es->save_hdf5(s, g, sub);
-                                return;
-                            }
-                            throw std::runtime_error("hdf5_export: Leg without save_hdf5");
-                        });
+    if (auto es = leg.as_elementary_space()) {
+        save_elementary_space(saver, path, es);
+        return;
+    }
+    // Plain LegPipe has no native HDF5 schema yet; refuse rather than silently drop structure.
+    throw std::runtime_error(std::string("hdf5_export: cannot save plain LegPipe as Leg (class ") +
+                             leg_class_name(leg) + ")");
 }
 
 Leg::Ptr
 load_leg(lasyten::hdf5::Loader& loader, std::string const& path)
 {
-    return std::static_pointer_cast<Leg>(load_elementary_space(loader, path));
+    return Leg{ load_elementary_space(loader, path) };
 }
 
 void

@@ -10,11 +10,16 @@
 #include <lasyten/tensors/forward_declare.h>
 #include <lasyten/tensors/symmetric_tensor.h>
 
+#include <format>
+#include <functional>
 #include <lasyten/tools/hdf5.h>
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -32,12 +37,35 @@ inline AllSpeciesTag const ALL_SPECIES{};
 [[nodiscard]] py::object& all_species_sentinel();
 [[nodiscard]] bool is_all_species(py::object const& species);
 
+/// Conventional names for DOF registry entries on a `Site`.
+inline constexpr char const* DOF_SPIN = "spin";
+inline constexpr char const* DOF_OCCUPATION = "occupation";
+inline constexpr char const* DOF_CLOCK = "clock";
+inline constexpr char const* DOF_ANYON = "anyon";
+
+class Site;
+
+/// Lightweight base for degrees of freedom composed into a `Site` (not inherited by sites).
+class DegreeOfFreedom
+{
+  public:
+    using Ptr = std::shared_ptr<DegreeOfFreedom>;
+
+    virtual ~DegreeOfFreedom() = default;
+
+    /// Perform sanity checks on this DOF's data.
+    virtual void test_sanity() = 0;
+};
+
 /// Collects necessary information about a local site of a lattice model.
 ///
 /// A site defines the local Hilbert space in terms of its `leg`.
 /// This involves a choice for the local basis.
 /// Moreover, it exposes the symmetric single-site operators.
 /// Multi-site operators, on the other hand, are represented by `Coupling` s.
+///
+/// Degrees of freedom (spin, occupation, …) are composed via the named `dofs` registry
+/// rather than inherited as mixins.
 ///
 /// Attributes:
 ///
@@ -52,9 +80,11 @@ inline AllSpeciesTag const ALL_SPECIES{};
 ///     Each must have the `leg` of the site as the only factor in its domain and codomain.
 /// hc_ops : {str: str}
 ///     Mapping from each known onsite operator name to the name of its hermitian conjugate.
-///
-/// TODO put some
-class Site : public virtual std::enable_shared_from_this<Site>
+/// dofs : {str: DegreeOfFreedom}
+///     Named degrees of freedom attached to this site. Conventional keys are ``"spin"``,
+///     ``"occupation"``, ``"clock"``, and ``"anyon"``; grouped / multi-DOF sites may use
+///     additional names.
+class Site : public std::enable_shared_from_this<Site>
 {
   public:
     using Ptr = std::shared_ptr<Site>;
@@ -66,20 +96,88 @@ class Site : public virtual std::enable_shared_from_this<Site>
     std::string default_device;
     std::map<std::string, SymmetricTensorPtr> onsite_operators;
     std::map<std::string, std::string> hc_ops;
+    std::map<std::string, DegreeOfFreedom::Ptr> dofs;
 
     Site(ElementarySpace::Ptr leg,
          std::map<std::string, int64> state_labels = {},
          std::map<std::string, SymmetricTensorPtr> onsite_operators = {},
          TensorBackend::Ptr backend = nullptr,
-         std::optional<std::string> default_device = std::nullopt);
+         std::optional<std::string> default_device = std::nullopt,
+         std::map<std::string, DegreeOfFreedom::Ptr> dofs = {});
 
     virtual ~Site() = default;
 
-    /// Perform sanity checks.
+    /// Perform sanity checks (including all registered DOFs).
     virtual void test_sanity();
+
+    /// Look up a DOF by name and cast to `T`. Returns nullptr if missing or wrong type.
+    template<class T>
+    [[nodiscard]] std::shared_ptr<T> get_dof(std::string const& name) const
+    {
+        auto it = dofs.find(name);
+        if (it == dofs.end() || !it->second) {
+            return nullptr;
+        }
+        return std::dynamic_pointer_cast<T>(it->second);
+    }
+
+    /// Look up a DOF by name and cast to `T`. Throws if missing or wrong type.
+    template<class T>
+    [[nodiscard]] std::shared_ptr<T> require_dof(std::string const& name) const
+    {
+        auto dof = get_dof<T>(name);
+        if (!dof) {
+            throw std::invalid_argument(
+              std::format("Site has no DOF named '{}' of the requested type", name));
+        }
+        return dof;
+    }
+
+    /// All registry entries that dynamically cast to `T`.
+    template<class T>
+    [[nodiscard]] std::vector<std::pair<std::string, std::shared_ptr<T>>> dofs_of() const
+    {
+        std::vector<std::pair<std::string, std::shared_ptr<T>>> out;
+        for (auto const& [name, dof] : dofs) {
+            if (auto casted = std::dynamic_pointer_cast<T>(dof)) {
+                out.emplace_back(name, std::move(casted));
+            }
+        }
+        return out;
+    }
+
+    /// Register (or replace) a named DOF.
+    void set_dof(std::string const& name, DegreeOfFreedom::Ptr dof);
+
+    [[nodiscard]] std::shared_ptr<class SpinDOF> get_spin(
+      std::string const& name = DOF_SPIN) const;
+    [[nodiscard]] std::shared_ptr<class SpinDOF> require_spin(
+      std::string const& name = DOF_SPIN) const;
+    [[nodiscard]] std::shared_ptr<class OccupationDOF> get_occupation(
+      std::string const& name = DOF_OCCUPATION) const;
+    [[nodiscard]] std::shared_ptr<class OccupationDOF> require_occupation(
+      std::string const& name = DOF_OCCUPATION) const;
+    [[nodiscard]] std::shared_ptr<class ClockDOF> get_clock(
+      std::string const& name = DOF_CLOCK) const;
+    [[nodiscard]] std::shared_ptr<class ClockDOF> require_clock(
+      std::string const& name = DOF_CLOCK) const;
+    [[nodiscard]] std::shared_ptr<class AnyonDOF> get_anyon(
+      std::string const& name = DOF_ANYON) const;
+    [[nodiscard]] std::shared_ptr<class AnyonDOF> require_anyon(
+      std::string const& name = DOF_ANYON) const;
 
     [[nodiscard]] Symmetry::Ptr symmetry() const;
     [[nodiscard]] float64 dim() const;
+
+    /// Change the `leg` of the site in place.
+    ///
+    /// Assumes that `state_labels` remain valid (same basis order / dimension). Rebuilds
+    /// `onsite_operators` from their dense blocks under the new leg; operators that are not
+    /// symmetric under the new symmetry raise. Rebinds any `OccupationDOF` legs to `new_leg`.
+    ///
+    /// @param new_leg The new physical leg. If ``nullptr``, use a trivial-sector space of the
+    /// same dimension (dropping all symmetry information).
+    void change_leg(ElementarySpace::Ptr new_leg = nullptr);
 
     /// Add an operator to the `onsite_operators`.
     ///
@@ -195,7 +293,7 @@ class Site : public virtual std::enable_shared_from_this<Site>
     [[nodiscard]] py::dict hdf5_backend_kwargs() const;
 };
 
-/// Common base class for sites that have a spin degree of freedom.
+/// Spin degree of freedom (composed into a `Site`, not a site base class).
 ///
 /// Attributes:
 ///
@@ -203,21 +301,15 @@ class Site : public virtual std::enable_shared_from_this<Site>
 ///     The vector of spin operators as a numpy array with axes ``[p, p*, i]`` and shape
 ///     ``(dim, dim, 3)``. These operators include the factor of the total spin,
 ///     e.g. for spin-1/2, these are ``.5`` times the pauli matrices.
-class SpinDOF : public virtual Site
+class SpinDOF : public DegreeOfFreedom
 {
   public:
     using Ptr = std::shared_ptr<SpinDOF>;
 
     py::array spin_vector;
 
-    SpinDOF(ElementarySpace::Ptr leg,
-            py::array spin_vector,
-            std::map<std::string, int64> state_labels = {},
-            std::map<std::string, SymmetricTensorPtr> onsite_operators = {},
-            TensorBackend::Ptr backend = nullptr,
-            std::optional<std::string> default_device = std::nullopt);
+    SpinDOF(ElementarySpace::Ptr leg, py::array spin_vector);
 
-    /// Perform sanity checks.
     void test_sanity() override;
 
     /// Build the spin_vector from ``Sz`` and ``Sp = Sx + i Sy``
@@ -232,23 +324,20 @@ class SpinDOF : public virtual Site
       bool use_test_su2 = false);
 };
 
-/// Common base class for sites that have a quantum clock degree of freedom.
-class ClockDOF : public virtual Site
+/// Clock degree of freedom (composed into a `Site`).
+class ClockDOF : public DegreeOfFreedom
 {
   public:
     using Ptr = std::shared_ptr<ClockDOF>;
 
     py::array clock_operators;
 
-    ClockDOF(ElementarySpace::Ptr leg,
-             py::array clock_operators,
-             std::map<std::string, int64> state_labels = {},
-             std::map<std::string, SymmetricTensorPtr> onsite_operators = {},
-             TensorBackend::Ptr backend = nullptr,
-             std::optional<std::string> default_device = std::nullopt);
+    ClockDOF(ElementarySpace::Ptr leg, py::array clock_operators);
 
-    /// Perform sanity checks.
     void test_sanity() override;
+
+    /// Register default Z / Zhc / Zphc onsite operators on `site`.
+    void register_default_ops(Site& site) const;
 
     /// Translate conservation law for a clock to a symmetry.
     ///
@@ -258,26 +347,25 @@ class ClockDOF : public virtual Site
       bool use_test_su2 = false);
 };
 
-/// Common base class for sites that have an anyonic degree of freedom.
-class AnyonDOF : public virtual Site
+/// Anyonic degree of freedom (composed into a `Site`).
+class AnyonDOF : public DegreeOfFreedom
 {
   public:
     using Ptr = std::shared_ptr<AnyonDOF>;
 
     std::vector<std::string> sector_names;
 
-    AnyonDOF(ElementarySpace::Ptr leg,
-             std::vector<std::string> sector_names = {},
-             std::map<std::string, int64> state_labels = {},
-             std::map<std::string, SymmetricTensorPtr> onsite_operators = {},
-             TensorBackend::Ptr backend = nullptr,
-             std::optional<std::string> default_device = std::nullopt);
+    AnyonDOF(ElementarySpace::Ptr leg, std::vector<std::string> sector_names = {});
 
-    /// Perform sanity checks.
     void test_sanity() override;
+
+    /// Register sector-projection onsite operators ``P_<sector>`` on `site`.
+    void register_default_ops(Site& site,
+                              TensorBackend::Ptr backend = nullptr,
+                              std::optional<std::string> default_device = std::nullopt) const;
 };
 
-/// Common base class for sites that have a bosonic or fermionic degree of freedom.
+/// Bosonic or fermionic occupation degree of freedom (composed into a `Site`).
 ///
 /// Requires that the local basis is such that the `number_operators` of all species
 /// are diagonal.
@@ -288,13 +376,10 @@ class AnyonDOF : public virtual Site
 ///     Number of boson species.
 /// creators : 3D array
 ///     The vector of creation operators as a numpy array with shape ``(dim, dim, num_species)``
-///     and axes ``[p, p*, i]``, where `i` corresponds to the different species of bosons (i.e.,
-///     ``[Bd0, Bd1`, ...]`` stacked along axis 2).
+///     and axes ``[p, p*, i]``.
 /// annihilators : 3D array
 ///     The vector of annihilation operators as a numpy array with shape ``(dim, dim,
-///     num_species)`` and axes ``[p, p*, i]``, where `i` corresponds to the different species of
-///     bosons (i.e.,
-///     ``[B0, B1`, ...]`` stacked along axis 2).
+///     num_species)``.
 /// anti_commute_sign : float
 ///     ``+1`` for bosons, ``-1`` for fermions.
 /// species_names : list of (str | None)
@@ -303,7 +388,7 @@ class AnyonDOF : public virtual Site
 ///     The vector of occupation number operators with shape ``(dim, dim, num_species)``.
 /// n_tot : 2D array
 ///     The total occupation number operator with shape ``(dim, dim)``.
-class OccupationDOF : public virtual Site
+class OccupationDOF : public DegreeOfFreedom
 {
   public:
     using Ptr = std::shared_ptr<OccupationDOF>;
@@ -320,17 +405,13 @@ class OccupationDOF : public virtual Site
                   py::array creators,
                   py::array annihilators,
                   int64 anti_commute_sign,
-                  std::vector<std::optional<std::string>> species_names = {},
-                  std::map<std::string, int64> state_labels = {},
-                  std::map<std::string, SymmetricTensorPtr> onsite_operators = {},
-                  TensorBackend::Ptr backend = nullptr,
-                  std::optional<std::string> default_device = std::nullopt);
+                  std::vector<std::optional<std::string>> species_names = {});
 
     void test_sanity() override;
 
-    /// Add occupation and parity operators for each species.
-    virtual void add_individual_occupation_ops();
-    void add_total_occupation_ops();
+    /// Add occupation and parity operators for each species onto `site`.
+    virtual void add_individual_occupation_ops(Site& site) const;
+    void add_total_occupation_ops(Site& site) const;
 
     /// Wrapper around ``annihilators[:, :, species]``, optionally including JW strings.
     ///
@@ -347,23 +428,23 @@ class OccupationDOF : public virtual Site
     [[nodiscard]] py::array get_occupation_numpy(py::object species = py::none());
     [[nodiscard]] int64 get_species_idx(py::object species) const;
 
+    /// Rebind the Hilbert-space leg (same dimension); used by `Site::change_leg`.
+    void set_leg(ElementarySpace::Ptr leg);
+
   protected:
+    ElementarySpace::Ptr leg_;
     std::map<std::string, int64> species_name_to_idx;
 };
 
-/// Common base class for sites that have a bosonic degree of freedom.
+/// Bosonic occupation degree of freedom.
 ///
-/// Requires that the local basis is such that the `number_operators` of all species
-/// are diagonal.
-///
-/// Mutually exclusive with `FermionicDOF`. Sites containing both bosonic and fermionic
-/// degrees of freedom can be realized by grouping of a bosonic site with a fermionic one.
+/// A single occupation DOF is either bosonic or fermionic. Sites that need both can register
+/// multiple occupation entries under different names (e.g. after grouping).
 ///
 /// Attributes:
 ///
 /// Nmax : 1D array of int
-///     Cutoff defining the maximum number of bosons per species and site. ``Nmax[i]`` corresponds
-///     to the cutoff for the `i`th species; a value of ``Nmax[i] = 1`` describes hard-core bosons.
+///     Cutoff defining the maximum number of bosons per species and site.
 class BosonicDOF : public OccupationDOF
 {
   public:
@@ -376,15 +457,11 @@ class BosonicDOF : public OccupationDOF
                py::array Nmax,
                py::array creators,
                py::array annihilators,
-               std::vector<std::optional<std::string>> species_names = {},
-               std::map<std::string, int64> state_labels = {},
-               std::map<std::string, SymmetricTensorPtr> onsite_operators = {},
-               TensorBackend::Ptr backend = nullptr,
-               std::optional<std::string> default_device = std::nullopt);
+               std::vector<std::optional<std::string>> species_names = {});
 
     void test_sanity() override;
 
-    void add_individual_occupation_ops() override;
+    void add_individual_occupation_ops(Site& site) const override;
 
     [[nodiscard]] py::array get_annihilator_numpy(py::object species,
                                                   bool include_JW = false) override;
@@ -405,13 +482,10 @@ class BosonicDOF : public OccupationDOF
     creation_annihilation_ops(int64 num_species, py::array Nmax, int64 dim);
 };
 
-/// Common base class for sites that have a fermionic degree of freedom.
+/// Fermionic occupation degree of freedom.
 ///
-/// Requires that the local basis is such that the `number_operators` of all species
-/// are diagonal.
-///
-/// Mutually exclusive with `BosonicDOF`. Sites containing both bosonic and fermionic
-/// degrees of freedom can be realized by grouping of a bosonic site with a fermionic one.
+/// A single occupation DOF is either bosonic or fermionic. Sites that need both can register
+/// multiple occupation entries under different names (e.g. after grouping).
 class FermionicDOF : public OccupationDOF
 {
   public:
@@ -423,11 +497,7 @@ class FermionicDOF : public OccupationDOF
     FermionicDOF(ElementarySpace::Ptr leg,
                  py::array creators,
                  py::array annihilators,
-                 std::vector<std::optional<std::string>> species_names = {},
-                 std::map<std::string, int64> state_labels = {},
-                 std::map<std::string, SymmetricTensorPtr> onsite_operators = {},
-                 TensorBackend::Ptr backend = nullptr,
-                 std::optional<std::string> default_device = std::nullopt);
+                 std::vector<std::optional<std::string>> species_names = {});
 
     void test_sanity() override;
 
@@ -444,5 +514,30 @@ class FermionicDOF : public OccupationDOF
 };
 
 [[nodiscard]] py::array as_immutable_array(py::object a, py::object dtype = py::none());
+
+/// Sector map with an explicit site index (callable mode of `set_common_symmetry`).
+using SiteSectorMapFn = std::function<SectorArray(int64 site_idx, SectorArray const& old_sectors)>;
+
+/// One new sector column as a sum of ``(prefactor, site_idx, old_col_idx)`` terms.
+using CommonSymmetryComboColumn = std::vector<std::tuple<float64, int64, int64>>;
+/// Explicit linear-combination mode of `set_common_symmetry` (TeNPy v1 style).
+using CommonSymmetryComboSpec = std::vector<CommonSymmetryComboColumn>;
+
+/// Adjust site symmetries in place so the sites can be used together.
+///
+/// String presets: ``"by_name"`` / ``"same"``, ``"independent"``, ``"drop"``.
+/// For more complex remaps, use the callable or linear-combo overloads with an explicit
+/// `new_symmetry`. See also issue #153 / TeNPy v1 ``set_common_charges``.
+void set_common_symmetry(std::vector<Site::Ptr> const& sites,
+                         std::string const& symmetry_combine = "by_name",
+                         Symmetry::Ptr new_symmetry = nullptr);
+
+void set_common_symmetry(std::vector<Site::Ptr> const& sites,
+                         SiteSectorMapFn sector_map,
+                         Symmetry::Ptr new_symmetry);
+
+void set_common_symmetry(std::vector<Site::Ptr> const& sites,
+                         CommonSymmetryComboSpec const& symmetry_combine,
+                         Symmetry::Ptr new_symmetry);
 
 } // namespace lasyten

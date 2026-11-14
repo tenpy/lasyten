@@ -5,10 +5,14 @@
 /// ``py::class_<Sector>`` / ``SectorArray`` own the Python types. These casters only
 /// extend *load* so call sites can still pass ndarrays during migration; *cast*
 /// always produces bound Sector / SectorArray instances (never bare ndarrays).
+///
+/// ``Leg`` value-type caster lives in ``include/lasyten/symmetries/spaces.h`` so library
+/// TUs that ``.cast<Leg>()`` see the same specialization.
 
 #include <lasyten/symmetries/fusion_symbol.h>
 #include <lasyten/symmetries/sector.h>
 #include <lasyten/symmetries/sector_numpy.h>
+#include <lasyten/symmetries/spaces.h>
 
 #include <pybind11/cast.h>
 #include <pybind11/numpy.h>

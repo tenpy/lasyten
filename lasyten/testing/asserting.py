@@ -1,7 +1,7 @@
 """Assertion wrappers for testing."""
 
 # Copyright (C) TeNPy Developers, Apache license
-from ..symmetries import Leg, LegPipe, TensorProduct
+from ..symmetries import Leg, TensorProduct, is_leg_pipe
 from ..tensors import SymmetricTensor, Tensor, almost_equal
 
 
@@ -28,14 +28,14 @@ def _equivalent_leg_recursion(a: TensorProduct | Leg, b: TensorProduct | Leg, lo
         for i in range(a.num_factors):
             _equivalent_leg_recursion(a[i], b[i], loc=f'{loc}[{i}]')
 
-    elif isinstance(a, LegPipe) and isinstance(b, LegPipe):
+    elif is_leg_pipe(a) and is_leg_pipe(b):
         assert a.num_legs == b.num_legs, f'Mismatching num_legs at pipe {loc}'
         assert a.is_dual == b.is_dual, f'Mismatching is_dual at pipe {loc}'
         assert a.combine_cstyle == b.combine_cstyle, f'Mismatching combine_cstyle at pipe {loc}'
         for i in range(a.num_legs):
             _equivalent_leg_recursion(a[i], b[i], loc=f'{loc}[{i}]')
 
-    elif isinstance(a, LegPipe) or isinstance(b, LegPipe):
+    elif is_leg_pipe(a) or is_leg_pipe(b):
         raise AssertionError(f'Mismatching types (pipe vs no pipe) at {loc}')
 
     elif isinstance(a, Leg) and isinstance(b, Leg):

@@ -33,6 +33,8 @@ lasyten/_core.py
 lasyten/_core.pyi
 .cursor/plans
 .cursor/rules
+# don't track compiled binaries
+*.so
 
 # Local checkouts / scratch (not for commit)
 tmp/

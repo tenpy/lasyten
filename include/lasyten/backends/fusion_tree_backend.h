@@ -204,7 +204,7 @@ class FusionTreeBackend : public TensorBackend
 
     DataPtr combine_legs(TensorCPtr tensor,
                          std::vector<std::vector<int64>> leg_idcs_combine,
-                         std::vector<LegPipe::Ptr> pipes,
+                         std::vector<Leg::Ptr> pipes,
                          TensorProduct::Ptr new_codomain,
                          TensorProduct::Ptr new_domain) override;
 
@@ -413,7 +413,7 @@ class FusionTreeBackend : public TensorBackend
 
     py::object state_tensor_product(BlockBackend::BlockPtr state1,
                                     BlockBackend::BlockPtr state2,
-                                    LegPipe::Ptr pipe) override;
+                                    Leg::Ptr pipe) override;
 
     DataPtr to_block_backend(DataPtr data,
                              std::shared_ptr<BlockBackend> block_backend,

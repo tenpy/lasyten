@@ -197,6 +197,7 @@ class Coupling
 /// @param name Optional coupling name.
 /// @param Jpp, Jmp, Jpm, Jmm Prefactors for the ladder-operator terms above. By default, all
 /// prefactors vanish.
+/// @param dof Names of the spin DOFs on each site (length 2). Defaults to ``("spin", "spin")``.
 [[nodiscard]] Coupling spin_spin_coupling(std::vector<Site::Ptr> sites,
                                           float64 Jx = 0,
                                           float64 Jy = 0,
@@ -205,7 +206,8 @@ class Coupling
                                           complex128 Jpp = {},
                                           complex128 Jmp = {},
                                           complex128 Jpm = {},
-                                          complex128 Jmm = {});
+                                          complex128 Jmm = {},
+                                          std::vector<std::string> dof = {});
 
 /// Single-site coupling of a spin to an external field.
 ///
@@ -217,11 +219,13 @@ class Coupling
 /// order.
 /// @param hx, hy, hz Prefactor, as given above. By default, all prefactors vanish.
 /// @param name Optional coupling name.
+/// @param dof Spin DOF name on the site. Defaults to ``"spin"``.
 [[nodiscard]] Coupling spin_field_coupling(std::vector<Site::Ptr> sites,
                                            float64 hx = 0,
                                            float64 hy = 0,
                                            float64 hz = 0,
-                                           std::optional<std::string> name = std::nullopt);
+                                           std::optional<std::string> name = std::nullopt,
+                                           std::string dof = DOF_SPIN);
 
 /// Two-site AKLT coupling between spins.
 ///
@@ -242,9 +246,11 @@ class Coupling
 /// order.
 /// @param J Prefactor, as given above. By default use ``1``.
 /// @param name Optional coupling name.
+/// @param dof Names of the spin DOFs on each site (length 2). Defaults to ``("spin", "spin")``.
 [[nodiscard]] Coupling aklt_coupling(std::vector<Site::Ptr> sites,
                                      float64 J = 1,
-                                     std::optional<std::string> name = std::nullopt);
+                                     std::optional<std::string> name = std::nullopt,
+                                     std::vector<std::string> dof = {});
 
 /// Two-site Heisenberg coupling between spins.
 ///
@@ -256,9 +262,11 @@ class Coupling
 /// order.
 /// @param J Prefactor, as given above. By default use ``1``, i.e. an anti-ferromagnetic coupling.
 /// @param name Optional coupling name.
+/// @param dof Names of the spin DOFs on each site (length 2). Defaults to ``("spin", "spin")``.
 [[nodiscard]] Coupling heisenberg_coupling(std::vector<Site::Ptr> sites,
                                            float64 J = 1,
-                                           std::optional<std::string> name = std::nullopt);
+                                           std::optional<std::string> name = std::nullopt,
+                                           std::vector<std::string> dof = {});
 
 /// Chiral coupling of three spins.
 ///
@@ -270,9 +278,11 @@ class Coupling
 /// order.
 /// @param chi Prefactor, as given above. By default use ``1``.
 /// @param name Optional coupling name.
+/// @param dof Names of the spin DOFs on each site (length 3). Defaults to all ``"spin"``.
 [[nodiscard]] Coupling chiral_3spin_coupling(std::vector<Site::Ptr> sites,
                                              float64 chi = 1,
-                                             std::optional<std::string> name = std::nullopt);
+                                             std::optional<std::string> name = std::nullopt,
+                                             std::vector<std::string> dof = {});
 
 /// Chemical potential for bosons or fermions. Single-site coupling.
 ///

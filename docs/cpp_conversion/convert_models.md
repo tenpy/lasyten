@@ -23,9 +23,11 @@ Convert (monkey-patch from `_core`):
 ## design notes
 
 - No `Hdf5Exportable` in C++ — `Site` does not inherit HDF5 base.
-- Virtual `Site` base for `SpinHalfFermionSite` MI (`SpinDOF` + `FermionicDOF`).
+- Degrees of freedom are **composed** into `Site` via the named `dofs` registry
+  (not inherited). See [convert_SiteDOF.md](convert_SiteDOF.md). Conventional keys:
+  `"spin"`, `"occupation"`, `"clock"`, `"anyon"`.
 - Dense operator tables stored as `py::array` with write-protected views (`as_immutable_array`).
-- Trampolines: `Site` (`test_sanity`), `OccupationDOF` (abstract numpy getters).
+- Trampolines: `Site` (`test_sanity`), `DegreeOfFreedom` / `OccupationDOF` (abstract methods).
 - `Coupling._permuted` cache and `_levels` kept as private C++ members.
 
 ## tests

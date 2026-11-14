@@ -228,9 +228,68 @@ objects_to_python(std::vector<py::object> const& objects)
     return out;
 }
 
-std::optional<py::class_<Space, PySpace, py::smart_holder>> g_space;
-std::optional<py::class_<ElementarySpace, Space, Leg, PyElementarySpace, py::smart_holder>>
-  g_elementary_space;
+std::optional<py::class_<Space, py::smart_holder>> g_space;
+std::optional<py::class_<ElementarySpace, Space, py::smart_holder>> g_elementary_space;
+
+/// Bind axis attributes shared by `ElementarySpace` and `LegPipe` (formerly on polymorphic `Leg`).
+template<typename Class, typename T>
+void
+bind_axis_common(Class& cls)
+{
+    cls
+      .def_property(
+        "basis_perm",
+        [](T const& self) { return perm_to_numpy(self.basis_perm()); },
+        [](T& self, py::object basis_perm) { self.set_basis_perm(perm_from_python(basis_perm)); },
+        doc_cpp_ref(DOC(lasyten, Leg), "lasyten::Leg::basis_perm()"))
+      .def_property(
+        "_basis_perm",
+        [](T const& self) -> py::object {
+            if (!self.has_custom_basis_perm()) {
+                return py::none();
+            }
+            return perm_to_numpy(self.basis_perm());
+        },
+        [](T& self, py::object basis_perm) { self.set_basis_perm(perm_from_python(basis_perm)); })
+      .def_property(
+        "inverse_basis_perm",
+        [](T const& self) { return perm_to_numpy(self.inverse_basis_perm()); },
+        [](T& self, py::object inverse_basis_perm) {
+            self.set_inverse_basis_perm(perm_from_python(inverse_basis_perm));
+        },
+        doc_cpp_ref(DOC(lasyten, Leg), "lasyten::Leg::inverse_basis_perm()"))
+      .def_property(
+        "_inverse_basis_perm",
+        [](T const& self) -> py::object {
+            if (!self.has_custom_basis_perm()) {
+                return py::none();
+            }
+            return perm_to_numpy(self.inverse_basis_perm());
+        },
+        [](T& self, py::object inverse_basis_perm) {
+            self.set_inverse_basis_perm(perm_from_python(inverse_basis_perm));
+        })
+      .def_property_readonly("flat_legs", &T::flat_legs, DOC(lasyten, LegPipe, flat_legs))
+      .def_property_readonly("flat_spaces", &T::flat_spaces, DOC(lasyten, LegPipe, flat_spaces))
+      .def_property_readonly(
+        "num_flat_legs", &T::num_flat_legs, DOC(lasyten, LegPipe, num_flat_legs))
+      .def_property_readonly("ascii_arrow", &T::ascii_arrow, DOC(lasyten, LegPipe, ascii_arrow))
+      .def("_flat_leg_permutation",
+           &T::_flat_leg_permutation,
+           py::arg("offset") = 0,
+           DOC(lasyten, LegPipe, _flat_leg_permutation))
+      .def("apply_basis_perm",
+           &T::apply_basis_perm,
+           py::arg("arr"),
+           py::arg("axis") = 0,
+           py::arg("inverse") = false,
+           py::arg("pre_compose") = false,
+           DOC(lasyten, LegPipe, apply_basis_perm))
+      .def_property_readonly("is_pipe", &T::is_pipe, DOC(lasyten, LegPipe, is_pipe))
+      .def_property_readonly("is_abelian_leg_pipe",
+                             &T::is_abelian_leg_pipe,
+                             DOC(lasyten, LegPipe, is_abelian_leg_pipe));
+}
 
 void bind_elementary_space(py::module_& m);
 
@@ -245,117 +304,24 @@ void bind_abelian_leg_pipe(py::module_& m);
 void
 bind_spaces(py::module_& m)
 {
-    py::class_<Leg, PyLeg, py::smart_holder> cls(m, "Leg", DOC(lasyten, Leg));
-
-    // Declare Space / ElementarySpace before Leg methods that return them (stubgen).
-    g_space = py::class_<Space, PySpace, py::smart_holder>(m, "Space", DOC(lasyten, Space));
-    g_elementary_space =
-      py::class_<ElementarySpace, Space, Leg, PyElementarySpace, py::smart_holder>(
-        m, "ElementarySpace", DOC(lasyten, ElementarySpace));
-
-    cls.def(
-      py::init(
-        [](py::object symmetry_obj, py::object dim_obj, bool is_dual, py::object basis_perm) {
-            auto symmetry = symmetry_from_python(symmetry_obj);
-            float64 dim = py::float_(dim_obj).cast<float64>();
-            return std::make_shared<PyLeg>(
-              std::move(symmetry), dim, is_dual, perm_from_python(basis_perm));
-        }),
-      py::arg("symmetry"),
-      py::arg("dim"),
-      py::arg("is_dual"),
-      py::arg("basis_perm") = py::none());
-
-    cls.def_readwrite("symmetry", &Leg::symmetry)
-      .def_property(
-        "dim",
-        [](Leg const& self) { return dim_to_python(self.dim); },
-        [](Leg& self, py::object dim_obj) { self.dim = py::float_(dim_obj).cast<float64>(); })
-      .def_readwrite("is_dual", &Leg::is_dual);
-
-    cls.def_property_readonly("dual", &Leg::dual, DOC(lasyten, Leg, dual))
-      .def_property_readonly("is_trivial", &Leg::is_trivial)
-      .def_property(
-        "basis_perm",
-        [](Leg const& self) { return perm_to_numpy(self.basis_perm()); },
-        [](Leg& self, py::object basis_perm) {
-            self.set_basis_perm(perm_from_python(basis_perm));
-        },
-        doc_cpp_ref(DOC(lasyten, Leg), "lasyten::Leg::basis_perm()"))
-      .def_property(
-        "_basis_perm",
-        [](Leg const& self) -> py::object {
-            if (!self.has_custom_basis_perm()) {
-                return py::none();
-            }
-            return perm_to_numpy(self.basis_perm());
-        },
-        [](Leg& self, py::object basis_perm) {
-            self.set_basis_perm(perm_from_python(basis_perm));
-        })
-      .def_property(
-        "inverse_basis_perm",
-        [](Leg const& self) { return perm_to_numpy(self.inverse_basis_perm()); },
-        [](Leg& self, py::object inverse_basis_perm) {
-            self.set_inverse_basis_perm(perm_from_python(inverse_basis_perm));
-        },
-        DOC(lasyten, Leg, inverse_basis_perm))
-      .def_property(
-        "_inverse_basis_perm",
-        [](Leg const& self) -> py::object {
-            if (!self.has_custom_basis_perm()) {
-                return py::none();
-            }
-            return perm_to_numpy(self.inverse_basis_perm());
-        },
-        [](Leg& self, py::object inverse_basis_perm) {
-            self.set_inverse_basis_perm(perm_from_python(inverse_basis_perm));
-        })
-      .def_property_readonly("flat_legs", &Leg::flat_legs, DOC(lasyten, Leg, flat_legs))
-      .def_property_readonly("flat_spaces", &Leg::flat_spaces, DOC(lasyten, Leg, flat_spaces))
-      .def_property_readonly(
-        "num_flat_legs", &Leg::num_flat_legs, DOC(lasyten, Leg, num_flat_legs))
-      .def_property_readonly("ascii_arrow", &Leg::ascii_arrow, DOC(lasyten, Leg, ascii_arrow));
-
-    cls.def("test_sanity", &Leg::test_sanity, DOC(lasyten, Leg, test_sanity))
-      .def("as_Space", &Leg::as_space_obj, DOC(lasyten, Leg, as_space))
-      .def("as_ElementarySpace",
-           &Leg::as_ElementarySpace,
-           py::arg("is_dual") = false,
-           DOC(lasyten, Leg, as_ElementarySpace))
-      .def("_flat_leg_permutation",
-           &Leg::_flat_leg_permutation,
-           py::arg("offset") = 0,
-           doc_cpp_ref(DOC(lasyten, Leg), "lasyten::Leg::_flat_leg_permutation()"))
-      .def("__eq__", &Leg::operator==, py::arg("other"))
-      .def("apply_basis_perm",
-           &Leg::apply_basis_perm,
-           py::arg("arr"),
-           py::arg("axis") = 0,
-           py::arg("inverse") = false,
-           py::arg("pre_compose") = false,
-           DOC(lasyten, Leg, apply_basis_perm));
+    // `Leg` is a C++ value-type handle; Python exposes it as an ABC in spaces.py.
+    // Declare Space / ElementarySpace early for return types (stubgen / cross-refs).
+    // No trampolines: pybind11 smart_holder + enable_shared_from_this + trampoline
+    // is unsupported ("trampoline-self-life-support for external shared_ptr").
+    g_space = py::class_<Space, py::smart_holder>(m, "Space", DOC(lasyten, Space));
+    g_elementary_space = py::class_<ElementarySpace, Space, py::smart_holder>(
+      m, "ElementarySpace", DOC(lasyten, ElementarySpace));
 
     auto& space = *g_space;
 
-    space.def(py::init([](py::object symmetry_obj,
-                          py::object sector_decomposition,
-                          py::object multiplicities,
-                          py::object sector_order) {
-                  auto symmetry = symmetry_from_python(symmetry_obj);
-                  return std::make_shared<PySpace>(
-                    symmetry,
-                    sector_array_from_python(sector_decomposition, *symmetry),
-                    multiplicities_from_python(multiplicities),
-                    sector_order_from_python(sector_order));
-              }),
-              py::arg("symmetry"),
-              py::arg("sector_decomposition"),
-              py::arg("multiplicities") = py::none(),
-              py::arg("sector_order") = py::none());
-
-    space.def_readwrite("symmetry", &Space::symmetry)
-      .def_readwrite("sector_decomposition", &Space::sector_decomposition)
+    space
+      .def_readwrite("symmetry", &Space::symmetry)
+      // Return SectorArray by value: def_readwrite member refs need a shared_ptr keep-alive
+      // that fails for smart_holder + enable_shared_from_this on some construction paths.
+      .def_property(
+        "sector_decomposition",
+        [](Space const& self) { return self.sector_decomposition; },
+        [](Space& self, SectorArray const& v) { self.sector_decomposition = v; })
       .def_readwrite("sector_order", &Space::sector_order)
       .def_property(
         "multiplicities",
@@ -393,7 +359,10 @@ the sector multiplicities.)pydoc")
                              &Space::is_trivial,
                              doc_cpp_ref(DOC(lasyten, Space), "lasyten::Space::is_trivial()"));
 
-    space.def("test_sanity", &Space::test_sanity, DOC(lasyten, Space, test_sanity))
+    space
+      .def("test_sanity",
+           &Space::test_sanity,
+           doc_cpp_ref(DOC(lasyten, Space), "lasyten::Space::test_sanity()"))
       .def("__eq__", &Space::operator==, py::arg("other"))
       .def("is_isomorphic_to",
            &Space::is_isomorphic_to,
@@ -406,7 +375,7 @@ the sector multiplicities.)pydoc")
       .def("as_ElementarySpace",
            &Space::as_ElementarySpace,
            py::arg("is_dual") = false,
-           DOC(lasyten, Leg, as_ElementarySpace))
+           DOC(lasyten, ElementarySpace, as_ElementarySpace))
       .def(
         "change_symmetry",
         [](Space& self, py::object symmetry_obj, py::function sector_map, bool injective) {
@@ -444,8 +413,7 @@ the sector multiplicities.)pydoc")
            py::arg("sector"),
            DOC(lasyten, Space, sector_multiplicity));
 
-    py::class_<LegPipe, Leg, PyLegPipe, py::smart_holder> pipe(
-      m, "LegPipe", DOC(lasyten, LegPipe));
+    py::class_<LegPipe, py::smart_holder> pipe(m, "LegPipe", DOC(lasyten, LegPipe));
 
     pipe.def(py::init([](py::sequence legs_obj, bool is_dual, bool combine_cstyle) {
                  std::vector<Leg::Ptr> legs;
@@ -453,24 +421,45 @@ the sector multiplicities.)pydoc")
                  for (py::handle item : legs_obj) {
                      legs.push_back(item.cast<Leg::Ptr>());
                  }
-                 return std::make_shared<PyLegPipe>(std::move(legs), is_dual, combine_cstyle);
+                 return std::make_shared<LegPipe>(std::move(legs), is_dual, combine_cstyle);
              }),
              py::arg("legs"),
              py::arg("is_dual") = false,
              py::arg("combine_cstyle") = true);
 
-    pipe.def_readwrite("legs", &LegPipe::legs)
+    pipe.def_readwrite("symmetry", &LegPipe::symmetry)
+      .def_property(
+        "dim",
+        [](LegPipe const& self) { return dim_to_python(self.dim); },
+        [](LegPipe& self, py::object dim_obj) { self.dim = py::float_(dim_obj).cast<float64>(); })
+      .def_readwrite("is_dual", &LegPipe::is_dual)
+      .def_readwrite("legs", &LegPipe::legs)
       .def_readonly("num_legs", &LegPipe::num_legs)
       .def_readwrite("combine_cstyle", &LegPipe::combine_cstyle);
 
-    pipe.def("test_sanity", &LegPipe::test_sanity, DOC(lasyten, LegPipe, test_sanity))
+    bind_axis_common<decltype(pipe), LegPipe>(pipe);
+
+    pipe
+      .def_property_readonly(
+        "dual", &LegPipe::dual, doc_cpp_ref(DOC(lasyten, LegPipe), "lasyten::LegPipe::dual()"))
+      .def_property_readonly("is_trivial", &LegPipe::is_trivial)
+      .def("test_sanity",
+           &LegPipe::test_sanity,
+           doc_cpp_ref(DOC(lasyten, LegPipe), "lasyten::LegPipe::test_sanity()"))
+      .def("as_Space", &LegPipe::as_space, DOC(lasyten, as_space))
+      .def(
+        "as_ElementarySpace",
+        [](LegPipe const& self, bool is_dual) {
+            return self.as_space()->as_ElementarySpace(is_dual);
+        },
+        py::arg("is_dual") = false,
+        DOC(lasyten, ElementarySpace, as_ElementarySpace))
       .def("__eq__",
            [](LegPipe const& self, py::object other) -> py::object {
                if (!py::isinstance<LegPipe>(other)) {
                    return py::reinterpret_borrow<py::object>(Py_NotImplemented);
                }
-               return py::cast(
-                 self.operator==(static_cast<Leg const&>(other.cast<LegPipe const&>())));
+               return py::cast(self == other.cast<LegPipe const&>());
            })
       .def("__getitem__", &LegPipe::operator[], py::arg("idx"))
       .def("__len__", [](LegPipe const& self) { return self.num_legs; })
@@ -501,7 +490,7 @@ bind_elementary_space(py::module_& m)
                         bool is_dual,
                         py::object basis_perm) {
                 auto symmetry = symmetry_from_python(symmetry_obj);
-                return std::make_shared<PyElementarySpace>(
+                return std::make_shared<ElementarySpace>(
                   symmetry,
                   sector_array_from_python(defining_sectors, *symmetry),
                   multiplicities_from_python(multiplicities),
@@ -514,30 +503,15 @@ bind_elementary_space(py::module_& m)
             py::arg("is_dual") = false,
             py::arg("basis_perm") = py::none());
 
-    // symmetry and dim exist on both the Space and the Leg base; keep them in sync.
-    cls
-      .def_property(
-        "symmetry",
-        [](ElementarySpace const& self) { return self.Space::symmetry; },
-        [](ElementarySpace& self, py::object symmetry_obj) {
-            auto symmetry = symmetry_from_python(symmetry_obj);
-            self.Space::symmetry = symmetry;
-            self.Leg::symmetry = std::move(symmetry);
-        })
-      .def_property(
-        "dim",
-        [](ElementarySpace const& self) { return dim_to_python(self.Space::dim); },
-        [](ElementarySpace& self, py::object dim_obj) {
-            auto const dim = py::float_(dim_obj).cast<float64>();
-            self.Space::dim = dim;
-            self.Leg::dim = dim;
-        })
+    cls.def_readwrite("is_dual", &ElementarySpace::is_dual)
       .def_readwrite("defining_sectors", &ElementarySpace::defining_sectors)
       .def_property_readonly(
         "sectors_of_basis",
         [](ElementarySpace const& self) { return sector_array_to_numpy(self.sectors_of_basis()); },
         DOC(lasyten, ElementarySpace, sectors_of_basis))
       .def_property_readonly("dual", &ElementarySpace::dual_es, DOC(lasyten, Space, dual));
+
+    bind_axis_common<decltype(cls), ElementarySpace>(cls);
 
     cls.def_static(
       "from_basis",
@@ -663,7 +637,10 @@ bind_elementary_space(py::module_& m)
       doc_cpp_ref(DOC(lasyten, ElementarySpace),
                   "lasyten::ElementarySpace::from_trivial_sector()"));
 
-    cls.def("test_sanity", &ElementarySpace::test_sanity, DOC(lasyten, Space, test_sanity))
+    cls
+      .def("test_sanity",
+           &ElementarySpace::test_sanity,
+           doc_cpp_ref(DOC(lasyten, ElementarySpace), "lasyten::ElementarySpace::test_sanity()"))
       .def("__repr__", [](ElementarySpace const& self) { return self.repr(); })
       .def("repr",
            &ElementarySpace::repr,
@@ -676,7 +653,7 @@ bind_elementary_space(py::module_& m)
                }
                return py::cast(self.equals_es(other.cast<ElementarySpace const&>()));
            })
-      .def("as_Space", &ElementarySpace::as_space_obj, DOC(lasyten, ElementarySpace, as_space_obj))
+      .def("as_Space", &ElementarySpace::as_Space, DOC(lasyten, Space, as_Space))
       .def("as_ElementarySpace",
            &ElementarySpace::as_ElementarySpace,
            py::arg("is_dual") = false,
@@ -704,7 +681,7 @@ bind_elementary_space(py::module_& m)
         "direct_sum",
         [](ElementarySpace const& self,
            py::args others_obj,
-           std::optional<OptionalLabels> summand_labels) {
+           std::optional<LegLabelList> summand_labels) {
             std::vector<ElementarySpace::Ptr> others;
             others.reserve(static_cast<std::size_t>(others_obj.size()));
             for (py::handle item : others_obj) {
@@ -763,18 +740,18 @@ bind_elementary_space(py::module_& m)
 void
 bind_direct_sum_space(py::module_& m)
 {
-    py::class_<DirectSumSpace, ElementarySpace, PyDirectSumSpace, py::smart_holder> cls(
+    py::class_<DirectSumSpace, ElementarySpace, py::smart_holder> cls(
       m, "DirectSumSpace", DOC(lasyten, DirectSumSpace));
 
     cls.def(
       py::init(
-        [](py::sequence spaces_obj, bool is_dual, std::optional<OptionalLabels> summand_labels) {
+        [](py::sequence spaces_obj, bool is_dual, std::optional<LegLabelList> summand_labels) {
             std::vector<ElementarySpace::Ptr> spaces;
             spaces.reserve(static_cast<std::size_t>(spaces_obj.size()));
             for (py::handle item : spaces_obj) {
                 spaces.push_back(item.cast<ElementarySpace::Ptr>());
             }
-            return std::make_shared<PyDirectSumSpace>(
+            return std::make_shared<DirectSumSpace>(
               std::move(spaces), is_dual, std::move(summand_labels));
         }),
       py::arg("spaces"),
@@ -788,7 +765,7 @@ bind_direct_sum_space(py::module_& m)
     cls
       .def_static(
         "from_spaces",
-        [](py::sequence spaces_obj, bool is_dual, std::optional<OptionalLabels> summand_labels) {
+        [](py::sequence spaces_obj, bool is_dual, std::optional<LegLabelList> summand_labels) {
             std::vector<ElementarySpace::Ptr> spaces;
             spaces.reserve(static_cast<std::size_t>(spaces_obj.size()));
             for (py::handle item : spaces_obj) {
@@ -820,12 +797,12 @@ bind_direct_sum_space(py::module_& m)
            &DirectSumSpace::as_plain_ElementarySpace,
            DOC(lasyten, DirectSumSpace, as_plain_ElementarySpace))
       .def("test_sanity", &DirectSumSpace::test_sanity)
-      .def("as_Space", &DirectSumSpace::as_space_obj, DOC(lasyten, DirectSumSpace, as_space_obj))
+      .def("as_Space", &DirectSumSpace::as_Space, DOC(lasyten, Space, as_Space))
       .def("as_ElementarySpace",
            &DirectSumSpace::as_ElementarySpace,
            py::arg("is_dual") = false,
-           DOC(lasyten, Leg, as_ElementarySpace))
-      .def_property_readonly("dual", &DirectSumSpace::dual_dss, DOC(lasyten, Leg, dual))
+           DOC(lasyten, ElementarySpace, as_ElementarySpace))
+      .def_property_readonly("dual", &DirectSumSpace::dual_dss, DOC(lasyten, Space, dual))
       .def(
         "change_symmetry",
         [](
@@ -875,7 +852,7 @@ bind_direct_sum_space(py::module_& m)
         [](DirectSumSpace const& self,
            py::object which,
            std::shared_ptr<TensorBackend> backend,
-           std::optional<OptionalLabels> labels,
+           std::optional<LegLabelList> labels,
            std::optional<std::string> device) {
             DirectSumSpace::SummandRef ref =
               py::isinstance<py::str>(which)
@@ -894,7 +871,7 @@ bind_direct_sum_space(py::module_& m)
         [](DirectSumSpace const& self,
            py::object which,
            std::shared_ptr<TensorBackend> backend,
-           std::optional<OptionalLabels> labels,
+           std::optional<LegLabelList> labels,
            std::optional<std::string> device) {
             DirectSumSpace::SummandRef ref =
               py::isinstance<py::str>(which)
@@ -972,7 +949,7 @@ bind_direct_sum_space(py::module_& m)
 void
 bind_tensor_product(py::module_& m)
 {
-    py::class_<TensorProduct, Space, PyTensorProduct, py::smart_holder> cls(
+    py::class_<TensorProduct, Space, py::smart_holder> cls(
       m, "TensorProduct", DOC(lasyten, TensorProduct));
 
     cls.def(py::init([](py::iterable factors_obj,
@@ -985,18 +962,17 @@ bind_tensor_product(py::module_& m)
                 if (!sector_decomposition.is_none()) {
                     auto sym = symmetry;
                     if (!sym && !factors.empty()) {
-                        sym = factors.front()->symmetry;
+                        sym = factors.front().symmetry();
                     }
                     if (!sym) {
                         throw py::value_error("If spaces is empty, the symmetry arg is required.");
                     }
                     sectors = sector_array_from_python(sector_decomposition, *sym);
                 }
-                return std::make_shared<PyTensorProduct>(
-                  std::move(factors),
-                  std::move(symmetry),
-                  std::move(sectors),
-                  multiplicities_from_python(multiplicities));
+                return std::make_shared<TensorProduct>(std::move(factors),
+                                                       std::move(symmetry),
+                                                       std::move(sectors),
+                                                       multiplicities_from_python(multiplicities));
             }),
             py::arg("factors"),
             py::arg("symmetry") = py::none(),
@@ -1017,11 +993,12 @@ bind_tensor_product(py::module_& m)
         "has_pipes",
         &TensorProduct::has_pipes,
         doc_cpp_ref(DOC(lasyten, TensorProduct), "lasyten::TensorProduct::has_pipes()"))
-      .def_property_readonly("flat_legs", &TensorProduct::flat_legs, DOC(lasyten, Leg, flat_legs))
       .def_property_readonly(
-        "flat_spaces", &TensorProduct::flat_spaces, DOC(lasyten, Leg, flat_spaces))
+        "flat_legs", &TensorProduct::flat_legs, DOC(lasyten, LegPipe, flat_legs))
       .def_property_readonly(
-        "num_flat_legs", &TensorProduct::num_flat_legs, DOC(lasyten, Leg, num_flat_legs));
+        "flat_spaces", &TensorProduct::flat_spaces, DOC(lasyten, LegPipe, flat_spaces))
+      .def_property_readonly(
+        "num_flat_legs", &TensorProduct::num_flat_legs, DOC(lasyten, LegPipe, num_flat_legs));
 
     cls.def_static(
       "from_partial_products",
@@ -1035,7 +1012,10 @@ bind_tensor_product(py::module_& m)
       },
       doc_cpp_ref(DOC(lasyten, TensorProduct), "lasyten::TensorProduct::from_partial_products()"));
 
-    cls.def("test_sanity", &TensorProduct::test_sanity, DOC(lasyten, Space, test_sanity))
+    cls
+      .def("test_sanity",
+           &TensorProduct::test_sanity,
+           doc_cpp_ref(DOC(lasyten, TensorProduct), "lasyten::TensorProduct::test_sanity()"))
       .def(
         "block_size",
         [](TensorProduct const& self, py::object coupled) {
@@ -1216,8 +1196,8 @@ bind_tensor_product(py::module_& m)
 void
 bind_abelian_leg_pipe(py::module_& m)
 {
-    // Diamond MI: the Python MRO is AbelianLegPipe, LegPipe, ElementarySpace, Space, Leg.
-    py::class_<AbelianLegPipe, LegPipe, ElementarySpace, PyAbelianLegPipe, py::smart_holder> cls(
+    // Single base: AbelianLegPipe inherits only ElementarySpace (pipe fields composed).
+    py::class_<AbelianLegPipe, ElementarySpace, py::smart_holder> cls(
       m, "AbelianLegPipe", DOC(lasyten, AbelianLegPipe));
 
     cls.def(py::init([](py::sequence legs_obj, bool is_dual, bool combine_cstyle) {
@@ -1226,12 +1206,15 @@ bind_abelian_leg_pipe(py::module_& m)
                 for (py::handle item : legs_obj) {
                     legs.push_back(item.cast<ElementarySpace::Ptr>());
                 }
-                return std::make_shared<PyAbelianLegPipe>(
-                  std::move(legs), is_dual, combine_cstyle);
+                return std::make_shared<AbelianLegPipe>(std::move(legs), is_dual, combine_cstyle);
             }),
             py::arg("legs"),
             py::arg("is_dual") = false,
             py::arg("combine_cstyle") = true);
+
+    cls.def_readwrite("legs", &AbelianLegPipe::legs)
+      .def_readonly("num_legs", &AbelianLegPipe::num_legs)
+      .def_readwrite("combine_cstyle", &AbelianLegPipe::combine_cstyle);
 
     cls
       .def_property_readonly(
@@ -1246,13 +1229,16 @@ bind_abelian_leg_pipe(py::module_& m)
       .def_property_readonly("block_ind_map",
                              [](AbelianLegPipe const& self) { return self.block_ind_map; });
 
-    cls.def_property_readonly("dual", &AbelianLegPipe::dual_pipe, DOC(lasyten, Leg, dual))
+    cls.def_property_readonly("dual", &AbelianLegPipe::dual_pipe, DOC(lasyten, Space, dual))
       .def_property_readonly(
         "is_trivial",
         &AbelianLegPipe::is_trivial,
         doc_cpp_ref(DOC(lasyten, AbelianLegPipe), "lasyten::AbelianLegPipe::is_trivial()"))
       .def_property_readonly(
         "flat_spaces", &AbelianLegPipe::flat_spaces, DOC(lasyten, LegPipe, flat_spaces))
+      .def_property_readonly(
+        "flat_legs", &AbelianLegPipe::flat_legs, DOC(lasyten, LegPipe, flat_legs))
+      .def_property_readonly("is_pipe", &AbelianLegPipe::is_pipe, DOC(lasyten, LegPipe, is_pipe))
       .def_property_readonly(
         "ascii_arrow", &AbelianLegPipe::ascii_arrow, DOC(lasyten, AbelianLegPipe, ascii_arrow));
 
@@ -1299,11 +1285,11 @@ bind_abelian_leg_pipe(py::module_& m)
         DOC(lasyten, AbelianLegPipe, from_trivial_sector));
 
     cls.def("test_sanity", &AbelianLegPipe::test_sanity, DOC(lasyten, AbelianLegPipe, test_sanity))
-      .def("as_Space", &AbelianLegPipe::as_space_obj, DOC(lasyten, Leg, as_space))
+      .def("as_Space", &AbelianLegPipe::as_Space, DOC(lasyten, Space, as_Space))
       .def("as_ElementarySpace",
            &AbelianLegPipe::as_ElementarySpace,
            py::arg("is_dual") = false,
-           DOC(lasyten, Leg, as_ElementarySpace))
+           DOC(lasyten, ElementarySpace, as_ElementarySpace))
       .def(
         "change_symmetry",
         [](
@@ -1347,13 +1333,19 @@ bind_abelian_leg_pipe(py::module_& m)
         py::arg("multiplicities"),
         doc_cpp_ref(DOC(lasyten, AbelianLegPipe),
                     "lasyten::AbelianLegPipe::_get_fusion_outcomes_perm()"))
+      .def("__getitem__", &AbelianLegPipe::operator[], py::arg("idx"))
+      .def("__len__", [](AbelianLegPipe const& self) { return self.num_legs; })
+      .def(
+        "__iter__",
+        [](AbelianLegPipe& self) { return py::make_iterator(self.legs.begin(), self.legs.end()); },
+        py::keep_alive<0, 1>())
       .def("__eq__",
            [](AbelianLegPipe const& self, py::object other) -> py::object {
-               if (!py::isinstance<LegPipe>(other)) {
+               if (!py::isinstance<AbelianLegPipe>(other)) {
                    return py::reinterpret_borrow<py::object>(py::handle(Py_NotImplemented));
                }
                return py::cast(
-                 self.operator==(static_cast<Leg const&>(other.cast<LegPipe const&>())));
+                 self.operator==(static_cast<Space const&>(other.cast<AbelianLegPipe const&>())));
            })
       .def("__repr__", [](AbelianLegPipe const& self) { return self.repr(); })
       .def("repr",

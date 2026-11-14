@@ -195,6 +195,27 @@ def _matching_paren(text: str, open_idx: int) -> int:
     raise ValueError('unbalanced parentheses')
 
 
+def _matching_brace(text: str, open_idx: int) -> int:
+    """Return index of matching closing brace; ``open_idx`` points at ``{``."""
+    depth = 0
+    i = open_idx
+    n = len(text)
+    while i < n:
+        nxt = _skip_string_or_char(text, i)
+        if nxt != i:
+            i = nxt
+            continue
+        ch = text[i]
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    raise ValueError('unbalanced braces')
+
+
 def _split_args(arglist: str) -> list[str]:
     """Split a top-level comma-separated C++ argument list.
 
@@ -397,10 +418,18 @@ class BindingParser:
         self.resolver = resolver
         self.mod = ModuleStub()
         self._doc_vars: dict[str, str] = {}
+        # Shared bind helpers: name → members defined on the Class& parameter.
+        # Bodies are skipped by ``_parse_chain_defs`` so members attach only via
+        # call sites (e.g. ``bind_axis_common<>(pipe)`` → LegPipe).
+        self._bind_helpers: dict[str, list[Member]] = {}
+        self._helper_body_ranges: list[tuple[int, int]] = []
 
     def _bind_handle(self, name: str, py_name: str, pos: int) -> None:
         self.mod.handles[name] = py_name
         self.mod.handle_history.append((pos, name, py_name))
+
+    def _in_helper_body(self, pos: int) -> bool:
+        return any(start <= pos < end for start, end in self._helper_body_ranges)
 
     def _set_member(self, cls: ClassStub, name: str, kind: str, doc: str) -> None:
         """Record a member; keep an existing docstring when a later overload has none."""
@@ -447,6 +476,8 @@ class BindingParser:
         self.mod.handles.clear()
         self.mod.handle_history.clear()
         self._doc_vars: dict[str, str] = {}
+        self._bind_helpers.clear()
+        self._helper_body_ranges.clear()
         self._parse_doc_vars(text)
         self._parse_classes(text)
         self._parse_handle_aliases(text)
@@ -455,9 +486,13 @@ class BindingParser:
         self._parse_module_defs(text)
         self._parse_module_attrs(text)
         self._parse_class_doc_assign(text)
+        # Discover Class& bind helpers before chain defs so their bodies are skipped
+        # and members are applied only at call sites below.
+        self._parse_class_bind_helpers(text)
         self._parse_chain_defs(text)
         self._parse_enum_post_attrs(text)
         self._parse_template_call_sites(text)
+        self._apply_bind_helper_calls(text)
 
     def _parse_handle_aliases(self, text: str) -> None:
         """Bind ``auto& alias = *g_handle;`` used after declare-then-define shells."""
@@ -878,6 +913,8 @@ class BindingParser:
             r'def_readonly|def_readwrite|def)\s*\(',
             text,
         ):
+            if self._in_helper_body(m.start()):
+                continue
             handle = m.group(1)
             kind_tok = m.group(2)
             kind = dict(patterns)[kind_tok]
@@ -931,6 +968,8 @@ class BindingParser:
             r'\.def_property_readonly|\.def_readonly|\.def_readwrite)',
             text,
         ):
+            if self._in_helper_body(m.start()):
+                continue
             handle = m.group(1)
             cls = self._resolve_cls(handle, m.start())
             if cls is None:
@@ -1033,6 +1072,137 @@ class BindingParser:
             if cls is None:
                 continue
             cls.members[m.group(1)] = Member(m.group(1), 'staticmethod', '')
+
+    def _parse_class_bind_helpers(self, text: str) -> None:
+        """Find ``void bind_*(Class& param) { param.def... }`` helpers.
+
+        Used for shared axis bindings such as ``bind_axis_common`` that are
+        invoked once per pybind class handle. Members are collected from the
+        helper body and later attached at each call site.
+        """
+        for m in re.finditer(
+            r'(?:template\s*<[^;{]*?>\s*)?void\s+([A-Za-z_][\w]*)\s*\(',
+            text,
+        ):
+            func_name = m.group(1)
+            open_paren = m.end() - 1
+            try:
+                close_paren = _matching_paren(text, open_paren)
+            except ValueError:
+                continue
+            params = text[open_paren + 1 : close_paren]
+            # Require a Class& / py::class_& parameter (the bind target).
+            param_m = re.search(
+                r'(?:Class|py::class_\s*<[^>]+>)\s*&\s*([A-Za-z_][\w]*)',
+                params,
+            )
+            if param_m is None:
+                continue
+            param = param_m.group(1)
+            j = close_paren + 1
+            while j < len(text) and text[j].isspace():
+                j += 1
+            if j >= len(text) or text[j] != '{':
+                continue
+            try:
+                close_brace = _matching_brace(text, j)
+            except ValueError:
+                continue
+            body_start, body_end = j + 1, close_brace
+            members = self._collect_handle_chain_members(
+                text, param, body_start, body_end
+            )
+            if not members:
+                continue
+            self._bind_helpers[func_name] = members
+            self._helper_body_ranges.append((body_start, body_end))
+
+    def _collect_handle_chain_members(
+        self, text: str, handle: str, start: int, end: int
+    ) -> list[Member]:
+        """Parse ``handle.def...`` / chained ``.def`` members inside ``text[start:end]``."""
+        region = text[start:end]
+        patterns = {
+            'def_static': 'staticmethod',
+            'def_property_readonly': 'property',
+            'def_property': 'property',
+            'def_readonly': 'readonly',
+            'def_readwrite': 'readwrite',
+            'def': 'method',
+        }
+        collected: dict[str, Member] = {}
+
+        def _record(name: str, kind: str, doc: str) -> None:
+            existing = collected.get(name)
+            if existing is not None and existing.doc and not doc:
+                return
+            collected[name] = Member(
+                name=name,
+                kind=kind,
+                doc=doc or (existing.doc if existing else ''),
+            )
+
+        for m in re.finditer(
+            rf'{re.escape(handle)}\s*(?:\.def|\.def_static|\.def_property|'
+            rf'\.def_property_readonly|\.def_readonly|\.def_readwrite)',
+            region,
+        ):
+            stmt_start = start + m.start()
+            stmt_end = self._statement_end(text, stmt_start)
+            stmt = text[stmt_start:stmt_end]
+            for cm in re.finditer(
+                r'\.\s*(def_static|def_property_readonly|def_property|'
+                r'def_readonly|def_readwrite|def)\s*\(',
+                stmt,
+            ):
+                kind = patterns[cm.group(1)]
+                open_idx = cm.end() - 1
+                try:
+                    close = _matching_paren(stmt, open_idx)
+                except ValueError:
+                    continue
+                args = _split_args(stmt[open_idx + 1 : close])
+                if not args:
+                    continue
+                name = _python_name_from_string_arg(args[0])
+                if not name:
+                    if 'py::init' in args[0]:
+                        _record('__init__', 'method', '')
+                    continue
+                _record(name, kind, self._doc_from_def_args(args))
+        return list(collected.values())
+
+    def _apply_bind_helper_calls(self, text: str) -> None:
+        """Attach helper members to each ``bind_foo<...>(handle)`` call-site class."""
+        if not self._bind_helpers:
+            return
+        for func_name, members in self._bind_helpers.items():
+            for m in re.finditer(
+                rf'\b{re.escape(func_name)}\s*(?:<[^;{{]*?>)?\s*\(',
+                text,
+            ):
+                if self._in_helper_body(m.start()):
+                    continue
+                open_idx = m.end() - 1
+                try:
+                    close = _matching_paren(text, open_idx)
+                except ValueError:
+                    continue
+                args = _split_args(text[open_idx + 1 : close])
+                if not args:
+                    continue
+                handle = args[0].strip()
+                # Skip the function definition itself (``Class& cls``).
+                if '&' in handle or re.match(r'^(?:Class|py::class_)', handle):
+                    continue
+                # Bare identifier only (the pybind class handle variable).
+                if not re.fullmatch(r'[A-Za-z_][\w]*', handle):
+                    continue
+                cls = self._resolve_cls(handle, m.start())
+                if cls is None:
+                    continue
+                for mem in members:
+                    self._set_member(cls, mem.name, mem.kind, mem.doc)
 
     def _parse_template_call_sites(self, text: str) -> None:
         # bind_sparse_mapping<...>(m, "Name", doc)

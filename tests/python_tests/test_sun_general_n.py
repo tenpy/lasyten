@@ -98,14 +98,19 @@ def _sample_f_keys(N: int, path: str, n: int = 2000) -> np.ndarray:
 
 
 def test_auto_weights_su2_submodule():
+    # external/SUN_symbols ships CG hweight 20 and F/R up through hweight 12; auto-detect picks the max.
     files = [
         symmetries.su_n_data_file_path(2, k, h, path=str(_SUN_SYMBOLS_SUBMODULE_DIR))
-        for k, h in (('CG', 20), ('F', 6), ('R', 6))
+        for k, h in (('CG', 20), ('F', 12), ('R', 12))
     ]
     if not all(os.path.exists(f) for f in files):
         pytest.skip('Need the SU(2) data files of the external/SUN_symbols submodule.')
     sym = symmetries.SUN(2, path=str(_SUN_SYMBOLS_SUBMODULE_DIR))
-    assert (sym.hweight_from_CG_hdf5(), sym.hweight_from_F_hdf5(), sym.hweight_from_R_hdf5()) == (20, 6, 6)
+    assert (sym.hweight_from_CG_hdf5(), sym.hweight_from_F_hdf5(), sym.hweight_from_R_hdf5()) == (
+        20,
+        12,
+        12,
+    )
 
 
 def test_auto_weights_general_n(N, folder_dir):
@@ -324,7 +329,7 @@ def _update_workload(sym, N: int, bond_weight: int, mult: int):
         t3 = lasy.tdot(W2, t2, ['w2_in', 'w2_p_in'], ['w1_out', 'p1'])
         t4 = lasy.tdot(RP, t3, ['r_w', 'r_out'], ['w2_out', 'vR'])
         out = lasy.permute_legs(t4, codomain=['a', 'w1_p_out', 'w2_p_out'], domain=['r_v'])
-        out.set_labels(['vL', 'p0', 'p1', 'vR'])
+        out.labels.set(['vL', 'p0', 'p1', 'vR'])
         return out
 
     return theta, apply
