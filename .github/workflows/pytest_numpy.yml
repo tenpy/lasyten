@@ -24,10 +24,6 @@ jobs:
       run:
         # needed so micromamba activation from setup-micromamba takes effect
         shell: bash -el {0}
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.14"]
 
     steps:
     - name: Checkout
