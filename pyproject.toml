@@ -118,6 +118,7 @@ markers = [
     "FusionTree: marks tests that use the FusionTreeBackend.",
     "numpy: marks tests that use the numpy block backend.",
     "torch: marks tests that use the torch block backend.",
+    "eigen: marks tests that use the Eigen/LAPACK block backend.",
     "example: marks tests as example (deselect with '-m \"not example\"')",
     "deselect_invalid_ChargedTensor_cases: modifies collection. See notes in conftest.py",
 ]

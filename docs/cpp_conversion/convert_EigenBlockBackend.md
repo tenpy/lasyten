@@ -120,5 +120,6 @@ for Eigen↔Python exchange, not a BlockBackend.
 - [x] Register in the backend factory as `"eigen"` (`"cpu"` deliberately unchanged)
 - [x] Basic contract tests green (zeros, ones, eye, reshape, permute, matrix_dot, SVD, QR, eigh, tdot, abs/add, numpy round trip)
 - [x] Document numerical defaults (LAPACK `gesdd` default; `gesvd` / `robust` options; Eigen Jacobi not used)
-- [ ] Run the full BlockBackend/tensor test-suite with `default_block_backend="eigen"`
+- [x] Run the full BlockBackend/tensor test-suite with `default_block_backend="eigen"`
+      (`pytest --block-backends eigen`: 8261 passed, 355 skipped, 605 xfailed; 2026-11-15)
 - [ ] Switch default `"cpu"` (after parity)
