@@ -279,11 +279,11 @@ block_indices_to_tensor_indices(std::span<const BlockBackend::BlockIndex> key,
 torch::Tensor
 tensor_from_py_value(py::object value, torch::Device device)
 {
-    if (py::isinstance<TorchBlockBackend::Block>(value))
+    if (py_isinstance<TorchBlockBackend::Block>(value))
         return value.cast<TorchBlockBackend::Block&>().tensor().to(device);
-    if (py::isinstance<BlockBackend::Block>(value))
+    if (py_isinstance<BlockBackend::Block>(value))
         return tensor_from_numpy_array(value.cast<BlockBackend::Block&>().to_numpy()).to(device);
-    if (py::isinstance<BlockBackend::Scalar>(value)) {
+    if (py_isinstance<BlockBackend::Scalar>(value)) {
         auto block = value.cast<BlockBackend::Scalar&>()._block();
         if (auto const* tb = dynamic_cast<TorchBlockBackend::Block const*>(block.get()))
             return tb->tensor().to(device);
@@ -315,7 +315,7 @@ TorchBlockBackend::Block::get_item(py::object key) const
         return get_item(std::span<const BlockIndex>(*idcs));
     // Escape hatch: index via numpy (Ellipsis / None / exotic keys).
     py::array arr = to_numpy();
-    if (py::isinstance<BlockBackend::Block>(key))
+    if (py_isinstance<BlockBackend::Block>(key))
         key = key.cast<BlockBackend::Block&>().to_numpy();
     py::object result = arr.attr("__getitem__")(key);
     return std::make_shared<const TorchBlockBackend::Block>(
@@ -328,7 +328,7 @@ TorchBlockBackend::Block::get_item(py::object key)
     if (auto idcs = BlockBackend::try_py_key_to_block_indices(key))
         return get_item(std::span<const BlockIndex>(*idcs));
     py::array arr = to_numpy();
-    if (py::isinstance<BlockBackend::Block>(key))
+    if (py_isinstance<BlockBackend::Block>(key))
         key = key.cast<BlockBackend::Block&>().to_numpy();
     py::object result = arr.attr("__getitem__")(key);
     return wrap(tensor_from_py_object(result).to(tensor_.device()));
@@ -352,11 +352,11 @@ TorchBlockBackend::Block::set_item(py::object key, py::object value)
 {
     if (auto idcs = BlockBackend::try_py_key_to_block_indices(key)) {
         torch::Tensor val = tensor_from_py_value(value, tensor_.device()).to(tensor_.options());
-        if (py::isinstance<BlockBackend::Block>(value)) {
+        if (py_isinstance<BlockBackend::Block>(value)) {
             set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Block&>());
             return;
         }
-        if (py::isinstance<BlockBackend::Scalar>(value)) {
+        if (py_isinstance<BlockBackend::Scalar>(value)) {
             set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Scalar&>());
             return;
         }
@@ -365,7 +365,7 @@ TorchBlockBackend::Block::set_item(py::object key, py::object value)
         set_item(std::span<const BlockIndex>(*idcs), tmp);
         return;
     }
-    if (py::isinstance<BlockBackend::Block>(key))
+    if (py_isinstance<BlockBackend::Block>(key))
         key = key.cast<BlockBackend::Block&>().to_numpy();
     py::array arr = to_numpy();
     torch::Tensor val = tensor_from_py_value(value, tensor_.device()).to(tensor_.options());
@@ -609,7 +609,7 @@ TorchBlockBackend::as_scalar(complex128 value, Dtype dt)
 BlockBackend::Scalar
 TorchBlockBackend::as_scalar(py::object value, Dtype dt)
 {
-    if (py::isinstance<BlockBackend::Scalar>(value)) {
+    if (py_isinstance<BlockBackend::Scalar>(value)) {
         auto scalar = py::cast<BlockBackend::Scalar>(value);
         if (scalar.dtype() == dt)
             return scalar;
@@ -773,7 +773,7 @@ TorchBlockBackend::as_block(py::object a,
                             std::optional<std::string> device)
 {
     std::string dev = as_device(device);
-    if (py::isinstance<TorchBlockBackend::Block>(a)) {
+    if (py_isinstance<TorchBlockBackend::Block>(a)) {
         BlockPtr block = a.cast<BlockPtr>();
         if (dtype_opt)
             block = to_dtype(block, *dtype_opt);
@@ -781,7 +781,7 @@ TorchBlockBackend::as_block(py::object a,
             block = copy_block(block, dev);
         return block;
     }
-    if (py::isinstance<BlockBackend::Block>(a)) {
+    if (py_isinstance<BlockBackend::Block>(a)) {
         BlockPtr block = a.cast<BlockPtr>();
         return block_from_numpy(block->to_numpy(), dtype_opt, dev);
     }

@@ -2,7 +2,7 @@
 #include <lasyten/tools.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/helpers.h"
 
@@ -35,14 +35,14 @@ py_check_compatible_legs(py::sequence legs1, py::sequence legs2, bool expect_equ
 {
     bool all_space = true;
     for (auto item : legs1) {
-        if (!py::isinstance<Space>(py::reinterpret_borrow<py::object>(item))) {
+        if (!lasyten::py_isinstance<Space>(py::reinterpret_borrow<py::object>(item))) {
             all_space = false;
             break;
         }
     }
     if (all_space) {
         for (auto item : legs2) {
-            if (!py::isinstance<Space>(py::reinterpret_borrow<py::object>(item))) {
+            if (!lasyten::py_isinstance<Space>(py::reinterpret_borrow<py::object>(item))) {
                 all_space = false;
                 break;
             }
@@ -80,13 +80,13 @@ py_from_compose_sym(std::variant<SymmetricTensorPtr, BlockBackend::Scalar> const
 } // namespace
 
 void
-bind_tensors_helpers(py::module_& m)
+bind_tensors_helpers(nb::module_& m)
 {
     m.def("_check_compatible_legs",
           &py_check_compatible_legs,
-          py::arg("legs1"),
-          py::arg("legs2"),
-          py::arg("expect_equal") = true,
+          nb::arg("legs1"),
+          nb::arg("legs2"),
+          nb::arg("expect_equal") = true,
           doc_plus(DOC(lasyten, _check_compatible_legs),
                    R"pydoc(
 Accepts sequences of either ``Leg`` or ``Space`` objects (dispatches to the matching
@@ -95,9 +95,9 @@ C++ overload).
 
     m.def("_compose_with_Mask",
           &_compose_with_Mask,
-          py::arg("tensor"),
-          py::arg("mask"),
-          py::arg("leg_idx"),
+          nb::arg("tensor"),
+          nb::arg("mask"),
+          nb::arg("leg_idx"),
           DOC(lasyten, _compose_with_Mask));
 
     m.def(
@@ -114,10 +114,10 @@ C++ overload).
           return py_from_compose_sym(_compose_SymmetricTensors(
             tensor1.cast<SymmetricTensorCPtr>(), tensor2.cast<SymmetricTensorCPtr>(), r1, r2));
       },
-      py::arg("tensor1"),
-      py::arg("tensor2"),
-      py::arg("relabel1") = py::none(),
-      py::arg("relabel2") = py::none(),
+      nb::arg("tensor1"),
+      nb::arg("tensor2"),
+      nb::arg("relabel1").none() = nb::none(),
+      nb::arg("relabel2").none() = nb::none(),
       doc_plus(DOC(lasyten, _compose_SymmetricTensors),
                R"pydoc(
 In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabel).
@@ -125,24 +125,24 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
 
     m.def("_convert_abelian_to_FT",
           &_convert_abelian_to_FT,
-          py::arg("tensor"),
-          py::arg("backend"),
-          py::arg("dtype"),
-          py::arg("device"),
+          nb::arg("tensor"),
+          nb::arg("backend"),
+          nb::arg("dtype"),
+          nb::arg("device"),
           DOC(lasyten, _convert_abelian_to_FT));
 
     m.def("_convert_FT_to_abelian",
           &_convert_FT_to_abelian,
-          py::arg("tensor"),
-          py::arg("backend"),
-          py::arg("dtype"),
-          py::arg("device"),
+          nb::arg("tensor"),
+          nb::arg("backend"),
+          nb::arg("dtype"),
+          nb::arg("device"),
           DOC(lasyten, _convert_FT_to_abelian));
 
     m.def("_decomposition_prepare",
           &_decomposition_prepare,
-          py::arg("tensor"),
-          py::arg("new_leg_dual"),
+          nb::arg("tensor"),
+          nb::arg("new_leg_dual"),
           DOC(lasyten, _decomposition_prepare));
 
     m.def(
@@ -150,7 +150,7 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
       [](py::object new_labels) {
           return _decomposition_labels(py_leg_labels(to_iterable(new_labels)));
       },
-      py::arg("new_labels"),
+      nb::arg("new_labels"),
       DOC(lasyten, _decomposition_labels));
 
     m.def(
@@ -161,7 +161,7 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
           }
           return _svd_new_labels(py_leg_labels(to_iterable(new_labels)));
       },
-      py::arg("new_labels"),
+      nb::arg("new_labels"),
       doc_plus(DOC(lasyten, _svd_new_labels),
                R"pydoc(
 In Python, ``new_labels`` may be ``None`` (all unlabeled).

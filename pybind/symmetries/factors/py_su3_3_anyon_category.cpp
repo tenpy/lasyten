@@ -1,6 +1,6 @@
 #include "../../doc_plus.h"
 #include "docstrings/symmetries/factors/su3_3_anyon_category.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 #include "symmetries/casters.hpp"
 
@@ -10,16 +10,16 @@
 namespace lasyten {
 
 void
-bind_su3_3_anyon_category(py::module_& m)
+bind_su3_3_anyon_category(nb::module_& m)
 {
-    py::class_<SU3_3AnyonCategory, SymmetryFactor, py::smart_holder> cls(
+    nb::class_<SU3_3AnyonCategory, SymmetryFactor> cls(
       m, "SU3_3AnyonCategory", DOC(lasyten, SU3_3AnyonCategory));
-    cls.def(py::init<>())
+    cls.def(lasyten::ctor<decltype(cls)>())
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<SU3_3AnyonCategory>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
     cls.attr("one_irrep") = SU3_3AnyonCategory::one_irrep;
     cls.attr("eight_irrep") = SU3_3AnyonCategory::eight_irrep;
     cls.attr("ten_irrep") = SU3_3AnyonCategory::ten_irrep;

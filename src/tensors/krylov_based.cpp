@@ -1,10 +1,9 @@
+#include <lasyten/detail/python_api.h>
 #include <lasyten/tensors/krylov_based.h>
 
 #include <lasyten/block_backend/dtypes.h>
 #include <lasyten/tensors/ops_algebra.h>
 #include <lasyten/tools.h>
-
-#include <pybind11/numpy.h>
 
 #include <algorithm>
 #include <cmath>

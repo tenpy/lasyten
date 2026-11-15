@@ -56,13 +56,38 @@ option(LINTING "Use clang-tidy for linting" OFF)
 option(BUILD_TESTING "Build ctest tests" ON)
 option(LASYTEN_WITH_HDF5 "Link hdf5_io_core for native HDF5 I/O" ON)
 # When ON (default): build Numpy/Torch/Array-API backends, models, _SU2, and
-# the pybind11 ``_core`` extension. NumpyBlockBackend requires a live Python
+# the nanobind ``_core`` extension. NumpyBlockBackend requires a live Python
 # interpreter (extension or pybind11::embed) — it is not a pure-C++ backend.
 # When OFF: those Python-owned TUs are excluded from liblasyten; ``_core`` is
-# not built. Public headers still use ``py::`` extensively (via lasyten.h), so
-# pybind11 remains a compile/link requirement until those APIs are decoupled.
+# not built; Python / pybind11 / nanobind / Torch are not looked for. Public headers
+# still mention ``py::`` (see include/lasyten/detail/python_api.h); in this mode ``py::`` is a
+# set of opaque stand-in types so declarations compile, but anything that really needs Python
+# does not. This is *scaffolding* (convert_nanobind.md, Phase 5): not every TU of liblasyten
+# builds yet — the status message printed at configure time lists what is skipped.
 option(LASYTEN_WITH_PYTHON
   "Include Python/pybind11-dependent liblasyten sources and build _core" ON)
+# The Python-dispatch CPU backends (NumpyBlockBackend, ArrayApiBlockBackend) are transitional
+# (convert_nanobind.md leftover #5): EigenBlockBackend ("eigen") is the preferred CPU backend and
+# TorchBlockBackend the GPU one. Turning this OFF drops numpy.cpp / array_api.cpp (and their
+# bindings); "cpu" then resolves to Eigen. Forced OFF without LASYTEN_WITH_PYTHON.
+include(CMakeDependentOption)
+cmake_dependent_option(LASYTEN_WITH_NUMPY_BACKEND
+  "Build the transitional NumpyBlockBackend / ArrayApiBlockBackend (Python-dispatch)"
+  ON "LASYTEN_WITH_PYTHON" OFF)
+
+# Preprocessor switches mirrored into the public headers (include/lasyten/detail/python_api.h).
+if(LASYTEN_WITH_PYTHON)
+  set(LASYTEN_HAS_PYTHON_DEF 1)
+  set(LASYTEN_WITH_TORCH_BACKEND_DEF 1)
+else()
+  set(LASYTEN_HAS_PYTHON_DEF 0)
+  set(LASYTEN_WITH_TORCH_BACKEND_DEF 0)
+endif()
+if(LASYTEN_WITH_NUMPY_BACKEND)
+  set(LASYTEN_WITH_NUMPY_BACKEND_DEF 1)
+else()
+  set(LASYTEN_WITH_NUMPY_BACKEND_DEF 0)
+endif()
 
 
 # #####################################################################
@@ -79,44 +104,90 @@ cmake_print_variables(PROJECT_SOURCE_DIR)
 cmake_print_variables(CMAKE_CXX_STANDARD)
 
 # #####################################################################
-# ## find python / pybind11
+# ## find python / pybind11 / nanobind (only with LASYTEN_WITH_PYTHON)
 # #####################################################################
-# Required even with LASYTEN_WITH_PYTHON=OFF: include/lasyten/lasyten.h and many
-# public headers declare py:: types. A Python-free configure is blocked until
-# those headers are split (see message below when OFF).
+# With LASYTEN_WITH_PYTHON=OFF none of these is required: no Development.Module /
+# Development.Embed, no pybind11, no nanobind. (An interpreter is searched for optionally, only
+# so that tools like the stub generator could use it; failing to find one is fine.)
 
-set(Python_FIND_VIRTUALENV ONLY)
-set(Python_FIND_STRATEGY LOCATION)
-find_package(Python REQUIRED COMPONENTS Interpreter Development.Module Development.Embed)
+if(LASYTEN_WITH_PYTHON)
+  set(Python_FIND_VIRTUALENV ONLY)
+  set(Python_FIND_STRATEGY LOCATION)
+  find_package(Python REQUIRED COMPONENTS Interpreter Development.Module Development.Embed)
 
-find_package(pybind11 CONFIG REQUIRED)
-# Find the module development requirements (requires FindPython from 3.17 or
-# scikit-build-core's built-in backport)
-cmake_print_variables(Python_VERSION)
-cmake_print_variables(Python_INCLUDE_DIRS)
-cmake_print_variables(Python_NumPy_VERSION)
-cmake_print_variables(Python_NumPy_INCLUDE_DIRS)
+  # pybind11 is kept until the public headers drop py:: (convert_nanobind.md Phase 4).
+  find_package(pybind11 CONFIG REQUIRED)
+
+  # nanobind builds the ``_core`` extension. Headers under include/lasyten/ still use
+  # pybind11 types; pybind/py_lasyten_nanobind.h bridges the two (see pybind/py_pybind11_bridge.h).
+  if(NOT nanobind_DIR AND NOT nanobind_ROOT)
+    execute_process(
+      COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+      OUTPUT_VARIABLE _lasyten_nanobind_cmake_dir
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      RESULT_VARIABLE _lasyten_nanobind_rc
+      ERROR_QUIET)
+    if(_lasyten_nanobind_rc EQUAL 0 AND _lasyten_nanobind_cmake_dir)
+      list(APPEND CMAKE_PREFIX_PATH "${_lasyten_nanobind_cmake_dir}")
+    endif()
+  endif()
+  find_package(nanobind CONFIG REQUIRED)
+  # Build libnanobind once and link it into liblasyten: library TUs convert bound
+  # C++ types via nanobind (see include/lasyten/py_nanobind_bridge.h), so every
+  # executable that links lasyten (ctests, examples) needs the nanobind symbols too.
+  nanobind_build_library(nanobind-static)
+  # Find the module development requirements (requires FindPython from 3.17 or
+  # scikit-build-core's built-in backport)
+  cmake_print_variables(Python_VERSION)
+  cmake_print_variables(Python_INCLUDE_DIRS)
+  cmake_print_variables(Python_NumPy_VERSION)
+  cmake_print_variables(Python_NumPy_INCLUDE_DIRS)
+else()
+  find_package(Python QUIET COMPONENTS Interpreter)
+  message(STATUS "LASYTEN_WITH_PYTHON=OFF: not requiring Python Development.Module/Embed, "
+    "pybind11, nanobind or Torch")
+endif()
+
+# #####################################################################
+# ## find Eigen3 + LAPACK(E) (native EigenBlockBackend)
+# #####################################################################
+# EigenBlockBackend (src/block_backend/eigen.cpp) is always built, independent of
+# LASYTEN_WITH_PYTHON: Eigen for products / matrix functions, LAPACKE for
+# SVD / QR / eigh / eig. conda-forge ships Eigen (header-only) and either OpenBLAS or
+# MKL as liblapack/libblas; both provide the LAPACKE symbols.
+find_package(Eigen3 REQUIRED NO_MODULE)
+find_package(LAPACK REQUIRED)
+find_path(LASYTEN_LAPACKE_INCLUDE_DIR lapacke.h
+  HINTS "$ENV{CONDA_PREFIX}" "${CMAKE_PREFIX_PATH}"
+  PATH_SUFFIXES include include/openblas openblas
+  REQUIRED)
+cmake_print_variables(Eigen3_VERSION)
+cmake_print_variables(LAPACK_LIBRARIES)
+cmake_print_variables(LASYTEN_LAPACKE_INCLUDE_DIR)
 
 if(NOT LASYTEN_WITH_PYTHON)
-  message(WARNING
-    "LASYTEN_WITH_PYTHON=OFF: excluding block_backend/{numpy,torch,array_api}.cpp, "
-    "symmetries/factors/su2.cpp, and models/*.cpp from liblasyten; skipping _core.\n"
-    "pybind11 is STILL required because public headers use py:: types. Remaining "
-    "blockers for a Python-free liblasyten (non-exhaustive):\n"
-    "  include/lasyten/lasyten.h  (includes pybind11; namespace py = pybind11)\n"
-    "  include/lasyten/config.h\n"
-    "  include/lasyten/tools.h, tools/warn.h, tools/hdf5_export.h\n"
-    "  include/lasyten/block_backend/{block_backend,dtypes,numpy,torch,array_api}.h\n"
-    "  include/lasyten/backends/{tensor_backend,abelian,fusion_tree_*,no_symmetry,\n"
-    "                         backend_factory,block_inds_numpy}.h\n"
-    "  include/lasyten/tensors/{tensor,diagonal_tensor,mask,symmetric_tensor,\n"
-    "                        sparse,krylov_based}.h\n"
-    "  include/lasyten/symmetries/{spaces,sector_numpy,fusion_symbol}.h\n"
-    "  include/lasyten/models/{degrees_of_freedom,sites,couplings}.h\n"
-    "Also: src TUs outside the gated list still call Numpy/Torch APIs "
-    "(e.g. backends/backend_factory.cpp, tools/hdf5_export.cpp, "
-    "symmetries/trees.cpp, block_backend/block_backend.cpp) — linking "
-    "executables that pull those symbols will fail until further decoupling.")
+  # NOTE: keep this list in sync with src/CMakeLists.txt (LASYTEN_PYTHON_API_SOURCES) and
+  # docs/cpp_conversion/convert_nanobind.md (Phase 5).
+  message(STATUS "")
+  message(STATUS "LASYTEN_WITH_PYTHON=OFF: EXPERIMENTAL Python-free configuration (Phase 5 scaffolding)")
+  message(STATUS "  Builds: liblasyten (Eigen + LAPACK + HDF5) from the TUs that compile against the")
+  message(STATUS "  opaque py:: stubs of include/lasyten/detail/python_api.h, and the ctest")
+  message(STATUS "  'test_eigen_block_backend_no_python' (EigenBlockBackend, native HDF5, no interpreter).")
+  message(STATUS "  Not built (LASYTEN_PYTHON_API_SOURCES in src/CMakeLists.txt, still py::-typed):")
+  message(STATUS "   - spaces.cpp, tensor*.cpp, TensorBackends, krylov_based.cpp, backend_factory.cpp")
+  message(STATUS "   - models (Site / Coupling hold py::array / py::object), su2.cpp, torch.cpp")
+  message(STATUS "   - Numpy / ArrayApi block backends, the nanobind module _core, python ctests")
+  message(STATUS "  Remaining blockers for a *complete* Python-free liblasyten:")
+  message(STATUS "   - py::object / py::array in the Tensor / TensorBackend / Space / Site public APIs")
+  message(STATUS "   - BlockBackend::block_from_numpy / to_numpy / apply_leg_permutations virtuals")
+  message(STATUS "   - repr() code calling Python __repr__ of legs / factors (spaces.cpp)")
+  message(STATUS "   - tests/ctest programs embed Python (only the Eigen test is built)")
+  message(STATUS "  Details: docs/cpp_conversion/convert_nanobind.md (Phase 5 / leftover #1)")
+  message(STATUS "")
+endif()
+if(LASYTEN_WITH_PYTHON AND NOT LASYTEN_WITH_NUMPY_BACKEND)
+  message(STATUS "LASYTEN_WITH_NUMPY_BACKEND=OFF: NumpyBlockBackend / ArrayApiBlockBackend are not "
+    "built; \"cpu\" resolves to EigenBlockBackend, \"numpy\" is unavailable")
 endif()
 
 # Reject a compiler whose libstdc++ is newer than the one conda Python loads.
@@ -169,48 +240,51 @@ endif()
 # #####################################################################
 # ## find pytorch (same shared libs as `import torch`)
 # #####################################################################
-#
-# Discover Torch via the active interpreter's installed package so lasyten._core
-# links the same libtorch / libc10 that Python's torch._C loads. That makes
-# `import lasyten` + `import torch` in one process safe (one shared libtorch).
-execute_process(
-  COMMAND "${Python_EXECUTABLE}" -c "import torch; print(torch.utils.cmake_prefix_path)"
-  OUTPUT_VARIABLE LASYTEN_TORCH_CMAKE_PREFIX
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  RESULT_VARIABLE LASYTEN_TORCH_CMAKE_PREFIX_RESULT
-)
-if(NOT LASYTEN_TORCH_CMAKE_PREFIX_RESULT EQUAL 0 OR LASYTEN_TORCH_CMAKE_PREFIX STREQUAL "")
-  message(FATAL_ERROR
-    "Could not obtain torch.utils.cmake_prefix_path from ${Python_EXECUTABLE}. "
-    "Install the matching Python torch package in this environment.")
-endif()
-list(PREPEND CMAKE_PREFIX_PATH "${LASYTEN_TORCH_CMAKE_PREFIX}")
+# Only needed by torch.cpp, i.e. with LASYTEN_WITH_PYTHON=ON (not looked for otherwise).
+if(LASYTEN_WITH_PYTHON)
+  #
+  # Discover Torch via the active interpreter's installed package so lasyten._core
+  # links the same libtorch / libc10 that Python's torch._C loads. That makes
+  # `import lasyten` + `import torch` in one process safe (one shared libtorch).
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "import torch; print(torch.utils.cmake_prefix_path)"
+    OUTPUT_VARIABLE LASYTEN_TORCH_CMAKE_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE LASYTEN_TORCH_CMAKE_PREFIX_RESULT
+  )
+  if(NOT LASYTEN_TORCH_CMAKE_PREFIX_RESULT EQUAL 0 OR LASYTEN_TORCH_CMAKE_PREFIX STREQUAL "")
+    message(FATAL_ERROR
+      "Could not obtain torch.utils.cmake_prefix_path from ${Python_EXECUTABLE}. "
+      "Install the matching Python torch package in this environment.")
+  endif()
+  list(PREPEND CMAKE_PREFIX_PATH "${LASYTEN_TORCH_CMAKE_PREFIX}")
 
-# Torch's Caffe2/mkl.cmake sets caffe2::mkl INTERFACE_LINK_DIRECTORIES to
-# ${MKL_ROOT}/lib/intel64 (etc.). When MKL_ROOT is unset those become the
-# bogus absolute paths /lib/intel64, and executables that link lasyten (e.g.
-# CommonCppTests) fail to resolve libtorch_cpu's MKL/sleef/omp deps. Conda
-# ships those libs in $CONDA_PREFIX/lib.
-if(NOT MKL_ROOT AND DEFINED ENV{CONDA_PREFIX})
-  set(MKL_ROOT "$ENV{CONDA_PREFIX}")
-endif()
+  # Torch's Caffe2/mkl.cmake sets caffe2::mkl INTERFACE_LINK_DIRECTORIES to
+  # ${MKL_ROOT}/lib/intel64 (etc.). When MKL_ROOT is unset those become the
+  # bogus absolute paths /lib/intel64, and executables that link lasyten (e.g.
+  # CommonCppTests) fail to resolve libtorch_cpu's MKL/sleef/omp deps. Conda
+  # ships those libs in $CONDA_PREFIX/lib.
+  if(NOT MKL_ROOT AND DEFINED ENV{CONDA_PREFIX})
+    set(MKL_ROOT "$ENV{CONDA_PREFIX}")
+  endif()
 
-find_package(Torch REQUIRED)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+  find_package(Torch REQUIRED)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 
-# Belt-and-suspenders: overwrite any empty-MKL_ROOT stub dirs Torch still set.
-if(TARGET caffe2::mkl AND MKL_ROOT)
-  set_property(TARGET caffe2::mkl PROPERTY INTERFACE_LINK_DIRECTORIES
-    "${MKL_ROOT}/lib")
-  # Executables that link Torch (e.g. CommonCppTests) must resolve libtorch_cpu's
-  # DT_NEEDED deps (MKL, sleef, omp) at link time; -L alone is not enough for
-  # that — pass -rpath-link. Shared modules like _core do not need this.
-  target_link_options(caffe2::mkl INTERFACE "LINKER:-rpath-link=${MKL_ROOT}/lib")
-endif()
+  # Belt-and-suspenders: overwrite any empty-MKL_ROOT stub dirs Torch still set.
+  if(TARGET caffe2::mkl AND MKL_ROOT)
+    set_property(TARGET caffe2::mkl PROPERTY INTERFACE_LINK_DIRECTORIES
+      "${MKL_ROOT}/lib")
+    # Executables that link Torch (e.g. CommonCppTests) must resolve libtorch_cpu's
+    # DT_NEEDED deps (MKL, sleef, omp) at link time; -L alone is not enough for
+    # that — pass -rpath-link. Shared modules like _core do not need this.
+    target_link_options(caffe2::mkl INTERFACE "LINKER:-rpath-link=${MKL_ROOT}/lib")
+  endif()
 
-cmake_print_variables(Torch_DIR)
-cmake_print_variables(TORCH_INSTALL_PREFIX)
-cmake_print_variables(TORCH_LIBRARIES)
+  cmake_print_variables(Torch_DIR)
+  cmake_print_variables(TORCH_INSTALL_PREFIX)
+  cmake_print_variables(TORCH_LIBRARIES)
+endif() # LASYTEN_WITH_PYTHON (Torch)
 
 # #####################################################################
 # ## C++ LIBRARY
@@ -220,12 +294,12 @@ add_library(lasyten STATIC)
 set_property(TARGET lasyten PROPERTY C_VISIBILITY_PRESET hidden)
 set_property(TARGET lasyten PROPERTY CXX_VISIBILITY_PRESET hidden)
 set_property(TARGET lasyten PROPERTY VISIBILITY_INLINES_HIDDEN ON)
-# CXX_VISIBILITY_PRESET is ignored for STATIC libraries; pybind11 still needs
-# -fvisibility=hidden on every TU that includes pybind types (see FAQ:
+# CXX_VISIBILITY_PRESET is ignored for STATIC libraries; pybind11 (still used by the public
+# headers) needs -fvisibility=hidden on every TU that includes pybind types (see FAQ:
 # "'SomeClass' declared with greater visibility than the type of its field").
 # PUBLIC so dependents (examples, ctests, user programs) get the same flag;
 # otherwise SpinSite/Coupling headers warn about py::array / py::object fields.
-# pybind11_add_module(_core) already adds the flag for the extension module.
+# nanobind_add_module(_core) already adds the flag for the extension module.
 target_compile_options(lasyten PRIVATE
   $<$<COMPILE_LANGUAGE:C>:-fvisibility=hidden>
 )
@@ -244,11 +318,30 @@ target_include_directories(lasyten
 add_subdirectory(src)
 target_compile_options(lasyten PUBLIC -fPIC)
 
-# pybind11::headers are required while public APIs still use py:: types
-# (include/lasyten/lasyten.h). LASYTEN_WITH_PYTHON gates which *sources* ship the
-# numpy/torch/array_api backends; it does not remove this link dependency yet.
-# NumpyBlockBackend specifically needs a Python interpreter at runtime.
-target_link_libraries(lasyten PUBLIC pybind11::pybind11 "${TORCH_LIBRARIES}")
+# With LASYTEN_WITH_PYTHON=ON, pybind11::headers are required while public APIs still use
+# py:: types (include/lasyten/detail/python_api.h -> lasyten.h), nanobind-static provides the
+# pybind11 <-> nanobind bridge symbols and libtorch backs TorchBlockBackend. NumpyBlockBackend
+# additionally needs a Python interpreter at runtime.
+# With LASYTEN_WITH_PYTHON=OFF none of these is linked (py:: is a set of opaque stubs).
+if(LASYTEN_WITH_PYTHON)
+  target_link_libraries(lasyten PUBLIC pybind11::pybind11 nanobind-static "${TORCH_LIBRARIES}")
+endif()
+
+# Feature switches seen by the public headers (lasyten/detail/python_api.h and users).
+target_compile_definitions(lasyten PUBLIC
+  LASYTEN_HAS_PYTHON=${LASYTEN_HAS_PYTHON_DEF}
+  LASYTEN_WITH_NUMPY_BACKEND=${LASYTEN_WITH_NUMPY_BACKEND_DEF}
+  LASYTEN_WITH_TORCH_BACKEND=${LASYTEN_WITH_TORCH_BACKEND_DEF}
+)
+
+# Native EigenBlockBackend: Eigen and LAPACK/BLAS (LAPACKE for SVD/QR/eigh/eig, BLAS for
+# Eigen's dense products).
+target_link_libraries(lasyten PUBLIC Eigen3::Eigen LAPACK::LAPACK)
+target_include_directories(lasyten PRIVATE "${LASYTEN_LAPACKE_INCLUDE_DIR}")
+# Route Eigen's dense products through the BLAS that LAPACK::LAPACK links.
+set_source_files_properties(
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/block_backend/eigen.cpp"
+  PROPERTIES COMPILE_DEFINITIONS EIGEN_USE_BLAS)
 
 # #####################################################################
 # ## hdf5_io_core (optional native HDF5)
@@ -279,7 +372,7 @@ endif()
 # ``_core`` (not liblasyten).
 
 if(LASYTEN_WITH_PYTHON)
-  pybind11_add_module(_core pybind/_core.cpp)
+  nanobind_add_module(_core pybind/_core.cpp)
 
   target_include_directories(_core
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/pybind
@@ -288,12 +381,13 @@ if(LASYTEN_WITH_PYTHON)
 
   target_link_libraries(_core PUBLIC lasyten)
 else()
-  message(STATUS "LASYTEN_WITH_PYTHON=OFF: skipping pybind11 module _core")
+  message(STATUS "LASYTEN_WITH_PYTHON=OFF: skipping nanobind module _core")
 endif()
 
 # #####################################################################
 # ## Docstrings (Doxygen XML → pybind/docstrings/<rel>, always at build)
 # #####################################################################
+# PREDEFINED: document the full (Python ON) API even if this build configuration turns parts off.
 # Layout: include/lasyten/<rel>  →  pybind/docstrings/<rel> (gitignored; IDE-visible)
 # Each pybind TU includes only the docstring headers it needs.
 # Requires doxygen (see environment.yml).
@@ -353,6 +447,7 @@ set(LASYTEN_MKDOC_HEADERS
   block_backend/array_api.h
   block_backend/block_backend.h
   block_backend/dtypes.h
+  block_backend/eigen.h
   block_backend/numpy.h
   block_backend/torch.h
   tools/cost_polynomials.h
@@ -395,6 +490,9 @@ QUIET                  = YES
 WARNINGS               = NO
 MARKDOWN_SUPPORT       = NO
 AUTOLINK_SUPPORT       = NO
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+PREDEFINED             = LASYTEN_HAS_PYTHON=1 LASYTEN_WITH_NUMPY_BACKEND=1 LASYTEN_WITH_TORCH_BACKEND=1
 ")
 
   # Write into the source tree under pybind/docstrings/ so IDEs can open DOC()
@@ -426,30 +524,25 @@ message(STATUS
 
 
 # #####################################################################
-# ## .pyi stub (pybind11-stubgen → lasyten/_core.pyi, for IDE type hints)
+# ## .pyi stub (nanobind stubgen → lasyten/_core.pyi, for IDE type hints)
 # #####################################################################
 # Written into the source tree next to _core.so (gitignored; always regenerated)
 # so IDEs/LSPs get parameter hints for the compiled extension. Optional: if
-# pybind11-stubgen is unavailable or fails, warn and skip rather than fail the build.
-find_program(LASYTEN_PYBIND11_STUBGEN_EXECUTABLE NAMES pybind11-stubgen)
+# the stub generation fails (e.g. _core cannot be imported at build time), warn and skip
+# rather than fail the build.
 set(LASYTEN_CORE_PYI "${CMAKE_CURRENT_SOURCE_DIR}/lasyten/_core.pyi")
 
-if(LASYTEN_PYBIND11_STUBGEN_EXECUTABLE)
-  add_custom_command(
-    OUTPUT ${LASYTEN_CORE_PYI}
-    COMMAND sh -c "PYTHONPATH=$<TARGET_FILE_DIR:_core> ${LASYTEN_PYBIND11_STUBGEN_EXECUTABLE} _core -o ${CMAKE_CURRENT_SOURCE_DIR}/lasyten \
-        || echo 'WARNING: pybind11-stubgen failed; lasyten/_core.pyi not (re)generated'"
-    DEPENDS _core
-    COMMENT "Generating lasyten/_core.pyi via pybind11-stubgen"
-    VERBATIM
-  )
-  add_custom_target(lasyten_generate_pyi_stub ALL DEPENDS ${LASYTEN_CORE_PYI})
-  add_dependencies(lasyten_generate_pyi_stub _core)
-else()
-  message(WARNING
-    "pybind11-stubgen not found; skipping lasyten/_core.pyi generation. "
-    "Install it (pip install pybind11-stubgen, or the 'lasyten[stubs]' extra) for IDE type hints.")
-endif()
+add_custom_command(
+  OUTPUT ${LASYTEN_CORE_PYI}
+  COMMAND sh -c "PYTHONPATH=$<TARGET_FILE_DIR:_core> ${Python_EXECUTABLE} -m nanobind.stubgen \
+      -m _core -o ${LASYTEN_CORE_PYI} \
+      || echo 'WARNING: nanobind.stubgen failed; lasyten/_core.pyi not (re)generated'"
+  DEPENDS _core
+  COMMENT "Generating lasyten/_core.pyi via nanobind.stubgen"
+  VERBATIM
+)
+add_custom_target(lasyten_generate_pyi_stub ALL DEPENDS ${LASYTEN_CORE_PYI})
+add_dependencies(lasyten_generate_pyi_stub _core)
 
 
 # Resolve libtorch/c10 from the same place as Python torch._C.

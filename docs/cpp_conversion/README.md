@@ -6,6 +6,18 @@ Each conversion follows the workflow in [.cursor/skills/pybind11-codegen/SKILL.m
 
 Conversion order follows the plan: Layer 0 (tools) → Layer 1 (block_backends) → Layer 2 (symmetries) → Layer 3 (backends) → Layer 4 (tensors) → Layer 5 (models).
 
+## Nanobind port (#255)
+
+Active follow-up after the pybind11-era C++ conversion and MI cleanup (#254):
+
+| Doc | Topic |
+| --- | --- |
+| [convert_nanobind.md](convert_nanobind.md) | Master note: nanobind port, ownership, trampolines, no-Python goal, leftover todos |
+| [convert_EigenBlockBackend.md](convert_EigenBlockBackend.md) | Native Eigen/LAPACK CPU BlockBackend + `nb::ndarray` I/O |
+| [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md) | Required TeNPy `v2_main` downstream changes |
+| [convert_BlockBackend.md](convert_BlockBackend.md) | BlockBackend status + #255 follow-ups |
+| [convert_spaces_MI.md](convert_spaces_MI.md) | Spaces MI removal (nanobind prerequisite) |
+
 
 ## Conversion workflow (per object)
 
@@ -141,8 +153,8 @@ Keep namespaces and include structure consistent with existing headers.
 1. Use the script from [.cursor/skills/pybind11-codegen/SKILL.md](.cursor/skills/pybind11-codegen/SKILL.md) to provide drafts. This will ensure that the docstrings and names are carried over correctly and provide hints for things to check.
 2. **Create `docs/cpp_conversion/`** — Store one `convert_<pyname>.md` per conversion (and optionally high-level `convert_tensors.md`, `convert_symmetries.md`) to track progress and decisions.
 3. **Extend type mappings** — Update [pybind11_codegen.toml](pybind11_codegen.toml) `[types_py_to_cpp]` as you find recurring types (e.g. `npt.NDArray` → appropriate C++ container or pybind11 buffer).
-2. **Holder type** — Use `py::smart_holder` (pybind11 v3 built-in) as the holder for `py::class_` bindings of C++ types that use `std::shared_ptr` in the API (e.g. `Block`, `NumpyBlock`, `BlockBackend`, `NumpyBlockBackend`). Prefer `py::class_<T, py::smart_holder>` over `py::class_<T, std::shared_ptr<T>>` so Python/C++ conversions work with both `std::unique_ptr` and `std::shared_ptr` and trampolines are handled safely. No extra include is required.
-4. **Trampolines** — Use `gen_pyb11_trampoline` only for classes that are subclassed in Python (e.g. `TensorBackend`, `BlockBackend`, `Symmetry`); for internal-only bases, bindings may not need trampolines.
+2. **Holder type (legacy pybind11)** — Historically used `py::smart_holder`. Under nanobind (#255) there are no holders: bind `nb::class_<T>` and exchange `std::shared_ptr<T>` — see [convert_nanobind.md](convert_nanobind.md).
+4. **Trampolines** — Keep only for types subclassed from Python (TeNPy needs `LinearOperator` / `PlanarLinearOperator`). Other trampolines are dropped in the first nanobind port.
 5. **Tests** — For each converted object, run the relevant pytest under `tests/`; keep the full suite passing before removing the corresponding Python implementation.
 6. **Incremental commits** — Per the skill: WIP commits with `--no-verify` (e.g. "WIP: convert : ") so pre-commit doesn’t block mid-conversion.
 7. **Docstrings** — See [docstring_porting.md](docstring_porting.md) (dual-language policy from [tenpy/lasyten#242](https://github.com/tenpy/lasyten/issues/242); `///` + per-header `pybind/docstrings/` + `DOC` / `R"pydoc"`).

@@ -1,15 +1,10 @@
 #include "../doc_plus.h"
 #include "docstrings/symmetries/sector.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 #include "tools/hdf5_bind.h"
 
 #include <lasyten/symmetries/sector.h>
 #include <lasyten/symmetries/sector_numpy.h>
-
-#include <pybind11/functional.h>
-#include <pybind11/numpy.h>
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -175,17 +170,16 @@ sector_array_repr(SectorArray const& a)
 } // namespace
 
 void
-bind_sector(py::module_& m)
+bind_sector(nb::module_& m)
 {
-    py::class_<Sector>(m, "Sector", DOC(lasyten, Sector))
-      .def(py::init<>())
-      .def(py::init([](py::object values) { return sector_from_numpy(values); }),
-           py::arg("values"),
+    nb::class_<Sector>(m, "Sector", DOC(lasyten, Sector))
+      .def(nb::init<>())
+      .def(nb::new_([](py::object values) { return sector_from_numpy(values); }),
+           nb::arg("values"),
            "Construct from a 1D integer sequence or ndarray.")
-      .def_property_readonly("shape",
-                             [](Sector const& self) { return py::make_tuple(self.len()); })
-      .def_property_readonly("sector_ind_len",
-                             [](Sector const& self) { return static_cast<int>(self.len()); })
+      .def_prop_ro("shape", [](Sector const& self) { return py::make_tuple(self.len()); })
+      .def_prop_ro("sector_ind_len",
+                   [](Sector const& self) { return static_cast<int>(self.len()); })
       .def("__len__", [](Sector const& self) { return static_cast<std::size_t>(self.len()); })
       .def("__getitem__",
            [](Sector const& self, py::object key) -> py::object {
@@ -220,9 +214,9 @@ bind_sector(py::module_& m)
         [](Sector const& self) {
             return py::make_iterator(self.span().begin(), self.span().end());
         },
-        py::keep_alive<0, 1>())
-      .def(py::self == py::self)
-      .def(py::self != py::self)
+        nb::keep_alive<0, 1>())
+      .def(nb::self == nb::self)
+      .def(nb::self != nb::self)
       .def("__hash__", [](Sector const& self) { return std::hash<Sector>{}(self); })
       .def("__repr__", &sector_repr)
       .def("__str__", &sector_repr)
@@ -233,37 +227,36 @@ bind_sector(py::module_& m)
         "Return a copy as a 1D ``int64`` NumPy array.")
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5_const<Sector>(),
-           py::arg("hdf5_saver"),
-           py::arg("h5gr"),
-           py::arg("subpath"))
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"))
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<Sector>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 
-    py::implicitly_convertible<py::array, Sector>();
+    nb::implicitly_convertible<py::array, Sector>();
 
-    py::class_<SectorArray>(m, "SectorArray", DOC(lasyten, SectorArray))
-      .def(py::init<>())
-      .def(py::init([](py::object values) { return sector_array_from_numpy(values); }),
-           py::arg("values"),
+    nb::class_<SectorArray>(m, "SectorArray", DOC(lasyten, SectorArray))
+      .def(nb::init<>())
+      .def(nb::new_([](py::object values) { return sector_array_from_numpy(values); }),
+           nb::arg("values"),
            "Construct from a 2D integer sequence or ndarray.")
       .def_static(
         "empty",
         [](int sector_ind_len) {
             return SectorArray::empty(static_cast<std::uint8_t>(sector_ind_len));
         },
-        py::arg("sector_ind_len"))
-      .def_static("from_sector", &SectorArray::from_sector, py::arg("sector"))
-      .def_static("repeat", &SectorArray::repeat, py::arg("sector"), py::arg("n"))
-      .def_property_readonly(
+        nb::arg("sector_ind_len"))
+      .def_static("from_sector", &SectorArray::from_sector, nb::arg("sector"))
+      .def_static("repeat", &SectorArray::repeat, nb::arg("sector"), nb::arg("n"))
+      .def_prop_ro(
         "shape",
         [](SectorArray const& self) { return py::make_tuple(self.size(), self.sector_ind_len()); })
-      .def_property_readonly("num_sectors", [](SectorArray const& self) { return self.size(); })
-      .def_property_readonly(
-        "sector_ind_len",
-        [](SectorArray const& self) { return static_cast<int>(self.sector_ind_len()); })
+      .def_prop_ro("num_sectors", [](SectorArray const& self) { return self.size(); })
+      .def_prop_ro("sector_ind_len",
+                   [](SectorArray const& self) { return static_cast<int>(self.sector_ind_len()); })
       .def("__len__", [](SectorArray const& self) { return self.size(); })
       .def("__getitem__",
            [](SectorArray const& self, py::object key) -> py::object {
@@ -317,9 +310,9 @@ bind_sector(py::module_& m)
                        throw py::index_error("SectorArray index out of range");
                    }
                    Sector s;
-                   if (py::isinstance<Sector>(value)) {
+                   if (lasyten::py_isinstance<Sector>(value)) {
                        s = value.cast<Sector>();
-                   } else if (py::isinstance<SectorArray>(value)) {
+                   } else if (lasyten::py_isinstance<SectorArray>(value)) {
                        auto sa = value.cast<SectorArray>();
                        if (sa.size() != 1) {
                            throw py::value_error("assigning multiple rows to a single index");
@@ -337,7 +330,7 @@ bind_sector(py::module_& m)
                // fancy int index assignment of rows
                auto idx = indices_from_py(key, self.size());
                SectorArray src;
-               if (py::isinstance<SectorArray>(value)) {
+               if (lasyten::py_isinstance<SectorArray>(value)) {
                    src = value.cast<SectorArray>();
                } else {
                    src = sector_array_from_numpy(value);
@@ -352,9 +345,9 @@ bind_sector(py::module_& m)
       .def(
         "__iter__",
         [](SectorArray const& self) { return py::make_iterator(self.begin(), self.end()); },
-        py::keep_alive<0, 1>())
-      .def(py::self == py::self)
-      .def(py::self != py::self)
+        nb::keep_alive<0, 1>())
+      .def(nb::self == nb::self)
+      .def(nb::self != nb::self)
       .def("__repr__", &sector_array_repr)
       .def("__str__", &sector_array_repr)
       .def("copy", [](SectorArray const& self) { return SectorArray(self); })
@@ -374,7 +367,7 @@ bind_sector(py::module_& m)
         [](SectorArray const& self, bool include_len) {
             return indices_to_numpy(self.find_row_differences(include_len));
         },
-        py::arg("include_len") = false)
+        nb::arg("include_len") = false)
       .def(
         "unique_sorted",
         [](SectorArray const& self, py::object multiplicities) {
@@ -394,7 +387,7 @@ bind_sector(py::module_& m)
             auto [uniq, um, perm] = self.unique_sorted(mults);
             return py::make_tuple(uniq, i64_to_numpy(um), indices_to_numpy(perm));
         },
-        py::arg("multiplicities") = py::none())
+        nb::arg("multiplicities").none() = nb::none())
       .def(
         "row_where",
         [](SectorArray const& self, Sector const& sector) -> py::object {
@@ -404,8 +397,8 @@ bind_sector(py::module_& m)
             }
             return py::int_(*idx);
         },
-        py::arg("sector"))
-      .def("concat", &SectorArray::concat, py::arg("other"))
+        nb::arg("sector"))
+      .def("concat", &SectorArray::concat, nb::arg("other"))
       .def(
         "take",
         [](SectorArray const& self, py::object indices) {
@@ -423,8 +416,8 @@ bind_sector(py::module_& m)
             auto idx = indices_from_py(indices, self.size());
             return self.take(idx);
         },
-        py::arg("indices"))
-      .def("slice", &SectorArray::slice, py::arg("start"), py::arg("stop"))
+        nb::arg("indices"))
+      .def("slice", &SectorArray::slice, nb::arg("start"), nb::arg("stop"))
       .def_static(
         "iter_common_sorted",
         [](SectorArray const& a, SectorArray const& b, bool a_strict, bool b_strict) {
@@ -435,22 +428,22 @@ bind_sector(py::module_& m)
               });
             return out;
         },
-        py::arg("a"),
-        py::arg("b"),
-        py::arg("a_strict") = true,
-        py::arg("b_strict") = true)
+        nb::arg("a"),
+        nb::arg("b"),
+        nb::arg("a_strict") = true,
+        nb::arg("b_strict") = true)
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5_const<SectorArray>(),
-           py::arg("hdf5_saver"),
-           py::arg("h5gr"),
-           py::arg("subpath"))
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"))
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<SectorArray>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 
-    py::implicitly_convertible<py::array, SectorArray>();
+    nb::implicitly_convertible<py::array, SectorArray>();
 }
 
 } // namespace lasyten

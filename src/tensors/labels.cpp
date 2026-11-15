@@ -276,7 +276,13 @@ _get_matching_labels(LegLabelList const& labels1, LegLabelList const& labels2)
             labels.emplace_back("");
         }
     }
-    if (!conflicts.empty() && Py_IsInitialized()) {
+#if LASYTEN_HAS_PYTHON
+    // Only warn once the interpreter is up (avoids warnings during static initialization).
+    bool const can_warn = Py_IsInitialized();
+#else
+    bool const can_warn = true;
+#endif
+    if (!conflicts.empty() && can_warn) {
         std::string positions;
         for (std::size_t i = 0; i < conflicts.size(); ++i) {
             if (i > 0) {

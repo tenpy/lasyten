@@ -146,11 +146,15 @@ class FusionSymbol
 /// Kronecker product of two FusionSymbols of equal rank (result same rank).
 [[nodiscard]] FusionSymbol kron(FusionSymbol const& a, FusionSymbol const& b);
 
+#if LASYTEN_HAS_PYTHON
 /// NumPy bridge (bindings / interim Block conversion).
 [[nodiscard]] py::array fusion_symbol_to_numpy(FusionSymbol const& src);
 [[nodiscard]] FusionSymbol fusion_symbol_from_numpy(py::array arr);
 
-/// Convert via backend ``block_from_numpy`` / ``to_numpy``.
+#endif // LASYTEN_HAS_PYTHON
+
+/// Convert via the backend: native for `EigenBlockBackend`; other backends go through
+/// ``block_from_numpy`` / ``to_numpy`` (needs ``LASYTEN_WITH_PYTHON``).
 [[nodiscard]] BlockBackend::BlockPtr block_from_fusion_symbol(
   BlockBackend& backend,
   FusionSymbol const& arr,

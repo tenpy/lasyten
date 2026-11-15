@@ -1,13 +1,12 @@
 #include <lasyten/block_backend/block_backend.h>
 #include <lasyten/block_backend/numpy.h>
+#include <lasyten/detail/python_api.h>
 #include <lasyten/tools.h>
 
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <map>
 #include <mutex>
-#include <pybind11/numpy.h>
-#include <pybind11/pytypes.h>
 #include <regex>
 #include <span>
 #include <stdexcept>
@@ -111,7 +110,7 @@ NumpyBlockBackend::Block::get_item(py::object key) const
 py::object
 NumpyBlockBackend::Block::_item_key_cast_Blocks_to_numpy(py::object key) const
 {
-    if (py::isinstance<NumpyBlockBackend::Block>(key)) {
+    if (py_isinstance<NumpyBlockBackend::Block>(key)) {
         NumpyBlockBackend::Block* block = key.cast<NumpyBlockBackend::Block*>();
         return block->to_numpy();
     } else if (py::isinstance<py::tuple>(key)) {
@@ -119,7 +118,7 @@ NumpyBlockBackend::Block::_item_key_cast_Blocks_to_numpy(py::object key) const
         py::tuple key_tuple = py::reinterpret_borrow<py::tuple>(key);
         py::tuple new_tuple = py::tuple(key_tuple.size());
         for (py::ssize_t i = 0; i < key_tuple.size(); ++i) {
-            if (py::isinstance<NumpyBlockBackend::Block>(key_tuple[i])) {
+            if (py_isinstance<NumpyBlockBackend::Block>(key_tuple[i])) {
                 NumpyBlockBackend::Block* block = key_tuple[i].cast<NumpyBlockBackend::Block*>();
                 new_tuple[i] = block->to_numpy();
             } else {
@@ -155,11 +154,11 @@ void
 NumpyBlockBackend::Block::set_item(py::object key, py::object value)
 {
     if (auto idcs = BlockBackend::try_py_key_to_block_indices(key)) {
-        if (py::isinstance<BlockBackend::Block>(value)) {
+        if (py_isinstance<BlockBackend::Block>(value)) {
             set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Block&>());
             return;
         }
-        if (py::isinstance<BlockBackend::Scalar>(value)) {
+        if (py_isinstance<BlockBackend::Scalar>(value)) {
             set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Scalar&>());
             return;
         }
@@ -169,7 +168,7 @@ NumpyBlockBackend::Block::set_item(py::object key, py::object value)
         return;
     }
     py::object key_copy = _item_key_cast_Blocks_to_numpy(key);
-    if (py::isinstance<NumpyBlockBackend::Block>(value)) {
+    if (py_isinstance<NumpyBlockBackend::Block>(value)) {
         NumpyBlockBackend::Block* block = value.cast<NumpyBlockBackend::Block*>();
         value = block->to_numpy();
     }
@@ -360,7 +359,7 @@ NumpyBlockBackend::as_scalar(complex128 value, Dtype dtype)
 BlockBackend::Scalar
 NumpyBlockBackend::as_scalar(py::object value, Dtype dtype)
 {
-    if (py::isinstance<BlockBackend::Scalar>(value)) {
+    if (py_isinstance<BlockBackend::Scalar>(value)) {
         auto scalar = py::cast<BlockBackend::Scalar>(value);
         if (scalar.dtype() == dtype)
             return scalar;
@@ -480,7 +479,7 @@ NumpyBlockBackend::as_block(py::object a,
      * return block
      */
     (void)as_device(device);
-    if (py::isinstance<NumpyBlockBackend::Block>(a)) {
+    if (py_isinstance<NumpyBlockBackend::Block>(a)) {
         // just use the block directly, no need to convert to numpy and back
         BlockPtr block = a.cast<BlockPtr>();
         if (dtype_opt) {
@@ -488,7 +487,7 @@ NumpyBlockBackend::as_block(py::object a,
         }
         return block;
     }
-    if (py::isinstance<BlockBackend::Block>(a)) {
+    if (py_isinstance<BlockBackend::Block>(a)) {
         // Foreign backend Block (e.g. Torch): convert via numpy.
         BlockPtr block = a.cast<BlockPtr>();
         py::array arr = block->to_numpy();

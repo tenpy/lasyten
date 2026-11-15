@@ -35,31 +35,31 @@ namespace {
 bool
 is_Mask(py::object obj)
 {
-    return py::isinstance<Mask>(obj);
+    return py_isinstance<Mask>(obj);
 }
 
 bool
 is_DiagonalTensor(py::object obj)
 {
-    return py::isinstance<DiagonalTensor>(obj);
+    return py_isinstance<DiagonalTensor>(obj);
 }
 
 bool
 is_Identity(py::object obj)
 {
-    return py::isinstance<Identity>(obj);
+    return py_isinstance<Identity>(obj);
 }
 
 bool
 is_SymmetricTensor(py::object obj)
 {
-    return py::isinstance<SymmetricTensor>(obj);
+    return py_isinstance<SymmetricTensor>(obj);
 }
 
 bool
 is_ChargedTensor(py::object obj)
 {
-    return py::isinstance<ChargedTensor>(obj);
+    return py_isinstance<ChargedTensor>(obj);
 }
 
 bool

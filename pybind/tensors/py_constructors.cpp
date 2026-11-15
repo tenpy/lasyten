@@ -3,7 +3,7 @@
 #include <lasyten/tensors/tensor.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 #include "py_factory_parse.hpp"
 
 #include "docstrings/tensors/constructors.h"
@@ -15,7 +15,7 @@
 namespace lasyten {
 
 void
-bind_tensors_constructors(py::module_& m)
+bind_tensors_constructors(nb::module_& m)
 {
     m.def(
       "eye",
@@ -37,12 +37,12 @@ bind_tensors_constructors(py::module_& m)
                      std::move(device_opt),
                      diagonal);
       },
-      py::arg("leg"),
-      py::arg("backend") = py::none(),
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = Dtype::Float64,
-      py::arg("device") = py::none(),
-      py::arg("diagonal") = true,
+      nb::arg("leg"),
+      nb::arg("backend").none() = nb::none(),
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype") = Dtype::Float64,
+      nb::arg("device").none() = nb::none(),
+      nb::arg("diagonal") = true,
       DOC(lasyten, eye));
 
     m.def(
@@ -63,7 +63,7 @@ bind_tensors_constructors(py::module_& m)
           if (!device.is_none()) {
               device_opt = device.cast<std::string>();
           }
-          if (py::isinstance<Tensor>(obj)) {
+          if (lasyten::py_isinstance<Tensor>(obj)) {
               auto t = obj.cast<TensorCPtr>();
               auto cod = tensor_product_from_python(codomain, t->symmetry);
               TensorProduct::Ptr dom;
@@ -93,14 +93,14 @@ bind_tensors_constructors(py::module_& m)
                                  device_opt,
                                  understood_braiding));
       },
-      py::arg("obj"),
-      py::arg("codomain"),
-      py::arg("domain") = py::none(),
-      py::arg("backend") = py::none(),
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::arg("device") = py::none(),
-      py::arg("understood_braiding") = false,
+      nb::arg("obj"),
+      nb::arg("codomain"),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("backend").none() = nb::none(),
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
+      nb::arg("understood_braiding") = false,
       doc_plus(DOC(lasyten, tensor),
                R"pydoc(
 Also accepts a dense block (second C++ overload). ``None`` for optional arguments
@@ -138,19 +138,19 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
                                  std::move(label_opt),
                                  is_dual);
       },
-      py::arg("tens"),
-      py::arg("legs_pos") = py::none(),
-      py::kw_only(),
-      py::arg("codomain_pos") = py::none(),
-      py::arg("domain_pos") = py::none(),
-      py::arg("label") = py::none(),
-      py::arg("is_dual") = false,
+      nb::arg("tens"),
+      nb::arg("legs_pos").none() = nb::none(),
+      nb::kw_only(),
+      nb::arg("codomain_pos").none() = nb::none(),
+      nb::arg("domain_pos").none() = nb::none(),
+      nb::arg("label").none() = nb::none(),
+      nb::arg("is_dual") = false,
       DOC(lasyten, add_trivial_leg));
 
     m.def(
       "zero_like",
       [](py::object tensor) { return zero_like(tensor.cast<TensorCPtr>()); },
-      py::arg("tensor"),
+      nb::arg("tensor"),
       DOC(lasyten, zero_like));
 
     m.def(
@@ -187,14 +187,14 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
           }
           return HiddenLegTensor::maybe_wrap(std::dynamic_pointer_cast<SymmetricTensor>(res));
       },
-      py::arg("grid"),
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::kw_only(),
-      py::arg("row_labels") = py::none(),
-      py::arg("col_labels") = py::none(),
-      py::arg("row_summands") = py::none(),
-      py::arg("col_summands") = py::none(),
+      nb::arg("grid"),
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::kw_only(),
+      nb::arg("row_labels").none() = nb::none(),
+      nb::arg("col_labels").none() = nb::none(),
+      nb::arg("row_summands").none() = nb::none(),
+      nb::arg("col_summands").none() = nb::none(),
       doc_plus(DOC(lasyten, tensor_from_grid),
                R"pydoc(
 In Python, ``grid`` is ``list[list[SymmetricTensor | None]]`` (``None`` = zero cell);
@@ -234,11 +234,11 @@ In Python, ``grid`` is ``list[list[SymmetricTensor | None]]`` (``None`` = zero c
           return tensor_grid_cell(
             tensor.cast<TensorCPtr>(), as_summand_ref(row), as_summand_ref(col), row_ref, col_ref);
       },
-      py::arg("tensor"),
-      py::arg("row"),
-      py::arg("col"),
-      py::arg("row_leg") = py::none(),
-      py::arg("col_leg") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("row"),
+      nb::arg("col"),
+      nb::arg("row_leg").none() = nb::none(),
+      nb::arg("col_leg").none() = nb::none(),
       doc_plus(DOC(lasyten, tensor_grid_cell),
                R"pydoc(
 In Python, ``row`` / ``col`` accept ``int | str`` (a summand label, resolved via
@@ -278,11 +278,11 @@ In Python, ``row`` / ``col`` accept ``int | str`` (a summand label, resolved via
                                 as_leg_ref(row_leg, 0),
                                 as_leg_ref(col_leg, -1));
       },
-      py::arg("tensor"),
-      py::arg("rows"),
-      py::arg("cols"),
-      py::arg("row_leg") = py::none(),
-      py::arg("col_leg") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("rows"),
+      nb::arg("cols"),
+      nb::arg("row_leg").none() = nb::none(),
+      nb::arg("col_leg").none() = nb::none(),
       doc_plus(DOC(lasyten, tensor_subgrid),
                R"pydoc(
 In Python, ``rows`` / ``cols`` are sequences of ``int | str`` (summand labels).
@@ -316,10 +316,10 @@ In Python, ``rows`` / ``cols`` are sequences of ``int | str`` (summand labels).
           return grid_project(
             tensor.cast<TensorCPtr>(), std::move(leg_refs), std::move(cell_refs), squeeze);
       },
-      py::arg("tensor"),
-      py::arg("legs"),
-      py::arg("cells"),
-      py::arg("squeeze") = false,
+      nb::arg("tensor"),
+      nb::arg("legs"),
+      nb::arg("cells"),
+      nb::arg("squeeze") = false,
       doc_plus(DOC(lasyten, grid_project),
                R"pydoc(
 In Python, ``legs`` and ``cells`` are parallel sequences of ``str | int`` values.

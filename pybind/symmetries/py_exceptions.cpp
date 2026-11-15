@@ -1,21 +1,20 @@
 #include "../doc_plus.h"
 #include "docstrings/symmetries/exceptions.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 #include <lasyten/symmetries/exceptions.h>
 
 namespace lasyten {
 
 void
-bind_symmetries_exceptions(py::module_& m)
+bind_symmetries_exceptions(nb::module_& m)
 {
-    // Docstrings attached after registration (register_exception has no docstring arg in pybind11
-    // 3).
-    auto& symmetry_error =
-      py::register_exception<SymmetryError>(m, "SymmetryError", PyExc_Exception);
+    // nb::exception registers the C++ -> Python translator itself; docstrings are attached after
+    // registration.
+    static nb::exception<SymmetryError> symmetry_error(m, "SymmetryError", PyExc_Exception);
     symmetry_error.doc() = DOC(lasyten, SymmetryError);
 
-    auto& braid_err = py::register_exception<BraidChiralityUnspecifiedError>(
+    static nb::exception<BraidChiralityUnspecifiedError> braid_err(
       m, "BraidChiralityUnspecifiedError", symmetry_error);
     braid_err.doc() = DOC(lasyten, BraidChiralityUnspecifiedError);
 }

@@ -11,7 +11,7 @@
 #include <lasyten/tensors/symmetric_tensor.h>
 #include <lasyten/tensors/tensor.h>
 
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include <optional>
 #include <stdexcept>
@@ -28,7 +28,7 @@ py_as_space_leg(py::object leg)
         return nullptr;
     }
     // Plain LegPipe is not a Space; reject before casting.
-    if (py::isinstance<LegPipe>(leg)) {
+    if (lasyten::py_isinstance<LegPipe>(leg)) {
         throw std::invalid_argument("DiagonalTensor / Mask is not defined on LegPipes.");
     }
     auto space = leg.cast<Space::Ptr>();
@@ -101,7 +101,7 @@ py_as_block(py::object obj,
 inline std::variant<ElementarySpace::Ptr, Sector>
 py_as_charge(py::object charge)
 {
-    if (py::isinstance<ElementarySpace>(charge)) {
+    if (lasyten::py_isinstance<ElementarySpace>(charge)) {
         return charge.cast<ElementarySpace::Ptr>();
     }
     return charge.cast<Sector>();

@@ -168,10 +168,12 @@ try_update_from_file(LasytenConfig& config, const std::string& path)
         return;
     try {
         config.update_from_file(path);
+#if LASYTEN_HAS_PYTHON
     } catch (py::error_already_set& e) {
         std::string msg = e.what();
         e.discard_as_unraisable(__func__);
         warn(std::format("Invalid config in {}. Ignoring the file. Reason: {}", path, msg));
+#endif
     } catch (const std::exception& e) {
         warn(std::format("Invalid config in {}. Ignoring the file. Reason: {}", path, e.what()));
     }
@@ -428,9 +430,8 @@ LasytenConfig::set_option(const std::string& key, const std::string& value)
             throw py::value_error("Invalid default_tensor_backend: " + value);
         default_tensor_backend = value;
     } else if (key == "default_block_backend") {
-        static const std::vector<std::string> allowed = {
-            "numpy", "torch", "cpu", "gpu", "apple_silicon"
-        };
+        static const std::vector<std::string> allowed = { "numpy", "eigen", "torch",
+                                                          "cpu",   "gpu",   "apple_silicon" };
         if (!is_allowed(value, allowed))
             throw py::value_error("Invalid default_block_backend: " + value);
         default_block_backend = value;
@@ -448,6 +449,7 @@ LasytenConfig::set_option(const std::string& key, const std::string& value)
     }
 }
 
+#if LASYTEN_HAS_PYTHON
 void
 LasytenConfig::update(py::dict options)
 {
@@ -468,6 +470,7 @@ LasytenConfig::update(py::dict options)
         }
     }
 }
+#endif // LASYTEN_HAS_PYTHON
 
 void
 LasytenConfig::update(const LasytenConfig& other)
@@ -484,11 +487,13 @@ LasytenConfig::update_from_env()
             continue;
         try {
             set_option(key, std::string(val));
+#if LASYTEN_HAS_PYTHON
         } catch (py::error_already_set& e) {
             std::string msg = e.what();
             e.discard_as_unraisable(__func__);
             warn(std::format(
               "Invalid config option in envvar {}. Reason {}", env_var_name(key), msg));
+#endif
         } catch (const std::exception& e) {
             warn(std::format(
               "Invalid config option in envvar {}. Reason {}", env_var_name(key), e.what()));
@@ -496,11 +501,13 @@ LasytenConfig::update_from_env()
     }
 }
 
+#if LASYTEN_HAS_PYTHON
 void
 LasytenConfig::update_from_mapping(py::dict options)
 {
     update(std::move(options));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 namespace {
 
@@ -575,51 +582,59 @@ LasytenConfig::update_from_file(const std::string& filename)
     apply_flat_yaml_text(*this, ss.str());
 }
 
+LasytenConfig::OptionValue
+LasytenConfig::get_option_value(const std::string& key) const
+{
+    if (key == "print_linewidth")
+        return print_linewidth;
+    if (key == "print_indent")
+        return print_indent;
+    if (key == "maxlines_spaces")
+        return maxlines_spaces;
+    if (key == "maxlines_tensors")
+        return maxlines_tensors;
+    if (key == "check_fusion")
+        return check_fusion;
+    if (key == "implicit_scalar_conversion")
+        return implicit_scalar_conversion;
+    if (key == "default_tensor_backend")
+        return default_tensor_backend;
+    if (key == "default_block_backend")
+        return default_block_backend;
+    if (key == "fusion_tree_eps")
+        return fusion_tree_eps;
+    if (key == "su_n_data_path")
+        return su_n_data_path;
+    if (key == "su_n_data_filename_base")
+        return su_n_data_filename_base;
+    if (key == "su_n_symbol_cache_mb")
+        return su_n_symbol_cache_mb;
+    if (key == "tree_plan_cache_mb")
+        return tree_plan_cache_mb;
+    if (key == "tree_size_memo_mb")
+        return tree_size_memo_mb;
+    if (key == "su_n_packed_ram_mb")
+        return su_n_packed_ram_mb;
+    if (key == "su_n_hweights")
+        return su_n_hweights;
+    if (key == "su2_cg_hweight")
+        return su2_cg_hweight;
+    if (key == "su2_f_hweight")
+        return su2_f_hweight;
+    if (key == "su2_r_hweight")
+        return su2_r_hweight;
+    if (key == "coupling_cutoff")
+        return coupling_cutoff;
+    throw py::key_error("Invalid option name: " + key);
+}
+
+#if LASYTEN_HAS_PYTHON
 py::object
 LasytenConfig::get_option(const std::string& key) const
 {
-    if (key == "print_linewidth")
-        return py::cast(print_linewidth);
-    if (key == "print_indent")
-        return py::cast(print_indent);
-    if (key == "maxlines_spaces")
-        return py::cast(maxlines_spaces);
-    if (key == "maxlines_tensors")
-        return py::cast(maxlines_tensors);
-    if (key == "check_fusion")
-        return py::cast(check_fusion);
-    if (key == "implicit_scalar_conversion")
-        return py::cast(implicit_scalar_conversion);
-    if (key == "default_tensor_backend")
-        return py::cast(default_tensor_backend);
-    if (key == "default_block_backend")
-        return py::cast(default_block_backend);
-    if (key == "fusion_tree_eps")
-        return py::cast(fusion_tree_eps);
-    if (key == "su_n_data_path")
-        return py::cast(su_n_data_path);
-    if (key == "su_n_data_filename_base")
-        return py::cast(su_n_data_filename_base);
-    if (key == "su_n_symbol_cache_mb")
-        return py::cast(su_n_symbol_cache_mb);
-    if (key == "tree_plan_cache_mb")
-        return py::cast(tree_plan_cache_mb);
-    if (key == "tree_size_memo_mb")
-        return py::cast(tree_size_memo_mb);
-    if (key == "su_n_packed_ram_mb")
-        return py::cast(su_n_packed_ram_mb);
-    if (key == "su_n_hweights")
-        return py::cast(su_n_hweights);
-    if (key == "su2_cg_hweight")
-        return py::cast(su2_cg_hweight);
-    if (key == "su2_f_hweight")
-        return py::cast(su2_f_hweight);
-    if (key == "su2_r_hweight")
-        return py::cast(su2_r_hweight);
-    if (key == "coupling_cutoff")
-        return py::cast(coupling_cutoff);
-    throw py::key_error("Invalid option name: " + key);
+    return std::visit([](auto const& v) { return py::cast(v); }, get_option_value(key));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::string
 LasytenConfig::str() const
@@ -632,11 +647,24 @@ LasytenConfig::str() const
             ss << ", ";
         first = false;
         ss << key << "=";
+#if LASYTEN_HAS_PYTHON
         py::object val = get_option(key);
         if (py::isinstance<py::str>(val))
             ss << "'" << std::string(py::cast<std::string>(val)) << "'";
         else
             ss << std::string(py::str(val));
+#else
+        std::visit(
+          [&ss](auto const& v) {
+              if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::string>)
+                  ss << "'" << v << "'";
+              else if constexpr (std::is_same_v<std::decay_t<decltype(v)>, bool>)
+                  ss << (v ? "True" : "False");
+              else
+                  ss << v;
+          },
+          get_option_value(key));
+#endif
     }
     ss << ")";
     return ss.str();
@@ -750,6 +778,7 @@ set_option(const std::string& key, float64 value)
     _global_config.set_option(key, value);
 }
 
+#if LASYTEN_HAS_PYTHON
 void
 set_option(const std::string& key, py::handle value)
 {
@@ -771,6 +800,7 @@ get_option(const std::string& key)
 {
     return get_config().get_option(key);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 void
 restore_defaults(bool use_user_file, bool use_local_file, bool use_env_vars)

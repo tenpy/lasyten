@@ -12,6 +12,7 @@ class NotImplemented : public std::logic_error
     NotImplemented(std::string name);
 };
 
+#if LASYTEN_HAS_PYTHON
 /// Format elements of an iterable as if it were a plain list.
 ///
 /// This means surrounding them with brackets and separating them by `', '`.
@@ -22,6 +23,7 @@ bool is_iterable(py::object a);
 
 /// If `a` is not iterable or a string, return [a], else return a.
 py::object to_iterable(py::object a);
+#endif // LASYTEN_HAS_PYTHON
 
 /// Convert to a valid index into the given length, with python convention of negative indices from
 /// back

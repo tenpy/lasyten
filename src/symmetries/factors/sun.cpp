@@ -1,6 +1,6 @@
 #include <lasyten/symmetries/factors/sun.h>
 
-#include <lasyten/block_backend/numpy.h>
+#include <lasyten/block_backend/block_backend.h>
 #include <lasyten/config.h>
 #include <lasyten/symmetries/exceptions.h>
 #include <lasyten/symmetries/fusion_symbol.h>
@@ -39,6 +39,18 @@
 namespace lasyten {
 
 namespace {
+
+/// Missing SU(N) data: ``FileNotFoundError`` on the Python side (historical API).
+[[noreturn]] void
+throw_file_not_found(std::string const& msg)
+{
+#if LASYTEN_HAS_PYTHON
+    PyErr_SetString(PyExc_FileNotFoundError, msg.c_str());
+    throw py::error_already_set();
+#else
+    throw std::runtime_error("FileNotFoundError: " + msg);
+#endif
+}
 
 std::string
 sector_slash_path(Sector const& a)
@@ -342,8 +354,7 @@ open_su_n_data_file(std::string const& full_path, char const* kind, int N, int64
           hweight,
           full_path);
         // Match the historical Python API: missing SU(N) data is FileNotFoundError.
-        PyErr_SetString(PyExc_FileNotFoundError, msg.c_str());
-        throw py::error_already_set();
+        throw_file_not_found(msg);
     }
     auto file = std::make_shared<HighFive::File>(full_path, HighFive::File::ReadOnly);
     auto stored = file_attr_int64(*file, "Highest_Weight");
@@ -1188,7 +1199,7 @@ SUN::_f_symbol_from_CG(Sector a, Sector b, Sector c, Sector d, Sector e, Sector 
         throw_hweight_too_low(
           "CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0], d.q[0], e.q[0], f.q[0] }), hw);
     }
-    auto& be = *static_cast<BlockBackend*>(NumpyBlockBackend::from_factory("cpu"));
+    auto& be = *default_cpu_block_backend();
     auto X1 =
       block_from_fusion_symbol(be,
                                _fusion_tensor(a, b, f, false, false)
@@ -1290,7 +1301,7 @@ SUN::_r_symbol_from_CG(Sector a, Sector b, Sector c) const
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
         throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
-    BlockBackend& be = *NumpyBlockBackend::from_factory("cpu");
+    BlockBackend& be = *default_cpu_block_backend();
     auto X1 = block_from_fusion_symbol(be, fusion_tensor(a, b, c));
     auto Y1 = be.conj(block_from_fusion_symbol(be, fusion_tensor(b, a, c)));
     if (!be.any(X1) || !be.any(Y1)) {
@@ -1606,8 +1617,7 @@ SUN::from_config(int N,
                               filename_base.value_or(get_config().su_n_data_filename_base),
                               N,
                               kinds[i]);
-                PyErr_SetString(PyExc_FileNotFoundError, msg.c_str());
-                throw py::error_already_set();
+                throw_file_not_found(msg);
             }
         }
         h_cg = *detected[0];

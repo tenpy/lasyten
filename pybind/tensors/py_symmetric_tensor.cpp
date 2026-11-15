@@ -6,11 +6,9 @@
 #include "py_trampolines.hpp"
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/symmetric_tensor.h"
-
-#include <pybind11/stl.h>
 
 #include "tools/hdf5_bind.h"
 #include <map>
@@ -45,26 +43,24 @@ optional_leg_order(py::object obj)
 
 namespace {
 
-std::optional<py::class_<SymmetricTensor, Tensor, PySymmetricTensor, py::smart_holder>>
-  g_symmetric_tensor;
+std::optional<nb::class_<SymmetricTensor, Tensor>> g_symmetric_tensor;
 
 } // namespace
 
 void
-declare_tensors_symmetric_tensor(py::module_& m)
+declare_tensors_symmetric_tensor(nb::module_& m)
 {
-    g_symmetric_tensor = py::class_<SymmetricTensor, Tensor, PySymmetricTensor, py::smart_holder>(
-      m, "SymmetricTensor");
+    g_symmetric_tensor = nb::class_<SymmetricTensor, Tensor>(m, "SymmetricTensor");
     (*g_symmetric_tensor).doc() = DOC(lasyten, SymmetricTensor);
 }
 
 void
-bind_tensors_symmetric_tensor(py::module_& m)
+bind_tensors_symmetric_tensor(nb::module_& m)
 {
     auto& cls = *g_symmetric_tensor;
 
     cls.def(
-      py::init([](TensorBackend::DataPtr data,
+      nb::new_([](TensorBackend::DataPtr data,
                   py::object codomain,
                   py::object domain,
                   TensorBackend::Ptr backend,
@@ -73,13 +69,13 @@ bind_tensors_symmetric_tensor(py::module_& m)
           return std::make_shared<SymmetricTensor>(
             std::move(data), init.codomain, init.domain, init.backend, init.symmetry, init.labels);
       }),
-      py::arg("data"),
-      py::arg("codomain"),
-      py::arg("domain") = py::none(),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none());
+      nb::arg("data"),
+      nb::arg("codomain"),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none());
 
-    cls.def_property(
+    cls.def_prop_rw(
       "data",
       [](SymmetricTensor& self) -> py::object {
           // Match Python NoSymmetryBackend: expose the raw Block, not BlockData wrapper.
@@ -118,15 +114,15 @@ bind_tensors_symmetric_tensor(py::module_& m)
           return SymmetricTensor::from_block_func(
             std::move(wrapped), init.codomain, init.domain, init.backend, init.labels, dt, device);
       },
-      py::arg("func"),
-      py::arg("codomain"),
-      py::arg("domain") = py::none(),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("func_kwargs") = py::none(),
-      py::arg("shape_kw") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::arg("device") = py::none(),
+      nb::arg("func"),
+      nb::arg("codomain"),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("func_kwargs").none() = nb::none(),
+      nb::arg("shape_kw").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, SymmetricTensor, from_block_func));
 
     cls.def_static(
@@ -152,15 +148,15 @@ bind_tensors_symmetric_tensor(py::module_& m)
                                                    tol,
                                                    understood_braiding);
       },
-      py::arg("block"),
-      py::arg("codomain"),
-      py::arg("domain") = py::none(),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::arg("device") = py::none(),
-      py::arg("tol") = 1e-6,
-      py::arg("understood_braiding") = false,
+      nb::arg("block"),
+      nb::arg("codomain"),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
+      nb::arg("tol") = 1e-6,
+      nb::arg("understood_braiding") = false,
       DOC(lasyten, SymmetricTensor, from_dense_block));
 
     cls.def_static(
@@ -177,11 +173,11 @@ bind_tensors_symmetric_tensor(py::module_& m)
           return SymmetricTensor::from_dense_block_trivial_sector(
             vec, std::move(space), std::move(backend), device, std::move(label));
       },
-      py::arg("vector"),
-      py::arg("space"),
-      py::arg("backend") = nullptr,
-      py::arg("device") = py::none(),
-      py::arg("label") = "",
+      nb::arg("vector"),
+      nb::arg("space"),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("device").none() = nb::none(),
+      nb::arg("label") = "",
       DOC(lasyten, SymmetricTensor, from_dense_block_trivial_sector));
 
     cls.def_static(
@@ -199,11 +195,11 @@ bind_tensors_symmetric_tensor(py::module_& m)
           return SymmetricTensor::from_eye(
             init.codomain, init.backend, init.labels, dtype, device);
       },
-      py::arg("co_domain"),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = Dtype::Complex128,
-      py::arg("device") = py::none(),
+      nb::arg("co_domain"),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype") = Dtype::Complex128,
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, SymmetricTensor, from_eye));
 
     cls.def_static(
@@ -238,14 +234,14 @@ bind_tensors_symmetric_tensor(py::module_& m)
                                                      dtype,
                                                      device);
       },
-      py::arg("codomain"),
-      py::arg("domain") = py::none(),
-      py::arg("mean") = py::none(),
-      py::arg("sigma") = 1.0,
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = Dtype::Complex128,
-      py::arg("device") = py::none(),
+      nb::arg("codomain"),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("mean").none() = nb::none(),
+      nb::arg("sigma") = 1.0,
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype") = Dtype::Complex128,
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, SymmetricTensor, from_random_normal));
 
     cls.def_static(
@@ -260,12 +256,12 @@ bind_tensors_symmetric_tensor(py::module_& m)
           return SymmetricTensor::from_random_uniform(
             init.codomain, init.domain, init.backend, init.labels, dtype, device);
       },
-      py::arg("codomain"),
-      py::arg("domain") = py::none(),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = Dtype::Complex128,
-      py::arg("device") = py::none(),
+      nb::arg("codomain"),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype") = Dtype::Complex128,
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, SymmetricTensor, from_random_uniform));
 
     cls.def_static(
@@ -285,14 +281,14 @@ bind_tensors_symmetric_tensor(py::module_& m)
           return SymmetricTensor::from_sector_block_func(
             std::move(wrapped), init.codomain, init.domain, init.backend, init.labels, dt, device);
       },
-      py::arg("func"),
-      py::arg("codomain"),
-      py::arg("domain") = py::none(),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("func_kwargs") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::arg("device") = py::none(),
+      nb::arg("func"),
+      nb::arg("codomain"),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("func_kwargs").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, SymmetricTensor, from_sector_block_func));
 
     cls.def_static(
@@ -311,12 +307,12 @@ bind_tensors_symmetric_tensor(py::module_& m)
           return SymmetricTensor::from_sector_projection(
             init.codomain, sector, init.backend, init.labels, dtype, device);
       },
-      py::arg("co_domain"),
-      py::arg("sector"),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::arg("device") = py::none(),
+      nb::arg("co_domain"),
+      nb::arg("sector"),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, SymmetricTensor, from_sector_projection));
 
     cls.def_static(
@@ -332,13 +328,13 @@ bind_tensors_symmetric_tensor(py::module_& m)
           return SymmetricTensor::from_tree_pairs(
             trees, init.codomain, init.domain, init.backend, init.labels, dtype, device);
       },
-      py::arg("trees"),
-      py::arg("codomain"),
-      py::arg("domain") = py::none(),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::arg("device") = py::none(),
+      nb::arg("trees"),
+      nb::arg("codomain"),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, SymmetricTensor, from_tree_pairs));
 
     cls.def_static(
@@ -353,51 +349,51 @@ bind_tensors_symmetric_tensor(py::module_& m)
           return SymmetricTensor::from_zero(
             init.codomain, init.domain, init.backend, init.labels, dtype, device);
       },
-      py::arg("codomain"),
-      py::arg("domain") = py::none(),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = Dtype::Complex128,
-      py::arg("device") = py::none(),
+      nb::arg("codomain"),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype") = Dtype::Complex128,
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, SymmetricTensor, from_zero));
 
     cls.def_static("_parse_default_dtype",
                    &SymmetricTensor::_parse_default_dtype,
-                   py::arg("dtype"),
-                   py::arg("symmetry"));
+                   nb::arg("dtype"),
+                   nb::arg("symmetry"));
 
     cls.def("as_dtype",
             &SymmetricTensor::as_dtype,
-            py::arg("dtype"),
+            nb::arg("dtype"),
             DOC(lasyten, SymmetricTensor, as_dtype));
     cls.def("as_SymmetricTensor",
             &SymmetricTensor::as_SymmetricTensor,
-            py::arg("guarantee_copy") = false,
-            py::arg("warning") = py::none(),
+            nb::arg("guarantee_copy") = false,
+            nb::arg("warning").none() = nb::none(),
             DOC(lasyten, SymmetricTensor, as_SymmetricTensor));
     cls.def("copy",
             &SymmetricTensor::copy,
-            py::arg("deep") = true,
-            py::arg("device") = py::none(),
-            py::arg("dtype") = py::none(),
+            nb::arg("deep") = true,
+            nb::arg("device").none() = nb::none(),
+            nb::arg("dtype").none() = nb::none(),
             DOC(lasyten, SymmetricTensor, copy));
     cls.def("diagonal",
             &SymmetricTensor::diagonal,
-            py::arg("check_offdiagonal") = false,
+            nb::arg("check_offdiagonal") = false,
             DOC(lasyten, SymmetricTensor, diagonal));
     cls.def("_get_item",
             &SymmetricTensor::_get_item,
-            py::arg("idx"),
+            nb::arg("idx"),
             DOC(lasyten, SymmetricTensor, _get_item));
     cls.def("move_to_device",
             &SymmetricTensor::move_to_device,
-            py::arg("device"),
+            nb::arg("device"),
             DOC(lasyten, SymmetricTensor, move_to_device));
     cls.def("to_backend",
             &SymmetricTensor::to_backend,
-            py::arg("backend"),
-            py::arg("dtype") = py::none(),
-            py::arg("device") = py::none(),
+            nb::arg("backend"),
+            nb::arg("dtype").none() = nb::none(),
+            nb::arg("device").none() = nb::none(),
             DOC(lasyten, SymmetricTensor, to_backend));
     cls.def(
       "to_dense_block",
@@ -407,24 +403,24 @@ bind_tensors_symmetric_tensor(py::module_& m)
          bool understood_braiding) {
           return self.to_dense_block(optional_leg_order(leg_order), dtype, understood_braiding);
       },
-      py::arg("leg_order") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::arg("understood_braiding") = false,
+      nb::arg("leg_order").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("understood_braiding") = false,
       DOC(lasyten, SymmetricTensor, to_dense_block));
     cls.def("to_dense_block_trivial_sector",
             &SymmetricTensor::to_dense_block_trivial_sector,
             DOC(lasyten, SymmetricTensor, to_dense_block_trivial_sector));
     cls.def("save_hdf5",
             lasyten::hdf5::wrap_save_hdf5_const<SymmetricTensor>(),
-            py::arg("hdf5_saver"),
-            py::arg("h5gr"),
-            py::arg("subpath"),
+            nb::arg("hdf5_saver"),
+            nb::arg("h5gr"),
+            nb::arg("subpath"),
             DOC(lasyten, SymmetricTensor, save_hdf5));
     cls.def_static("from_hdf5",
                    lasyten::hdf5::wrap_from_hdf5<SymmetricTensor>(),
-                   py::arg("hdf5_loader"),
-                   py::arg("h5gr"),
-                   py::arg("subpath"),
+                   nb::arg("hdf5_loader"),
+                   nb::arg("h5gr"),
+                   nb::arg("subpath"),
                    DOC(lasyten, SymmetricTensor, from_hdf5));
 }
 

@@ -1,7 +1,7 @@
 #include <lasyten/tools/mappings.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 #include "docstrings/tools/mappings.h"
 
 #include <complex>
@@ -14,24 +14,24 @@ namespace {
 
 template<typename Mapping>
 void
-bind_sparse_mapping(py::module_& m, char const* name, char const* doc)
+bind_sparse_mapping(nb::module_& m, char const* name, char const* doc)
 {
     using KT = typename Mapping::Key;
     using Inner = typename Mapping::Inner;
 
-    py::class_<Mapping> cls(m, name);
+    nb::class_<Mapping> cls(m, name);
     cls.doc() = doc;
 
-    cls.def(py::init<>())
-      .def(py::init<typename Mapping::Outer>(), py::arg("data"))
-      .def_readwrite("data", &Mapping::data)
+    cls.def(lasyten::ctor<decltype(cls)>())
+      .def(lasyten::ctor<decltype(cls), typename Mapping::Outer>(), nb::arg("data"))
+      .def_rw("data", &Mapping::data)
       .def_static("from_identity",
                   &Mapping::from_identity,
-                  py::arg("keys"),
+                  nb::arg("keys"),
                   doc_cpp_ref(R"pydoc(from_identity)pydoc", "lasyten::Mapping::from_identity()"))
       .def("pre_compose",
            &Mapping::pre_compose,
-           py::arg("other"),
+           nb::arg("other"),
            doc_cpp_ref(R"pydoc(pre_compose)pydoc", "lasyten::Mapping::pre_compose()"))
       .def("nonzero_rows",
            &Mapping::nonzero_rows,
@@ -41,13 +41,13 @@ bind_sparse_mapping(py::module_& m, char const* name, char const* doc)
            doc_cpp_ref(R"pydoc(nonzero_cols)pydoc", "lasyten::Mapping::nonzero_cols()"))
       .def("prune",
            &Mapping::prune,
-           py::arg("tol"),
+           nb::arg("tol"),
            doc_cpp_ref(R"pydoc(prune)pydoc", "lasyten::Mapping::prune()"))
       .def("__len__", &Mapping::size)
       .def(
         "__contains__",
         [](Mapping const& self, KT const& j) { return self.contains(j); },
-        py::arg("j"))
+        nb::arg("j"))
       .def(
         "__getitem__",
         [](Mapping const& self, KT const& j) {
@@ -57,12 +57,12 @@ bind_sparse_mapping(py::module_& m, char const* name, char const* doc)
             }
             return it->second; // copy to Python dict
         },
-        py::arg("j"))
+        nb::arg("j"))
       .def(
         "__setitem__",
         [](Mapping& self, KT const& j, Inner const& inner) { self.data[j] = inner; },
-        py::arg("j"),
-        py::arg("value"))
+        nb::arg("j"),
+        nb::arg("value"))
       .def("items",
            [](Mapping const& self) {
                py::list out;
@@ -92,32 +92,32 @@ bind_sparse_mapping(py::module_& m, char const* name, char const* doc)
 
 template<typename IdMapping>
 void
-bind_identity_mapping(py::module_& m, char const* name)
+bind_identity_mapping(nb::module_& m, char const* name)
 {
     using KT = typename IdMapping::Key;
 
-    py::class_<IdMapping> cls(m, name);
+    nb::class_<IdMapping> cls(m, name);
     cls.doc() = doc_cpp_ref(R"pydoc(IdMapping)pydoc", "lasyten::IdMapping");
 
-    cls.def(py::init<>())
-      .def(py::init<std::vector<KT> const&>(), py::arg("keys"))
-      .def_readwrite("keys", &IdMapping::keys)
+    cls.def(lasyten::ctor<decltype(cls)>())
+      .def(lasyten::ctor<decltype(cls), std::vector<KT> const&>(), nb::arg("keys"))
+      .def_rw("keys", &IdMapping::keys)
       .def("pre_compose",
            &IdMapping::pre_compose,
-           py::arg("other"),
+           nb::arg("other"),
            doc_cpp_ref(R"pydoc(pre_compose)pydoc", "lasyten::IdMapping::pre_compose()"))
       .def("nonzero_rows", &IdMapping::nonzero_rows)
       .def("nonzero_cols", &IdMapping::nonzero_cols)
       .def("prune",
            &IdMapping::prune,
-           py::arg("tol"),
+           nb::arg("tol"),
            doc_cpp_ref(R"pydoc(prune)pydoc", "lasyten::IdMapping::prune()"));
 }
 
 } // namespace
 
 void
-bind_mappings(py::module_& m)
+bind_mappings(nb::module_& m)
 {
     bind_sparse_mapping<SparseMappingFusionTree>(
       m,

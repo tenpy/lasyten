@@ -8,7 +8,7 @@
 #include <lasyten/tools/cost_polynomials.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/planar.h"
 
@@ -25,22 +25,15 @@ namespace lasyten {
 
 namespace {
 
-class PyPlanarLinearOperator
-  : public PlanarLinearOperator
-  , public py::trampoline_self_life_support
+/// nanobind trampoline so Python subclasses can override ``matvec`` / ``to_tensor``.
+class PyPlanarLinearOperator : public PlanarLinearOperator
 {
   public:
-    using PlanarLinearOperator::PlanarLinearOperator;
+    NB_TRAMPOLINE(PlanarLinearOperator, 2);
 
-    VectorLike::Ptr matvec(VectorLike::CPtr vec) override
-    {
-        PYBIND11_OVERRIDE(VectorLike::Ptr, PlanarLinearOperator, matvec, vec);
-    }
+    VectorLike::Ptr matvec(VectorLike::CPtr vec) override { NB_OVERRIDE(matvec, vec); }
 
-    TensorPtr to_tensor(TensorBackend::Ptr backend) override
-    {
-        PYBIND11_OVERRIDE(TensorPtr, PlanarLinearOperator, to_tensor, backend);
-    }
+    TensorPtr to_tensor(TensorBackend::Ptr backend) override { NB_OVERRIDE(to_tensor, backend); }
 };
 
 LegRef
@@ -153,7 +146,7 @@ as_polynomial(py::object obj)
     if (obj.is_none()) {
         return BigOPolynomial::from_str("None");
     }
-    if (py::isinstance<BigOPolynomial>(obj)) {
+    if (lasyten::py_isinstance<BigOPolynomial>(obj)) {
         return obj.cast<BigOPolynomial>();
     }
     return BigOPolynomial::from_str(std::string(py::str(obj)));
@@ -267,7 +260,7 @@ parse_order_py(PlanarDiagram const& self, py::object order)
     if (py::isinstance<py::str>(order)) {
         return self.parse_order(order.cast<std::string>());
     }
-    if (py::isinstance<ContractionTree>(order)) {
+    if (lasyten::py_isinstance<ContractionTree>(order)) {
         return self.parse_order(order.cast<ContractionTree>());
     }
     if (self.tensors.size() == 1) {
@@ -293,7 +286,7 @@ make_planar_diagram(py::object tensors,
           py::isinstance<py::str>(order) ? order.cast<std::string>() : std::string("definition");
         return PlanarDiagram(std::move(tens), std::move(names), std::move(defn), order_str, allow);
     }
-    if (py::isinstance<ContractionTree>(order)) {
+    if (lasyten::py_isinstance<ContractionTree>(order)) {
         return PlanarDiagram(std::move(tens),
                              std::move(names),
                              std::move(defn),
@@ -363,7 +356,7 @@ evaluate_diagram(PlanarDiagram const& self, py::object tensors_obj)
         first = py::reinterpret_borrow<py::object>(item.second);
         break;
     }
-    if (py::isinstance<TensorPlaceholder>(first)) {
+    if (lasyten::py_isinstance<TensorPlaceholder>(first)) {
         std::map<std::string, TensorPlaceholder> map;
         for (auto item : tensors) {
             map.emplace(item.first.cast<std::string>(), item.second.cast<TensorPlaceholder>());
@@ -426,13 +419,13 @@ labels_as_strings(py::object labels)
 } // namespace
 
 void
-bind_tensors_planar(py::module_& m)
+bind_tensors_planar(nb::module_& m)
 {
-    py::class_<TensorPlaceholder, py::smart_holder> tensor_placeholder(m, "TensorPlaceholder");
+    nb::class_<TensorPlaceholder> tensor_placeholder(m, "TensorPlaceholder");
     tensor_placeholder.doc() = DOC(lasyten, TensorPlaceholder);
 
     tensor_placeholder
-      .def(py::init([](py::object labels, py::object dims, py::object cost_to_make) {
+      .def(nb::new_([](py::object labels, py::object dims, py::object cost_to_make) {
                auto labs = labels_as_strings(labels);
                auto d = parse_dims_list(dims, labs.size());
                BigOPolynomial cost;
@@ -441,35 +434,34 @@ bind_tensors_planar(py::module_& m)
                }
                return TensorPlaceholder(std::move(labs), std::move(d), std::move(cost));
            }),
-           py::arg("labels"),
-           py::arg("dims") = py::none(),
-           py::arg("cost_to_make") = py::none())
-      .def_property(
+           nb::arg("labels"),
+           nb::arg("dims").none() = nb::none(),
+           nb::arg("cost_to_make").none() = nb::none())
+      .def_prop_rw(
         "labels",
-        py::cpp_function([](TensorPlaceholder& self) -> LegLabels& { return self.labels; },
-                         py::return_value_policy::reference_internal),
-        py::cpp_function([](TensorPlaceholder& self, py::object value) {
-            if (py::isinstance<LegLabels>(value)) {
+        [](TensorPlaceholder& self) -> LegLabels& { return self.labels; },
+        [](TensorPlaceholder& self, py::object value) {
+            if (lasyten::py_isinstance<LegLabels>(value)) {
                 self.labels.set(value.cast<LegLabels const&>().as_list());
             } else {
                 self.labels.set(value.cast<LegLabelList>());
             }
             self.num_legs = self.labels.num_legs();
-        }))
-      .def_readwrite("num_legs", &TensorPlaceholder::num_legs)
-      .def_readwrite("dims", &TensorPlaceholder::dims)
-      .def_readwrite("cost_to_make", &TensorPlaceholder::cost_to_make)
-      .def("copy", &TensorPlaceholder::copy, py::arg("deep") = true)
+        },
+        nb::rv_policy::reference_internal)
+      .def_rw("num_legs", &TensorPlaceholder::num_legs)
+      .def_rw("dims", &TensorPlaceholder::dims)
+      .def_rw("cost_to_make", &TensorPlaceholder::cost_to_make)
+      .def("copy", &TensorPlaceholder::copy, nb::arg("deep") = true)
       .def("string_labels", &TensorPlaceholder::string_labels)
       .def("__repr__", &TensorPlaceholder::__repr__);
 
-    py::class_<ContractionTreeNode, py::smart_holder> contraction_tree_node(m,
-                                                                            "ContractionTreeNode");
+    nb::class_<ContractionTreeNode> contraction_tree_node(m, "ContractionTreeNode");
     contraction_tree_node.doc() = DOC(lasyten, ContractionTreeNode);
 
     contraction_tree_node
       .def(
-        py::init(
+        nb::new_(
           [](py::object parent, py::object left_child, py::object right_child, py::object value) {
               ContractionTreeNode::Ptr p;
               ContractionTreeNode::Ptr left;
@@ -490,11 +482,11 @@ bind_tensors_planar(py::module_& m)
               return std::make_shared<ContractionTreeNode>(
                 std::move(p), std::move(left), std::move(right), std::move(val));
           }),
-        py::arg("parent"),
-        py::arg("left_child"),
-        py::arg("right_child"),
-        py::arg("value"))
-      .def_property(
+        nb::arg("parent"),
+        nb::arg("left_child"),
+        nb::arg("right_child"),
+        nb::arg("value"))
+      .def_prop_rw(
         "parent",
         [](ContractionTreeNode const& self) -> py::object {
             auto p = self.parent.lock();
@@ -510,14 +502,14 @@ bind_tensors_planar(py::module_& m)
                 self.parent = parent.cast<ContractionTreeNode::Ptr>();
             }
         })
-      .def_readwrite("left_child", &ContractionTreeNode::left_child)
-      .def_readwrite("right_child", &ContractionTreeNode::right_child)
-      .def_readwrite("value", &ContractionTreeNode::value)
-      .def_property_readonly("is_leaf", &ContractionTreeNode::is_leaf)
+      .def_rw("left_child", &ContractionTreeNode::left_child)
+      .def_rw("right_child", &ContractionTreeNode::right_child)
+      .def_rw("value", &ContractionTreeNode::value)
+      .def_prop_ro("is_leaf", &ContractionTreeNode::is_leaf)
       .def("test_sanity", &ContractionTreeNode::test_sanity, "Perform sanity checks.")
       .def("copy",
            &ContractionTreeNode::copy,
-           py::arg("parent") = nullptr,
+           nb::arg("parent").none() = nullptr,
            "Implement :meth:`ContractionTree.copy` recursively.")
       .def("get_leaves", &ContractionTreeNode::get_leaves, "Returns ``leaves, num_nodes_below``.")
       .def("remove_children",
@@ -530,15 +522,16 @@ bind_tensors_planar(py::module_& m)
            &ContractionTreeNode::show_whole_tree,
            "Return a graphic representation of the full contraction tree.");
 
-    py::class_<ContractionTree, py::smart_holder> contraction_tree(m, "ContractionTree");
+    nb::class_<ContractionTree> contraction_tree(m, "ContractionTree");
     contraction_tree.doc() = DOC(lasyten, ContractionTree);
 
-    contraction_tree.def(py::init<ContractionTreeNode::Ptr>(), py::arg("root"))
-      .def_readwrite("root", &ContractionTree::root)
-      .def_property_readonly("leaves", &ContractionTree::leaves)
-      .def_property_readonly("num_leaves", &ContractionTree::num_leaves)
-      .def_property_readonly("num_nodes", &ContractionTree::num_nodes)
-      .def_property_readonly("num_inner_nodes", &ContractionTree::num_inner_nodes)
+    contraction_tree
+      .def(lasyten::ctor<decltype(contraction_tree), ContractionTreeNode::Ptr>(), nb::arg("root"))
+      .def_rw("root", &ContractionTree::root)
+      .def_prop_ro("leaves", &ContractionTree::leaves)
+      .def_prop_ro("num_leaves", &ContractionTree::num_leaves)
+      .def_prop_ro("num_nodes", &ContractionTree::num_nodes)
+      .def_prop_ro("num_inner_nodes", &ContractionTree::num_inner_nodes)
       .def("test_sanity", &ContractionTree::test_sanity, "Perform sanity checks.")
       .def("copy", &ContractionTree::copy)
       .def(
@@ -550,29 +543,29 @@ bind_tensors_planar(py::module_& m)
             }
             return self.fuse(other, std::move(v));
         },
-        py::arg("other"),
-        py::arg("value") = py::none(),
+        nb::arg("other"),
+        nb::arg("value").none() = nb::none(),
         DOC(lasyten, ContractionTree, fuse))
       .def("pop_contraction",
            &ContractionTree::pop_contraction,
            DOC(lasyten, ContractionTree, pop_contraction))
       .def("__str__", &ContractionTree::str)
       .def_static(
-        "from_contraction_order", &ContractionTree::from_contraction_order, py::arg("order"))
+        "from_contraction_order", &ContractionTree::from_contraction_order, nb::arg("order"))
       .def_static("from_single_node",
                   &ContractionTree::from_single_node,
-                  py::arg("node"),
+                  nb::arg("node"),
                   "Contraction tree from a single node, i.e., without any child and parent nodes.")
       .def_static(
         "from_nested_containers",
         [](py::object tree) { return from_nested_containers_py(tree); },
-        py::arg("tree"));
+        nb::arg("tree"));
 
-    py::class_<PlanarDiagram, py::smart_holder> planar_diagram(m, "PlanarDiagram");
+    nb::class_<PlanarDiagram> planar_diagram(m, "PlanarDiagram");
     planar_diagram.doc() = DOC(lasyten, PlanarDiagram);
 
     planar_diagram
-      .def(py::init([](py::object tensors,
+      .def(nb::new_([](py::object tensors,
                        py::object definition,
                        py::object dims,
                        py::object order,
@@ -580,12 +573,12 @@ bind_tensors_planar(py::module_& m)
                return make_planar_diagram(
                  tensors, definition, dims, order, allow_multiple_charged_tensors);
            }),
-           py::arg("tensors"),
-           py::arg("definition"),
-           py::arg("dims") = py::none(),
-           py::arg("order") = "definition",
-           py::arg("allow_multiple_charged_tensors") = false)
-      .def_property(
+           nb::arg("tensors"),
+           nb::arg("definition"),
+           nb::arg("dims").none() = nb::none(),
+           nb::arg("order") = "definition",
+           nb::arg("allow_multiple_charged_tensors") = false)
+      .def_prop_rw(
         "tensors",
         [](PlanarDiagram const& self) { return placeholder_map_to_dict(self); },
         [](PlanarDiagram& self, py::object obj) {
@@ -595,16 +588,15 @@ bind_tensors_planar(py::module_& m)
                 self.tensor_names_ = std::move(names);
             }
         })
-      .def_property(
+      .def_prop_rw(
         "definition",
         [](PlanarDiagram const& self) { return definition_to_py(self.definition); },
         [](PlanarDiagram& self, py::object obj) { self.definition = parse_definition_py(obj); })
-      .def_readwrite("order", &PlanarDiagram::order)
-      .def_readwrite("open_legs", &PlanarDiagram::open_legs)
-      .def_readwrite("contraction_cost", &PlanarDiagram::contraction_cost)
-      .def_property_readonly("tensor_names", &PlanarDiagram::tensor_names)
-      .def_readwrite("allow_multiple_charged_tensors",
-                     &PlanarDiagram::allow_multiple_charged_tensors)
+      .def_rw("order", &PlanarDiagram::order)
+      .def_rw("open_legs", &PlanarDiagram::open_legs)
+      .def_rw("contraction_cost", &PlanarDiagram::contraction_cost)
+      .def_prop_ro("tensor_names", &PlanarDiagram::tensor_names)
+      .def_rw("allow_multiple_charged_tensors", &PlanarDiagram::allow_multiple_charged_tensors)
       .def(
         "add_tensor",
         [](PlanarDiagram const& self,
@@ -622,10 +614,10 @@ bind_tensors_planar(py::module_& m)
             auto tmp = self.add_tensor(std::move(extra), std::move(extra_def), "definition");
             return with_order(std::move(tmp), order);
         },
-        py::arg("tensor"),
-        py::arg("extra_definition"),
-        py::arg("extra_dims") = py::none(),
-        py::arg("order") = "definition",
+        nb::arg("tensor"),
+        nb::arg("extra_definition"),
+        nb::arg("extra_dims").none() = nb::none(),
+        nb::arg("order") = "definition",
         DOC(lasyten, PlanarDiagram, add_tensor))
       .def(
         "remove_tensor",
@@ -640,34 +632,35 @@ bind_tensors_planar(py::module_& m)
             auto tmp = self.remove_tensor(name, extra_def, "definition");
             return with_order(std::move(tmp), order);
         },
-        py::arg("name"),
-        py::arg("extra_definition") = py::list(),
-        py::arg("order") = "greedy",
+        nb::arg("name"),
+        nb::arg("extra_definition") = py::list(),
+        nb::arg("order") = "greedy",
         DOC(lasyten, PlanarDiagram, remove_tensor))
       .def(
         "evaluate",
         [](PlanarDiagram const& self, py::dict tensors) {
             return evaluate_diagram(self, tensors);
         },
-        py::arg("tensors"),
+        nb::arg("tensors"),
         DOC(lasyten, PlanarDiagram, evaluate))
       .def("__call__",
-           [](PlanarDiagram const& self, py::kwargs kwargs) {
+           [](PlanarDiagram const& self, nb::kwargs kwargs_nb) {
+               auto kwargs = pykwargs(kwargs_nb);
                return evaluate_diagram(self, kwargs);
            })
       .def("optimize_order",
            &PlanarDiagram::optimize_order,
-           py::arg("strategy"),
+           nb::arg("strategy"),
            DOC(lasyten, PlanarDiagram, optimize_order))
       .def_static(
         "parse_definition",
         [](py::object definition) { return definition_to_py(parse_definition_py(definition)); },
-        py::arg("definition"),
+        nb::arg("definition"),
         "Parse the input format for the ``definition`` arg to :class:`PlanarDiagram`.")
       .def(
         "parse_order",
         [](PlanarDiagram const& self, py::object order) { return parse_order_py(self, order); },
-        py::arg("order"),
+        nb::arg("order"),
         "Parse the input format for the ``order`` arg to :class:`PlanarDiagram`.")
       .def_static(
         "parse_tensors",
@@ -686,38 +679,39 @@ bind_tensors_planar(py::module_& m)
             }
             return out;
         },
-        py::arg("tensors"),
-        py::arg("dims") = py::none(),
+        nb::arg("tensors"),
+        nb::arg("dims").none() = nb::none(),
         "Parse the input format for the ``tensors`` arg to :class:`PlanarDiagram`.")
       .def("verify_diagram",
            &PlanarDiagram::verify_diagram,
            DOC(lasyten, PlanarDiagram, verify_diagram));
 
-    // `py::dynamic_attr` plus no data descriptors for `op_diagram` / `matvec_diagram`: subclasses
+    // `nb::dynamic_attr` plus no data descriptors for `op_diagram` / `matvec_diagram`: subclasses
     // are documented to store those as *class* variables, and `self.op_diagram` in an
     // uninitialized C++ instance would otherwise hit `def_readwrite` and crash.
-    py::class_<PlanarLinearOperator, LinearOperator, PyPlanarLinearOperator, py::smart_holder>
-      planar_linear_operator(m, "PlanarLinearOperator", py::dynamic_attr());
+    nb::class_<PlanarLinearOperator, LinearOperator, PyPlanarLinearOperator>
+      planar_linear_operator(m, "PlanarLinearOperator", nb::dynamic_attr());
     planar_linear_operator.doc() = DOC(lasyten, PlanarLinearOperator);
 
     planar_linear_operator
-      .def(py::init<PlanarDiagram const&,
-                    PlanarDiagram const&,
-                    std::map<std::string, TensorPtr>,
-                    std::string>(),
-           py::arg("op_diagram"),
-           py::arg("matvec_diagram"),
-           py::arg("op_tensors"),
-           py::arg("vec_name"))
-      .def_readwrite("op_tensors", &PlanarLinearOperator::op_tensors)
-      .def_readwrite("vec_name", &PlanarLinearOperator::vec_name)
-      .def("matvec", &PlanarLinearOperator::matvec, py::arg("vec"))
-      .def("to_tensor", &PlanarLinearOperator::to_tensor, py::arg("backend") = nullptr);
+      .def(lasyten::ctor<decltype(planar_linear_operator),
+                         PlanarDiagram const&,
+                         PlanarDiagram const&,
+                         std::map<std::string, TensorPtr>,
+                         std::string>(),
+           nb::arg("op_diagram"),
+           nb::arg("matvec_diagram"),
+           nb::arg("op_tensors"),
+           nb::arg("vec_name"))
+      .def_rw("op_tensors", &PlanarLinearOperator::op_tensors)
+      .def_rw("vec_name", &PlanarLinearOperator::vec_name)
+      .def("matvec", &PlanarLinearOperator::matvec, nb::arg("vec"))
+      .def("to_tensor", &PlanarLinearOperator::to_tensor, nb::arg("backend").none() = nullptr);
 
     m.def("parse_leg_bipartition",
           &parse_leg_bipartition,
-          py::arg("legs"),
-          py::arg("num_legs"),
+          nb::arg("legs"),
+          nb::arg("num_legs"),
           DOC(lasyten, parse_leg_bipartition));
 
     m.def(
@@ -730,8 +724,8 @@ bind_tensors_planar(py::module_& m)
          py::object relabel2) -> py::object {
           auto l1 = py_as_leg_refs(legs1);
           auto l2 = py_as_leg_refs(legs2);
-          if (py::isinstance<TensorPlaceholder>(tensor1) ||
-              py::isinstance<TensorPlaceholder>(tensor2)) {
+          if (lasyten::py_isinstance<TensorPlaceholder>(tensor1) ||
+              lasyten::py_isinstance<TensorPlaceholder>(tensor2)) {
               return py::cast(planar_contraction(tensor1.cast<TensorPlaceholder>(),
                                                  tensor2.cast<TensorPlaceholder>(),
                                                  std::move(l1),
@@ -744,12 +738,12 @@ bind_tensors_planar(py::module_& m)
                                                       py_relabel_map(relabel1),
                                                       py_relabel_map(relabel2)));
       },
-      py::arg("tensor1"),
-      py::arg("tensor2"),
-      py::arg("legs1"),
-      py::arg("legs2"),
-      py::arg("relabel1") = std::map<std::string, std::string>{},
-      py::arg("relabel2") = std::map<std::string, std::string>{},
+      nb::arg("tensor1"),
+      nb::arg("tensor2"),
+      nb::arg("legs1"),
+      nb::arg("legs2"),
+      nb::arg("relabel1") = std::map<std::string, std::string>{},
+      nb::arg("relabel2") = std::map<std::string, std::string>{},
       DOC(lasyten, planar_contraction));
 
     m.def(
@@ -767,29 +761,31 @@ bind_tensors_planar(py::module_& m)
                                       py_relabel_map(relabel1),
                                       py_relabel_map(relabel2));
       },
-      py::arg("tensor1"),
-      py::arg("mask2"),
-      py::arg("legs1"),
-      py::arg("legs2"),
-      py::arg("relabel1") = std::map<std::string, std::string>{},
-      py::arg("relabel2") = std::map<std::string, std::string>{},
+      nb::arg("tensor1"),
+      nb::arg("mask2"),
+      nb::arg("legs1"),
+      nb::arg("legs2"),
+      nb::arg("relabel1") = std::map<std::string, std::string>{},
+      nb::arg("relabel2") = std::map<std::string, std::string>{},
       DOC(lasyten, planar_contract_mask));
 
     m.def(
       "planar_partial_trace",
-      [](py::object tensor, py::args pairs) -> py::object {
+      [](py::object tensor, nb::args pairs_nb) -> py::object {
+          auto pairs = pyargs(pairs_nb);
           std::vector<std::vector<LegRef>> ps;
           ps.reserve(static_cast<std::size_t>(pairs.size()));
           for (auto item : pairs) {
               ps.push_back(py_as_leg_refs(py::reinterpret_borrow<py::object>(item)));
           }
-          if (py::isinstance<TensorPlaceholder>(tensor)) {
+          if (lasyten::py_isinstance<TensorPlaceholder>(tensor)) {
               return py::cast(
                 planar_partial_trace(tensor.cast<TensorPlaceholder>(), std::move(ps)));
           }
           return eval_result_to_py(planar_partial_trace(tensor.cast<TensorCPtr>(), std::move(ps)));
       },
-      py::arg("tensor"),
+      nb::arg("tensor"),
+      nb::arg("pairs"),
       DOC(lasyten, planar_partial_trace));
 
     m.def(
@@ -798,15 +794,16 @@ bind_tensors_planar(py::module_& m)
           return planar_permute_legs(
             std::move(T), py_opt_leg_refs(codomain), py_opt_leg_refs(domain));
       },
-      py::arg("T"),
-      py::kw_only(),
-      py::arg("codomain") = py::none(),
-      py::arg("domain") = py::none(),
+      nb::arg("T"),
+      nb::kw_only(),
+      nb::arg("codomain").none() = nb::none(),
+      nb::arg("domain").none() = nb::none(),
       DOC(lasyten, planar_permute_legs));
 
     m.def(
       "planar_combine_legs",
-      [](TensorCPtr T, py::args which_legs, py::object pipe_dualities, py::object pipes) {
+      [](TensorCPtr T, nb::args which_legs_nb, py::object pipe_dualities, py::object pipes) {
+          auto which_legs = pyargs(which_legs_nb);
           std::vector<std::vector<LegRef>> groups;
           groups.reserve(static_cast<std::size_t>(which_legs.size()));
           for (auto item : which_legs) {
@@ -817,10 +814,11 @@ bind_tensors_planar(py::module_& m)
                                      py_as_pipe_dualities(pipe_dualities),
                                      py_as_pipes(pipes));
       },
-      py::arg("T"),
-      py::kw_only(),
-      py::arg("pipe_dualities") = false,
-      py::arg("pipes") = py::none(),
+      nb::arg("T"),
+      nb::arg("which_legs"),
+      nb::kw_only(),
+      nb::arg("pipe_dualities") = false,
+      nb::arg("pipes").none() = nb::none(),
       DOC(lasyten, planar_combine_legs));
 
     m.def(
@@ -838,12 +836,12 @@ bind_tensors_planar(py::module_& m)
                              new_leg_dual,
                              py_opt_string(sort));
       },
-      py::arg("tensor"),
-      py::arg("codomain_cut"),
-      py::arg("domain_cut"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
-      py::arg("sort") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("codomain_cut"),
+      nb::arg("domain_cut"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("sort").none() = nb::none(),
       DOC(lasyten, planar_eigh));
 
     m.def(
@@ -861,12 +859,12 @@ bind_tensors_planar(py::module_& m)
                             new_leg_dual,
                             py_opt_string(sort));
       },
-      py::arg("tensor"),
-      py::arg("codomain_cut"),
-      py::arg("domain_cut"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
-      py::arg("sort") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("codomain_cut"),
+      nb::arg("domain_cut"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("sort").none() = nb::none(),
       DOC(lasyten, planar_eig));
 
     m.def(
@@ -884,12 +882,12 @@ bind_tensors_planar(py::module_& m)
                                 new_leg_dual,
                                 py_opt_string(sort));
       },
-      py::arg("tensor"),
-      py::arg("codomain_cut"),
-      py::arg("domain_cut"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
-      py::arg("sort") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("codomain_cut"),
+      nb::arg("domain_cut"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("sort").none() = nb::none(),
       DOC(lasyten, planar_eigvals));
 
     m.def(
@@ -902,11 +900,11 @@ bind_tensors_planar(py::module_& m)
           return planar_lq(
             std::move(tensor), codomain_cut, domain_cut, py_opt_labels(new_labels), new_leg_dual);
       },
-      py::arg("tensor"),
-      py::arg("codomain_cut"),
-      py::arg("domain_cut"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
+      nb::arg("tensor"),
+      nb::arg("codomain_cut"),
+      nb::arg("domain_cut"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
       DOC(lasyten, planar_lq));
 
     m.def(
@@ -919,11 +917,11 @@ bind_tensors_planar(py::module_& m)
           return planar_qr(
             std::move(tensor), codomain_cut, domain_cut, py_opt_labels(new_labels), new_leg_dual);
       },
-      py::arg("tensor"),
-      py::arg("codomain_cut"),
-      py::arg("domain_cut"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
+      nb::arg("tensor"),
+      nb::arg("codomain_cut"),
+      nb::arg("domain_cut"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
       DOC(lasyten, planar_qr));
 
     m.def(
@@ -941,12 +939,12 @@ bind_tensors_planar(py::module_& m)
                             new_leg_dual,
                             py_opt_string(algorithm));
       },
-      py::arg("tensor"),
-      py::arg("codomain_cut"),
-      py::arg("domain_cut"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
-      py::arg("algorithm") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("codomain_cut"),
+      nb::arg("domain_cut"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("algorithm").none() = nb::none(),
       DOC(lasyten, planar_svd));
 
     m.def(
@@ -976,26 +974,26 @@ bind_tensors_planar(py::module_& m)
                                       trunc_cut,
                                       svd_min);
       },
-      py::arg("tensor"),
-      py::arg("codomain_cut"),
-      py::arg("domain_cut"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
-      py::arg("algorithm") = py::none(),
-      py::arg("normalize_to") = py::none(),
-      py::arg("chi_max") = py::none(),
-      py::arg("chi_min") = 1,
-      py::arg("degeneracy_tol") = 0.,
-      py::arg("trunc_cut") = 0.,
-      py::arg("svd_min") = 0.,
+      nb::arg("tensor"),
+      nb::arg("codomain_cut"),
+      nb::arg("domain_cut"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("algorithm").none() = nb::none(),
+      nb::arg("normalize_to").none() = nb::none(),
+      nb::arg("chi_max").none() = nb::none(),
+      nb::arg("chi_min") = 1,
+      nb::arg("degeneracy_tol") = 0.,
+      nb::arg("trunc_cut") = 0.,
+      nb::arg("svd_min") = 0.,
       DOC(lasyten, planar_truncated_svd));
 
     m.def("planar_almost_equal",
           &planar_almost_equal,
-          py::arg("tensor_1"),
-          py::arg("tensor_2"),
-          py::arg("rtol") = 1e-5,
-          py::arg("atol") = 1e-8,
+          nb::arg("tensor_1"),
+          nb::arg("tensor_2"),
+          nb::arg("rtol") = 1e-5,
+          nb::arg("atol") = 1e-8,
           DOC(lasyten, planar_almost_equal));
 
     m.def(
@@ -1011,11 +1009,11 @@ bind_tensors_planar(py::module_& m)
                                           py_opt_labels(new_labels),
                                           py_opt_float(cutoff_singular_values));
       },
-      py::arg("tensor"),
-      py::arg("codomain_cut"),
-      py::arg("domain_cut"),
-      py::arg("new_labels") = py::none(),
-      py::arg("cutoff_singular_values") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("codomain_cut"),
+      nb::arg("domain_cut"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("cutoff_singular_values").none() = nb::none(),
       DOC(lasyten, horizontal_factorization));
 
     m.def(
@@ -1026,7 +1024,8 @@ bind_tensors_planar(py::module_& m)
          std::string which,
          py::object new_labels,
          bool new_leg_dual,
-         py::kwargs kwargs) -> py::object {
+         nb::kwargs kwargs_nb) -> py::object {
+          auto kwargs = pykwargs(kwargs_nb);
           auto labs = py_opt_labels(new_labels);
           auto kw = [&](char const* key) -> py::object {
               return kwargs.contains(key) ? py::object(kwargs[key]) : py::none();
@@ -1089,12 +1088,13 @@ bind_tensors_planar(py::module_& m)
           }
           throw py::value_error(std::string("Invalid decomposition \"") + which + '"');
       },
-      py::arg("tensor"),
-      py::arg("codomain_cut"),
-      py::arg("domain_cut"),
-      py::arg("which"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
+      nb::arg("tensor"),
+      nb::arg("codomain_cut"),
+      nb::arg("domain_cut"),
+      nb::arg("which"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("kwargs"),
       R"pydoc(Planar generalization of eigen, QR, LQ, SV, and truncated SV decompositions.
 
 See the respective docstrings of :func:`planar_eigh`, :func:`planar_eig`, :func:`planar_eigvals`,

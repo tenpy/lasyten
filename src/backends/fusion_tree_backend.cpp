@@ -1818,7 +1818,7 @@ FusionTreeBackend::permute_legs(TensorCPtr a,
         bool is_codomain = i < a->num_codomain_legs();
         // Match Python ``isinstance(leg, LegPipe)`` — not ``hasattr(num_flat_legs)``,
         // since ElementarySpace also exposes num_flat_legs.
-        bool const is_pipe = py::isinstance<LegPipe>(leg);
+        bool const is_pipe = py_isinstance<LegPipe>(leg);
         if (is_pipe) {
             int64 num = leg.attr("num_flat_legs").cast<int64>();
             py::list indices;
@@ -2071,7 +2071,7 @@ FusionTreeBackend::from_dense_block(BlockBackend::BlockPtr a,
         int64 perm_idx = 0;
         for (py::ssize_t n = 0; n < legs.size(); ++n) {
             py::object leg = legs[n];
-            if (py::isinstance<LegPipe>(leg)) {
+            if (py_isinstance<LegPipe>(leg)) {
                 idcs.append(n);
                 py::list dims;
                 for (auto const& s : leg.attr("flat_legs"))
@@ -2858,14 +2858,14 @@ FusionTreeBackend::_mask_contract(TensorCPtr tensor, MaskCPtr mask, int64 leg_id
         py::list sp = py::cast(tensor->domain).attr("factors");
         sp[co_domain_idx] = large_leg ? py::cast(mask->small_leg()) : py::cast(mask->large_leg());
         target_space = domain = py::cast<TensorProduct::Ptr>(
-          py::type::of<TensorProduct>()(sp, py::arg("symmetry") = py::cast(tensor->symmetry)));
+          py_type_of<TensorProduct>()(sp, py::arg("symmetry") = py::cast(tensor->symmetry)));
         iter_space = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
     } else {
         domain = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
         py::list sp = py::cast(tensor->codomain).attr("factors");
         sp[co_domain_idx] = large_leg ? py::cast(mask->small_leg()) : py::cast(mask->large_leg());
         target_space = codomain = py::cast<TensorProduct::Ptr>(
-          py::type::of<TensorProduct>()(sp, py::arg("symmetry") = py::cast(tensor->symmetry)));
+          py_type_of<TensorProduct>()(sp, py::arg("symmetry") = py::cast(tensor->symmetry)));
         iter_space = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
     }
     // pipes on the other legs are fine; the data is organized w.r.t. the flat legs

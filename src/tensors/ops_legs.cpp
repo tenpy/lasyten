@@ -1377,12 +1377,12 @@ flatten_first_pipe_data_fusion_tree(SymmetricTensor const& tensor,
         auto perm = flatten_pipe_block_perm(old_prod, new_prod, pipe_prod, coupled);
         std::vector<int64> other(static_cast<std::size_t>(other_prod.block_size(coupled)));
         std::iota(other.begin(), other.end(), int64{ 0 });
-        std::vector<py::array_t<int64>> perms{ py::array_t<int64>(py::cast(perm)),
-                                               py::array_t<int64>(py::cast(other)) };
+        std::vector<std::vector<int64>> perms{ std::vector<int64>(perm.begin(), perm.end()),
+                                               std::move(other) };
         if (in_domain) {
             std::swap(perms[0], perms[1]);
         }
-        blocks.push_back(block_backend.apply_leg_permutations(data->blocks[i], perms));
+        blocks.push_back(block_backend.apply_axis_permutations(data->blocks[i], perms));
     }
     return FusionTreeBackend::wrap(std::make_shared<FusionTreeData>(
       data->block_inds, std::move(blocks), data->dtype, data->device, true));

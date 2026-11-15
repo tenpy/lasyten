@@ -6,9 +6,6 @@
 #include <lasyten/lasyten.h>
 #include <lasyten/symmetries/sector.h>
 
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-
 #include <optional>
 #include <string>
 #include <vector>

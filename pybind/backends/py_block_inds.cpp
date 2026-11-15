@@ -1,16 +1,11 @@
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 #include "docstrings/backends/block_inds.h"
 
 #include "backends/casters.hpp"
 
 #include <lasyten/backends/block_inds.h>
 #include <lasyten/backends/block_inds_numpy.h>
-
-#include <pybind11/functional.h>
-#include <pybind11/numpy.h>
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
 
 #include "tools/hdf5_bind.h"
 #include <algorithm>
@@ -137,37 +132,37 @@ block_inds_repr(BlockInds const& a)
     return oss.str();
 }
 
-std::optional<py::class_<BlockInds>> g_block_inds;
+std::optional<nb::class_<BlockInds>> g_block_inds;
 
 } // namespace
 
 void
-declare_block_inds(py::module_& m)
+declare_block_inds(nb::module_& m)
 {
-    g_block_inds = py::class_<BlockInds>(m, "BlockInds", DOC(lasyten, BlockInds));
+    g_block_inds = nb::class_<BlockInds>(m, "BlockInds", DOC(lasyten, BlockInds));
 }
 
 void
-bind_block_inds(py::module_& m)
+bind_block_inds(nb::module_& m)
 {
     (void)m;
     auto& cls = *g_block_inds;
-    cls.def(py::init<>())
-      .def(py::init([](py::object values) { return block_inds_from_numpy(values); }),
-           py::arg("values"),
+    cls.def(lasyten::ctor<decltype(cls)>())
+      .def(nb::new_([](py::object values) { return block_inds_from_numpy(values); }),
+           nb::arg("values"),
            "Construct from a 2D integer sequence or ndarray.")
       .def_static(
-        "empty", [](std::size_t ncols) { return BlockInds::empty(ncols); }, py::arg("ncols"))
+        "empty", [](std::size_t ncols) { return BlockInds::empty(ncols); }, nb::arg("ncols"))
       .def_static(
         "zeros",
         [](std::size_t nrows, std::size_t ncols) { return BlockInds::zeros(nrows, ncols); },
-        py::arg("nrows"),
-        py::arg("ncols"))
-      .def_property_readonly(
+        nb::arg("nrows"),
+        nb::arg("ncols"))
+      .def_prop_ro(
         "shape", [](BlockInds const& self) { return py::make_tuple(self.nrows(), self.ncols()); })
-      .def_property_readonly("nrows", &BlockInds::nrows)
-      .def_property_readonly("ncols", &BlockInds::ncols)
-      .def_property_readonly("ndim", [](BlockInds const&) { return 2; })
+      .def_prop_ro("nrows", &BlockInds::nrows)
+      .def_prop_ro("ncols", &BlockInds::ncols)
+      .def_prop_ro("ndim", [](BlockInds const&) { return 2; })
       .def("__len__", [](BlockInds const& self) { return self.nrows(); })
       .def("__repr__", &block_inds_repr)
       .def("__str__", &block_inds_repr)
@@ -175,7 +170,7 @@ bind_block_inds(py::module_& m)
       .def("__eq__",
            [](BlockInds const& self, py::object other) -> py::object {
                py::object self_np = block_inds_to_numpy(self);
-               if (py::isinstance<BlockInds>(other)) {
+               if (lasyten::py_isinstance<BlockInds>(other)) {
                    other = block_inds_to_numpy(other.cast<BlockInds>());
                }
                return self_np.attr("__eq__")(other);
@@ -183,7 +178,7 @@ bind_block_inds(py::module_& m)
       .def("__ne__",
            [](BlockInds const& self, py::object other) -> py::object {
                py::object self_np = block_inds_to_numpy(self);
-               if (py::isinstance<BlockInds>(other)) {
+               if (lasyten::py_isinstance<BlockInds>(other)) {
                    other = block_inds_to_numpy(other.cast<BlockInds>());
                }
                return self_np.attr("__ne__")(other);
@@ -193,8 +188,8 @@ bind_block_inds(py::module_& m)
         [](BlockInds const& self, py::object /*dtype*/, py::object /*copy*/) {
             return block_inds_to_numpy(self);
         },
-        py::arg("dtype") = py::none(),
-        py::arg("copy") = py::none())
+        nb::arg("dtype").none() = nb::none(),
+        nb::arg("copy").none() = nb::none())
       .def("to_numpy", &block_inds_to_numpy)
       .def("lexsort_indices",
            [](BlockInds const& self) { return indices_to_numpy(self.lexsort_indices()); })
@@ -208,17 +203,17 @@ bind_block_inds(py::module_& m)
         [](BlockInds const& self, bool include_len) {
             return indices_to_numpy(self.find_row_differences(include_len));
         },
-        py::arg("include_len") = false)
+        nb::arg("include_len") = false)
       .def(
         "take",
         [](BlockInds const& self, py::object indices) {
             return self.take(indices_from_py(indices, self.nrows()));
         },
-        py::arg("indices"))
-      .def("concat", &BlockInds::concat, py::arg("other"))
+        nb::arg("indices"))
+      .def("concat", &BlockInds::concat, nb::arg("other"))
       .def("reverse_columns", &BlockInds::reverse_columns)
-      .def("repeat_columns", &BlockInds::repeat_columns, py::arg("times"))
-      .def("insert_column", &BlockInds::insert_column, py::arg("col"), py::arg("fill") = 0)
+      .def("repeat_columns", &BlockInds::repeat_columns, nb::arg("times"))
+      .def("insert_column", &BlockInds::insert_column, nb::arg("col"), nb::arg("fill") = 0)
       .def("__getitem__",
            [](BlockInds const& self, py::object key) -> py::object {
                // ``arr[:, ::-1]`` / ``arr[rows, cols]``
@@ -394,16 +389,16 @@ bind_block_inds(py::module_& m)
            })
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5_const<BlockInds>(),
-           py::arg("hdf5_saver"),
-           py::arg("h5gr"),
-           py::arg("subpath"))
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"))
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<BlockInds>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 
-    py::implicitly_convertible<py::array, BlockInds>();
+    nb::implicitly_convertible<py::array, BlockInds>();
 }
 
 } // namespace lasyten

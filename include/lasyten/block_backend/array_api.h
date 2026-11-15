@@ -1,6 +1,16 @@
 #pragma once
 
 #include <lasyten/block_backend/block_backend.h>
+#include <lasyten/detail/python_api.h>
+
+#if !LASYTEN_HAS_PYTHON
+#error                                                                                            \
+  "ArrayApiBlockBackend needs a Python interpreter: configure with -DLASYTEN_WITH_PYTHON=ON and -DLASYTEN_WITH_NUMPY_BACKEND=ON"
+#endif
+#if defined(LASYTEN_WITH_NUMPY_BACKEND) && !LASYTEN_WITH_NUMPY_BACKEND
+#error                                                                                            \
+  "ArrayApiBlockBackend is compiled out (-DLASYTEN_WITH_NUMPY_BACKEND=OFF); use EigenBlockBackend"
+#endif
 #include <lasyten/tools/hdf5.h>
 #include <map>
 #include <memory>
@@ -18,7 +28,7 @@ class ArrayApiBlockBackend : public BlockBackend
 {
   public:
     /// Block that holds an Array-API array as ``py::object``.
-    class PYBIND11_EXPORT Block : public BlockBackend::Block
+    class LASYTEN_EXPORT Block : public BlockBackend::Block
     {
       public:
         explicit Block(py::object arr, ArrayApiBlockBackend* backend);
@@ -217,3 +227,6 @@ class ArrayApiBlockBackend : public BlockBackend
 };
 
 } // namespace lasyten
+
+// pybind11 casters for nested bound types, delegating to nanobind (py_nanobind_bridge.h).
+LASYTEN_PY_BRIDGE_CLASS(::lasyten::ArrayApiBlockBackend::Block)

@@ -46,15 +46,19 @@ Dtype from_repr(std::string const& name);
 /// Epsilon: difference between 1.0 and next representable. Bool raises.
 float64 eps(Dtype dtype);
 
+#if LASYTEN_HAS_PYTHON
 /// Numpy dtype object for this Dtype.
 py::object to_numpy_dtype(Dtype dtype);
 
 /// Build Dtype from numpy dtype object. Returns none for None input (Python only).
 Dtype from_numpy_dtype(py::object numpy_dtype);
 
+#endif
+
 /// Common dtype that can represent all given dtypes.
 Dtype common(const std::vector<Dtype>& dtypes);
 
+#if LASYTEN_HAS_PYTHON
 /// Convert a Python scalar to this dtype's scalar type (returns py::object).
 py::object convert_python_scalar(Dtype dtype, py::object value);
 
@@ -66,6 +70,7 @@ py::object zero_scalar(Dtype dtype);
 
 /// One scalar in this dtype (e.g. 1, 1.0, 1+0j).
 py::object one_scalar(Dtype dtype);
+#endif // LASYTEN_HAS_PYTHON
 
 } // namespace dtype
 

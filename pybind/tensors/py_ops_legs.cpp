@@ -5,7 +5,7 @@
 #include <lasyten/tensors/tensor.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/ops_legs.h"
 
@@ -57,7 +57,7 @@ py_is_public_idx(py::handle obj)
     if (py::isinstance<py::int_>(obj)) {
         return true;
     }
-    if (py::isinstance<Sector>(obj)) {
+    if (lasyten::py_isinstance<Sector>(obj)) {
         return false;
     }
     if (py::isinstance<py::array>(obj)) {
@@ -199,7 +199,7 @@ py_as_pipes(py::object obj)
 } // namespace
 
 void
-bind_tensors_ops_legs(py::module_& m)
+bind_tensors_ops_legs(nb::module_& m)
 {
     m.def(
       "bend_legs",
@@ -214,9 +214,9 @@ bind_tensors_ops_legs(py::module_& m)
           }
           return bend_legs(std::move(tensor), n_cod, n_dom);
       },
-      py::arg("tensor"),
-      py::arg("num_codomain_legs") = py::none(),
-      py::arg("num_domain_legs") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("num_codomain_legs").none() = nb::none(),
+      nb::arg("num_domain_legs").none() = nb::none(),
       doc_plus(DOC(lasyten, bend_legs),
                R"pydoc(
 In Python, ``num_codomain_legs`` / ``num_domain_legs`` are ``int | None`` (``None`` = unspecified).
@@ -224,17 +224,18 @@ In Python, ``num_codomain_legs`` / ``num_domain_legs`` are ``int | None`` (``Non
 
     m.def("check_same_legs",
           &check_same_legs,
-          py::arg("t1"),
-          py::arg("t2"),
+          nb::arg("t1"),
+          nb::arg("t2"),
           DOC(lasyten, check_same_legs));
 
     m.def(
       "combine_legs",
       [](TensorCPtr tensor,
-         py::args which_legs,
+         nb::args which_legs_nb,
          py::object pipe_dualities,
          py::object pipes,
          py::object levels) {
+          auto which_legs = pyargs(which_legs_nb);
           std::vector<std::vector<LegRef>> groups;
           groups.reserve(static_cast<std::size_t>(which_legs.size()));
           for (auto item : which_legs) {
@@ -249,11 +250,12 @@ In Python, ``num_codomain_legs`` / ``num_domain_legs`` are ``int | None`` (``Non
                               std::move(pipes_opt),
                               std::move(levels_opt));
       },
-      py::arg("tensor"),
-      py::kw_only(),
-      py::arg("pipe_dualities") = false,
-      py::arg("pipes") = py::none(),
-      py::arg("levels") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("which_legs"),
+      nb::kw_only(),
+      nb::arg("pipe_dualities") = false,
+      nb::arg("pipes").none() = nb::none(),
+      nb::arg("levels").none() = nb::none(),
       doc_plus(DOC(lasyten, combine_legs),
                R"pydoc(
 In Python, groups are passed as ``*which_legs`` (each a sequence of ``int | str``);
@@ -268,10 +270,10 @@ In Python, groups are passed as ``*which_legs`` (each a sequence of ``int | str`
                                    py_opt_leg_refs(domain),
                                    py_as_levels(tensor, levels));
       },
-      py::arg("tensor"),
-      py::arg("codomain") = py::none(),
-      py::arg("domain") = py::none(),
-      py::arg("levels") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("codomain").none() = nb::none(),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("levels").none() = nb::none(),
       doc_plus(DOC(lasyten, combine_to_matrix),
                R"pydoc(
 In Python, ``codomain`` / ``domain`` are ``int``, ``str``, a sequence thereof, or ``None``;
@@ -303,13 +305,13 @@ In Python, ``codomain`` / ``domain`` are ``int``, ``str``, a sequence thereof, o
                           std::move(levels_opt),
                           std::move(bend_opt));
       },
-      py::arg("tensor"),
-      py::arg("which_leg"),
-      py::arg("codomain_pos") = py::none(),
-      py::kw_only(),
-      py::arg("domain_pos") = py::none(),
-      py::arg("levels") = py::none(),
-      py::arg("bend_right") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("which_leg"),
+      nb::arg("codomain_pos").none() = nb::none(),
+      nb::kw_only(),
+      nb::arg("domain_pos").none() = nb::none(),
+      nb::arg("levels").none() = nb::none(),
+      nb::arg("bend_right").none() = nb::none(),
       doc_plus(DOC(lasyten, move_leg),
                R"pydoc(
 In Python, ``which_leg`` is ``int | str``; optional args use ``None``; ``levels`` /
@@ -321,8 +323,8 @@ In Python, ``which_leg`` is ``int | str``; optional args use ``None``; ``levels`
       [](TensorCPtr tensor, py::object which_leg) {
           return flatten_pipe_leg(std::move(tensor), py_as_leg_ref(which_leg));
       },
-      py::arg("tensor"),
-      py::arg("which_leg"),
+      nb::arg("tensor"),
+      nb::arg("which_leg"),
       doc_plus(DOC(lasyten, flatten_pipe_leg),
                R"pydoc(
 In Python, ``which_leg`` is ``int | str``.
@@ -353,14 +355,14 @@ In Python, ``which_leg`` is ``int | str``.
                                  cpos,
                                  dpos);
       },
-      py::arg("A"),
-      py::arg("B"),
-      py::arg("axis_A"),
-      py::arg("axis_B"),
-      py::arg("hidden_leg_label"),
-      py::arg("target_codomain_pos") = py::none(),
-      py::kw_only(),
-      py::arg("target_domain_pos") = py::none(),
+      nb::arg("A"),
+      nb::arg("B"),
+      nb::arg("axis_A"),
+      nb::arg("axis_B"),
+      nb::arg("hidden_leg_label"),
+      nb::arg("target_codomain_pos").none() = nb::none(),
+      nb::kw_only(),
+      nb::arg("target_domain_pos").none() = nb::none(),
       doc_plus(DOC(lasyten, move_hidden_leg),
                R"pydoc(
 In Python, ``axis_A`` / ``axis_B`` are ``int | str``; optional position args use ``None``.
@@ -381,11 +383,11 @@ In Python, ``axis_A`` / ``axis_B`` are ``int | str``; optional position args use
                               std::move(levels_opt),
                               std::move(bend_opt));
       },
-      py::arg("tensor"),
-      py::arg("codomain") = py::none(),
-      py::arg("domain") = py::none(),
-      py::arg("levels") = py::none(),
-      py::arg("bend_right") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("codomain").none() = nb::none(),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("levels").none() = nb::none(),
+      nb::arg("bend_right").none() = nb::none(),
       doc_plus(DOC(lasyten, permute_legs),
                R"pydoc(
 In Python, ``codomain`` / ``domain`` are ``int``, ``str``, a sequence thereof, or ``None``;
@@ -401,8 +403,8 @@ In Python, ``codomain`` / ``domain`` are ``int``, ``str``, a sequence thereof, o
           }
           return split_legs(std::move(tensor), legs_opt);
       },
-      py::arg("tensor"),
-      py::arg("legs") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("legs").none() = nb::none(),
       doc_plus(DOC(lasyten, split_legs),
                R"pydoc(
 In Python, ``legs`` is ``int``, ``str``, a sequence thereof, or ``None`` (split all pipes).
@@ -417,23 +419,24 @@ In Python, both overloads are exposed as one function:
 
     m.def("slice_leg",
           &py_slice_leg,
-          py::arg("tensor"),
-          py::arg("leg"),
-          py::arg("idx_or_sector"),
-          py::arg("multiplicity") = py::none(),
+          nb::arg("tensor"),
+          nb::arg("leg"),
+          nb::arg("idx_or_sector"),
+          nb::arg("multiplicity").none() = nb::none(),
           slice_leg_py_doc);
 
-    py::object tensor_cls = m.attr("Tensor");
-    tensor_cls.attr("slice_leg") = py::cpp_function(
+    nb::object tensor_cls = m.attr("Tensor");
+    tensor_cls.attr("slice_leg") = nb::cpp_function(
       [](TensorCPtr self, py::object leg, py::object idx_or_sector, py::object multiplicity) {
           return py_slice_leg(
             std::move(self), std::move(leg), std::move(idx_or_sector), std::move(multiplicity));
       },
-      py::name("slice_leg"),
-      py::is_method(tensor_cls),
-      py::arg("leg"),
-      py::arg("idx_or_sector"),
-      py::arg("multiplicity") = py::none(),
+      nb::name("slice_leg"),
+      nb::is_method(),
+      nb::scope(tensor_cls),
+      nb::arg("leg"),
+      nb::arg("idx_or_sector"),
+      nb::arg("multiplicity").none() = nb::none(),
       slice_leg_py_doc);
 
     m.def(
@@ -445,8 +448,8 @@ In Python, both overloads are exposed as one function:
           }
           return squeeze_legs(std::move(tensor), legs_opt);
       },
-      py::arg("tensor"),
-      py::arg("legs") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("legs").none() = nb::none(),
       doc_plus(DOC(lasyten, squeeze_legs),
                R"pydoc(
 In Python, ``legs`` is ``int``, ``str``, a sequence thereof, or ``None`` (squeeze all trivial).

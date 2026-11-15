@@ -1094,7 +1094,7 @@ NoSymmetryBackend::truncate_singular_values(DiagonalTensorCPtr S,
     auto mask_data = block_backend->block_from_numpy(keep, Dtype::Bool);
     bool is_dual = true;
     py::object leg = py::cast(S->leg());
-    if (py::isinstance<ElementarySpace>(leg))
+    if (py_isinstance<ElementarySpace>(leg))
         is_dual = leg.cast<ElementarySpace::Ptr>()->is_dual;
     // keep.sum() via numpy
     int64 dim = keep.attr("sum")().cast<int64>();

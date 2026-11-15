@@ -1116,8 +1116,9 @@ parse_inputs_drop_symmetry_public(std::optional<std::vector<int64>> which, Symme
 
 } // namespace lasyten
 
-#include <pybind11/cast.h>
+#include <lasyten/detail/python_api.h>
 
+#if LASYTEN_HAS_PYTHON
 namespace pybind11::detail {
 
 /// Accept `ElementarySpace` / `LegPipe` shared_ptrs from Python; unwrap to the held object on
@@ -1138,11 +1139,11 @@ struct type_caster<lasyten::Leg>
         }
         (void)convert;
         try {
-            if (isinstance<lasyten::ElementarySpace>(src)) {
+            if (lasyten::py_isinstance<lasyten::ElementarySpace>(src)) {
                 value = lasyten::Leg(src.cast<std::shared_ptr<lasyten::ElementarySpace>>());
                 return true;
             }
-            if (isinstance<lasyten::LegPipe>(src)) {
+            if (lasyten::py_isinstance<lasyten::LegPipe>(src)) {
                 value = lasyten::Leg(src.cast<std::shared_ptr<lasyten::LegPipe>>());
                 return true;
             }
@@ -1170,3 +1171,4 @@ struct type_caster<lasyten::Leg>
 };
 
 } // namespace pybind11::detail
+#endif // LASYTEN_HAS_PYTHON

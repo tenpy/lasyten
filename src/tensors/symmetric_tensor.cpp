@@ -7,7 +7,6 @@
 #include <lasyten/backends/abelian.h>
 #include <lasyten/backends/backend_factory.h>
 #include <lasyten/backends/fusion_tree_backend.h>
-#include <lasyten/block_backend/torch.h>
 #include <lasyten/tools.h>
 #include <lasyten/tools/warn.h>
 
@@ -80,7 +79,7 @@ SymmetricTensor::test_sanity() const
     bool is_diagonal = dynamic_cast<DiagonalTensor const*>(this) != nullptr;
     if (!is_diagonal && Py_IsInitialized()) {
         try {
-            is_diagonal = py::isinstance<DiagonalTensor>(py::cast(shared_from_this()));
+            is_diagonal = py_isinstance<DiagonalTensor>(py::cast(shared_from_this()));
         } catch (py::error_already_set& e) {
             e.restore();
             PyErr_Clear();
@@ -946,9 +945,9 @@ SymmetricTensor::from_hdf5(lasyten::hdf5::Loader& loader,
       data, codomain, domain, backend, symmetry, std::move(labels));
     obj->dtype = dt;
     obj->device = backend->get_device_from_data(data);
-    if (dynamic_cast<TorchBlockBackend*>(backend->block_backend.get()) != nullptr) {
-        obj->device = TorchBlockBackend::device_for_hdf5_load(
-          obj->device, backend->block_backend->default_device);
+    if (is_torch_block_backend(backend->block_backend.get())) {
+        obj->device =
+          torch_device_for_hdf5_load(obj->device, backend->block_backend->default_device);
         if (auto* abd = dynamic_cast<AbelianBackendData*>(data.get())) {
             abd->device = obj->device;
         } else if (auto* ftd = dynamic_cast<FusionTreeData*>(data.get())) {

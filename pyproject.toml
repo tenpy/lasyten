@@ -54,8 +54,9 @@ docbuild = [
     "clang",
     "pybind11-mkdoc",
 ]
-# generates lasyten/_core.pyi at build time for IDE type hints (optional; build warns if missing)
-stubs = ["pybind11-stubgen"]
+# generates lasyten/_core.pyi at build time (``python -m nanobind.stubgen``) for IDE type hints
+# (optional; the build warns if generation fails)
+stubs = ["nanobind"]
 # bundles
 dev = ["lasyten[io, test, lint, docbuild, stubs]"]
 all = ["lasyten[io, test, lint, docbuild, stubs]"]
@@ -73,7 +74,8 @@ all = ["lasyten[io, test, lint, docbuild, stubs]"]
 
 [build-system]
 # torch is required at build time: CMake links against the same libtorch as `import torch`
-requires = ["scikit-build-core", "pybind11", "numpy>=2.0", "torch", "setuptools-scm"]
+# pybind11 is kept temporarily: public headers still use py:: types (convert_nanobind.md, Phase 4).
+requires = ["scikit-build-core", "nanobind>=3.0", "pybind11", "numpy>=2.0", "torch", "setuptools-scm"]
 build-backend = "scikit_build_core.build"
 
 

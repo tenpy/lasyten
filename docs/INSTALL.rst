@@ -57,6 +57,33 @@ For a debug build, you can even enable automatic rebuild upon python import::
 
     pip install -v --no-build-isolation -C editable.rebuild=true -e .
 
+CMake options for the block backends and a Python-free build
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+``LASYTEN_WITH_NUMPY_BACKEND`` (default ON if ``LASYTEN_WITH_PYTHON`` is ON)
+    Build the transitional Python-dispatch backends ``NumpyBlockBackend`` and ``ArrayApiBlockBackend``.
+    The preferred CPU backend is the native ``EigenBlockBackend`` (factory name ``"eigen"``), and
+    ``TorchBlockBackend`` is for GPUs. With ``-DLASYTEN_WITH_NUMPY_BACKEND=OFF`` the two Python-dispatch
+    backends are neither compiled nor exposed in ``lasyten``, and ``"cpu"`` resolves to Eigen::
+
+        pip install -v --no-build-isolation -C cmake.define.LASYTEN_WITH_NUMPY_BACKEND=OFF .
+
+``LASYTEN_WITH_PYTHON`` (default ON)
+    The long-term goal is to be able to use the C++ library without any Python interpreter.
+    This is **experimental scaffolding**, not yet a usable library: with
+    ``-DLASYTEN_WITH_PYTHON=OFF`` CMake does not look for Python, pybind11, nanobind or PyTorch, and builds
+    the subset of ``liblasyten`` that does not need Python (Eigen + LAPACK + HDF5, no ``_core``)
+    plus a CTest that exercises ``EigenBlockBackend`` (incl. HDF5 I/O) without an interpreter.
+    Needs only a C++ compiler, CMake, Eigen3, LAPACK/LAPACKE and HDF5 (e.g. from the conda env)::
+
+        cmake -S . -B /tmp/lasyten_off -G Ninja -DLASYTEN_WITH_PYTHON=OFF
+        cmake --build /tmp/lasyten_off
+        ctest --test-dir /tmp/lasyten_off --output-on-failure
+
+    The configure step prints which parts are skipped and what is still blocking.
+    See ``docs/cpp_conversion/convert_nanobind.md`` (Phase 5) for the status.
+
+
 Building from source on MacOS
 +++++++++++++++++++++++++++++
 Building on MacOS is not carefully tested yet, but Jakob got it running on an M2 MacBook running

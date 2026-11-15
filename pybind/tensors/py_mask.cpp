@@ -5,12 +5,9 @@
 #include "py_factory_parse.hpp"
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/mask.h"
-
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
 
 #include "tools/hdf5_bind.h"
 #include <format>
@@ -45,23 +42,23 @@ optional_leg_order(py::object obj)
 
 namespace {
 
-std::optional<py::class_<Mask, Tensor, py::smart_holder>> g_mask;
+std::optional<nb::class_<Mask, Tensor>> g_mask;
 
 } // namespace
 
 void
-declare_tensors_mask(py::module_& m)
+declare_tensors_mask(nb::module_& m)
 {
-    g_mask = py::class_<Mask, Tensor, py::smart_holder>(m, "Mask");
+    g_mask = nb::class_<Mask, Tensor>(m, "Mask");
     (*g_mask).doc() = DOC(lasyten, Mask);
 }
 
 void
-bind_tensors_mask(py::module_& m)
+bind_tensors_mask(nb::module_& m)
 {
     auto& cls = *g_mask;
 
-    cls.def(py::init([](TensorBackend::DataPtr data,
+    cls.def(nb::new_([](TensorBackend::DataPtr data,
                         py::object space_in_obj,
                         py::object space_out_obj,
                         std::optional<bool> is_projection,
@@ -93,18 +90,18 @@ bind_tensors_mask(py::module_& m)
                                               init.labels,
                                               std::move(device_s));
             }),
-            py::arg("data"),
-            py::arg("space_in"),
-            py::arg("space_out"),
-            py::arg("is_projection") = py::none(),
-            py::arg("backend") = nullptr,
-            py::arg("labels") = py::none());
+            nb::arg("data"),
+            nb::arg("space_in"),
+            nb::arg("space_out"),
+            nb::arg("is_projection").none() = nb::none(),
+            nb::arg("backend").none() = nullptr,
+            nb::arg("labels").none() = nb::none());
 
-    cls.def_readonly_static("_forbidden_dtypes", &Mask::_forbidden_dtypes);
+    cls.def_ro_static("_forbidden_dtypes", &Mask::_forbidden_dtypes);
 
-    cls.def_readwrite("is_projection", &Mask::is_projection);
+    cls.def_rw("is_projection", &Mask::is_projection);
 
-    cls.def_property(
+    cls.def_prop_rw(
       "data",
       [](Mask& self) -> py::object {
           if (std::dynamic_pointer_cast<NoSymmetryBackend>(self.backend)) {
@@ -120,8 +117,8 @@ bind_tensors_mask(py::module_& m)
           }
       });
 
-    cls.def_property_readonly("large_leg", &Mask::large_leg);
-    cls.def_property_readonly("small_leg", &Mask::small_leg);
+    cls.def_prop_ro("large_leg", &Mask::large_leg);
+    cls.def_prop_ro("small_leg", &Mask::small_leg);
 
     cls.def("test_sanity", &Mask::test_sanity, DOC(lasyten, Mask, test_sanity));
 
@@ -136,11 +133,11 @@ bind_tensors_mask(py::module_& m)
           return Mask::from_eye(
             py_as_space_leg(leg), is_projection, init.backend, init.labels, device);
       },
-      py::arg("leg"),
-      py::arg("is_projection") = true,
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("device") = py::none(),
+      nb::arg("leg"),
+      nb::arg("is_projection") = true,
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, Mask, from_eye));
 
     cls.def_static(
@@ -155,17 +152,17 @@ bind_tensors_mask(py::module_& m)
           return Mask::from_block_mask(
             block, py_as_space_leg(large_leg), init.backend, init.labels, device);
       },
-      py::arg("block_mask"),
-      py::arg("large_leg"),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("device") = py::none(),
+      nb::arg("block_mask"),
+      nb::arg("large_leg"),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, Mask, from_block_mask));
 
     cls.def_static(
       "from_DiagonalTensor",
       [](py::object diag) { return Mask::from_DiagonalTensor(diag.cast<DiagonalTensorCPtr>()); },
-      py::arg("diag"),
+      nb::arg("diag"),
       DOC(lasyten, Mask, from_DiagonalTensor));
 
     cls.def_static(
@@ -179,11 +176,11 @@ bind_tensors_mask(py::module_& m)
           return Mask::from_indices(
             indices, py_as_space_leg(large_leg), init.backend, init.labels, device);
       },
-      py::arg("indices"),
-      py::arg("large_leg"),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("device") = py::none(),
+      nb::arg("indices"),
+      nb::arg("large_leg"),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, Mask, from_indices));
 
     cls.def_static(
@@ -210,14 +207,14 @@ bind_tensors_mask(py::module_& m)
                                    device,
                                    np_random);
       },
-      py::arg("large_leg"),
-      py::arg("small_leg") = py::none(),
-      py::arg("backend") = nullptr,
-      py::arg("p_keep") = 0.5,
-      py::arg("min_keep") = 0,
-      py::arg("labels") = py::none(),
-      py::arg("device") = py::none(),
-      py::arg("np_random") = py::none(),
+      nb::arg("large_leg"),
+      nb::arg("small_leg").none() = nb::none(),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("p_keep") = 0.5,
+      nb::arg("min_keep") = 0,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
+      nb::arg("np_random").none() = nb::none(),
       DOC(lasyten, Mask, from_random));
 
     cls.def_static(
@@ -229,27 +226,27 @@ bind_tensors_mask(py::module_& m)
           auto init = py_parse_diag(large_leg, std::move(backend), labels);
           return Mask::from_zero(py_as_space_leg(large_leg), init.backend, init.labels, device);
       },
-      py::arg("large_leg"),
-      py::arg("backend") = nullptr,
-      py::arg("labels") = py::none(),
-      py::arg("device") = py::none(),
+      nb::arg("large_leg"),
+      nb::arg("backend").none() = nullptr,
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, Mask, from_zero));
 
     cls.def_static("from_hdf5",
                    lasyten::hdf5::wrap_from_hdf5<Mask>(),
-                   py::arg("hdf5_loader"),
-                   py::arg("h5gr"),
-                   py::arg("subpath"),
+                   nb::arg("hdf5_loader"),
+                   nb::arg("h5gr"),
+                   nb::arg("subpath"),
                    DOC(lasyten, Mask, from_hdf5));
 
     cls.def("save_hdf5",
             lasyten::hdf5::wrap_save_hdf5_const<Mask>(),
-            py::arg("hdf5_saver"),
-            py::arg("h5gr"),
-            py::arg("subpath"),
+            nb::arg("hdf5_saver"),
+            nb::arg("h5gr"),
+            nb::arg("subpath"),
             DOC(lasyten, Mask, save_hdf5));
 
-    cls.def("as_dtype", &Mask::as_dtype, py::arg("dtype"), DOC(lasyten, Mask, as_dtype));
+    cls.def("as_dtype", &Mask::as_dtype, nb::arg("dtype"), DOC(lasyten, Mask, as_dtype));
 
     cls.def(
       "as_SymmetricTensor",
@@ -262,12 +259,12 @@ bind_tensors_mask(py::module_& m)
           }
           return self.as_SymmetricTensor(guarantee_copy, warning);
       },
-      py::arg("guarantee_copy") = false,
-      py::arg("warning") = py::none(),
-      py::arg("dtype") = Dtype::Complex128,
+      nb::arg("guarantee_copy") = false,
+      nb::arg("warning").none() = nb::none(),
+      nb::arg("dtype") = Dtype::Complex128,
       DOC(lasyten, Mask, as_SymmetricTensor));
 
-    cls.def("as_DiagonalTensor", &Mask::as_DiagonalTensor, py::arg("dtype") = Dtype::Complex128);
+    cls.def("as_DiagonalTensor", &Mask::as_DiagonalTensor, nb::arg("dtype") = Dtype::Complex128);
 
     cls.def("as_block_mask", &Mask::as_block_mask);
     cls.def("as_numpy_mask", &Mask::as_numpy_mask);
@@ -277,16 +274,16 @@ bind_tensors_mask(py::module_& m)
 
     cls.def("copy",
             &Mask::copy,
-            py::arg("deep") = true,
-            py::arg("device") = py::none(),
-            py::arg("dtype") = py::none(),
+            nb::arg("deep") = true,
+            nb::arg("device").none() = nb::none(),
+            nb::arg("dtype").none() = nb::none(),
             DOC(lasyten, Mask, copy));
 
     // Override Tensor.dagger / hc properties (which delegate to the Python free function).
-    cls.def_property_readonly("dagger", &Mask::dagger, DOC(lasyten, Mask, dagger));
-    cls.def_property_readonly("hc", &Mask::dagger, DOC(lasyten, Mask, dagger));
+    cls.def_prop_ro("dagger", &Mask::dagger, DOC(lasyten, Mask, dagger));
+    cls.def_prop_ro("hc", &Mask::dagger, DOC(lasyten, Mask, dagger));
 
-    cls.def("_get_item", &Mask::_get_item, py::arg("idx"), DOC(lasyten, Mask, _get_item));
+    cls.def("_get_item", &Mask::_get_item, nb::arg("idx"), DOC(lasyten, Mask, _get_item));
 
     cls.def("logical_not", &Mask::logical_not, DOC(lasyten, Mask, logical_not));
     cls.def("orthogonal_complement",
@@ -295,14 +292,14 @@ bind_tensors_mask(py::module_& m)
 
     cls.def("move_to_device",
             &Mask::move_to_device,
-            py::arg("device"),
+            nb::arg("device"),
             DOC(lasyten, Mask, move_to_device));
 
     cls.def("to_backend",
             &Mask::to_backend,
-            py::arg("backend"),
-            py::arg("dtype") = py::none(),
-            py::arg("device") = py::none(),
+            nb::arg("backend"),
+            nb::arg("dtype").none() = nb::none(),
+            nb::arg("device").none() = nb::none(),
             DOC(lasyten, Mask, to_backend));
 
     cls.def(
@@ -310,9 +307,9 @@ bind_tensors_mask(py::module_& m)
       [](Mask& self, py::object leg_order, std::optional<Dtype> dtype, bool understood_braiding) {
           return self.to_dense_block(optional_leg_order(leg_order), dtype, understood_braiding);
       },
-      py::arg("leg_order") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::arg("understood_braiding") = false,
+      nb::arg("leg_order").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("understood_braiding") = false,
       DOC(lasyten, Mask, to_dense_block));
 
     cls.def(
@@ -320,9 +317,9 @@ bind_tensors_mask(py::module_& m)
       [](Mask& self, py::object leg_order, py::object numpy_dtype, bool understood_braiding) {
           return self.to_numpy(optional_leg_order(leg_order), numpy_dtype, understood_braiding);
       },
-      py::arg("leg_order") = py::none(),
-      py::arg("numpy_dtype") = py::none(),
-      py::arg("understood_braiding") = false,
+      nb::arg("leg_order").none() = nb::none(),
+      nb::arg("numpy_dtype").none() = nb::none(),
+      nb::arg("understood_braiding") = false,
       DOC(lasyten, Mask, to_numpy));
 
     cls.def(
@@ -336,13 +333,13 @@ bind_tensors_mask(py::module_& m)
           if (py::isinstance<py::bool_>(other)) {
               return py::cast(self._binary_operand(other.cast<bool>(), adapted, operand));
           }
-          if (py::isinstance<Mask>(other) ||
+          if (lasyten::py_isinstance<Mask>(other) ||
               py::isinstance(other,
                              py::module_::import("lasyten.tensors._tensors").attr("Mask"))) {
               return py::cast(self._binary_operand(other.cast<MaskCPtr>(), adapted, operand));
           }
           if (return_NotImplemented &&
-              !(py::isinstance<Tensor>(other) ||
+              !(lasyten::py_isinstance<Tensor>(other) ||
                 py::isinstance(other,
                                py::module_::import("lasyten.tensors._tensors").attr("Tensor")) ||
                 py::isinstance(other, py::module_::import("numbers").attr("Number")))) {
@@ -352,10 +349,10 @@ bind_tensors_mask(py::module_& m)
                                                   operand,
                                                   std::string(py::str(py::type::of(other)))));
       },
-      py::arg("other"),
-      py::arg("func"),
-      py::arg("operand"),
-      py::arg("return_NotImplemented") = true,
+      nb::arg("other"),
+      nb::arg("func"),
+      nb::arg("operand"),
+      nb::arg("return_NotImplemented") = true,
       DOC(lasyten, Mask, _binary_operand));
 
     cls.def(
@@ -363,7 +360,7 @@ bind_tensors_mask(py::module_& m)
       [](Mask& self, py::function func) {
           return self._unary_operand(adapt_block_bool_unary(func, self.backend->block_backend));
       },
-      py::arg("func"));
+      nb::arg("func"));
 
     cls.def("__bool__", [](Mask&) {
         throw py::type_error("The truth value of a Mask is ambiguous. Use a.any() or a.all()");
@@ -383,12 +380,12 @@ bind_tensors_mask(py::module_& m)
               if (py::isinstance<py::bool_>(other)) {
                   return py::cast(self._binary_operand(other.cast<bool>(), func, operand));
               }
-              if (py::isinstance<Mask>(other) ||
+              if (lasyten::py_isinstance<Mask>(other) ||
                   py::isinstance(other,
                                  py::module_::import("lasyten.tensors._tensors").attr("Mask"))) {
                   return py::cast(self._binary_operand(other.cast<MaskCPtr>(), func, operand));
               }
-              if (!(py::isinstance<Tensor>(other) ||
+              if (!(lasyten::py_isinstance<Tensor>(other) ||
                     py::isinstance(
                       other, py::module_::import("lasyten.tensors._tensors").attr("Tensor")) ||
                     py::isinstance(other, py::module_::import("numbers").attr("Number")))) {
@@ -399,7 +396,7 @@ bind_tensors_mask(py::module_& m)
                             operand,
                             std::string(py::str(py::type::of(other)))));
           },
-          py::arg("other"));
+          nb::arg("other"));
     };
     bind_bool_binop("__and__", "and_", "&");
     bind_bool_binop("__rand__", "and_", "&");

@@ -6,7 +6,7 @@
 #include <lasyten/tensors/vector_like.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/ops_algebra.h"
 
@@ -89,15 +89,15 @@ py_as_scalar(py::object obj, TensorCPtr hint)
 } // namespace
 
 void
-bind_tensors_ops_algebra(py::module_& m)
+bind_tensors_ops_algebra(nb::module_& m)
 {
     m.def("almost_equal",
           &almost_equal,
-          py::arg("tensor_1"),
-          py::arg("tensor_2"),
-          py::arg("rtol") = 1e-5,
-          py::arg("atol") = 1e-8,
-          py::arg("allow_different_types") = false,
+          nb::arg("tensor_1"),
+          nb::arg("tensor_2"),
+          nb::arg("rtol") = 1e-5,
+          nb::arg("atol") = 1e-8,
+          nb::arg("allow_different_types") = false,
           DOC(lasyten, almost_equal));
 
     m.def(
@@ -105,9 +105,9 @@ bind_tensors_ops_algebra(py::module_& m)
       [](TensorCPtr tensor, MaskCPtr mask, py::object leg) {
           return apply_mask(std::move(tensor), std::move(mask), py_as_leg_ref(leg));
       },
-      py::arg("tensor"),
-      py::arg("mask"),
-      py::arg("leg"),
+      nb::arg("tensor"),
+      nb::arg("mask"),
+      nb::arg("leg"),
       DOC(lasyten, apply_mask));
 
     m.def(
@@ -115,12 +115,12 @@ bind_tensors_ops_algebra(py::module_& m)
       [](TensorCPtr tensor, MaskCPtr mask, py::object leg) {
           return enlarge_leg(std::move(tensor), std::move(mask), py_as_leg_ref(leg));
       },
-      py::arg("tensor"),
-      py::arg("mask"),
-      py::arg("leg"),
+      nb::arg("tensor"),
+      nb::arg("mask"),
+      nb::arg("leg"),
       DOC(lasyten, enlarge_leg));
 
-    m.def("dagger", &dagger, py::arg("tensor"), DOC(lasyten, dagger));
+    m.def("dagger", &dagger, nb::arg("tensor"), DOC(lasyten, dagger));
 
     m.def(
       "compose",
@@ -130,10 +130,10 @@ bind_tensors_ops_algebra(py::module_& m)
                                                   optional_relabel(relabel1),
                                                   optional_relabel(relabel2)));
       },
-      py::arg("tensor1"),
-      py::arg("tensor2"),
-      py::arg("relabel1") = py::none(),
-      py::arg("relabel2") = py::none(),
+      nb::arg("tensor1"),
+      nb::arg("tensor2"),
+      nb::arg("relabel1").none() = nb::none(),
+      nb::arg("relabel2").none() = nb::none(),
       doc_plus(DOC(lasyten, compose),
                R"pydoc(
 In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabel).
@@ -141,7 +141,8 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
 
     m.def(
       "get_same_device",
-      [](py::args tensors, std::string error_msg) {
+      [](nb::args tensors_nb, std::string error_msg) {
+          auto tensors = pyargs(tensors_nb);
           std::vector<TensorCPtr> vec;
           vec.reserve(static_cast<std::size_t>(tensors.size()));
           for (auto item : tensors) {
@@ -149,16 +150,17 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
           }
           return get_same_device(vec, std::move(error_msg));
       },
-      py::kw_only(),
-      py::arg("error_msg") = "Incompatible devices.",
+      nb::arg("tensors"),
+      nb::kw_only(),
+      nb::arg("error_msg") = "Incompatible devices.",
       DOC(lasyten, get_same_device));
 
     // Bind the VectorLike overload (DOC(..., 2)); Tensor overload is DOC(lasyten, inner).
     m.def("inner",
           static_cast<BlockBackend::Scalar (*)(VectorLikeCPtr, VectorLikeCPtr, bool)>(&inner),
-          py::arg("A"),
-          py::arg("B"),
-          py::arg("do_dagger") = true,
+          nb::arg("A"),
+          nb::arg("B"),
+          nb::arg("do_dagger") = true,
           DOC(lasyten, inner, 2));
 
     m.def(
@@ -189,13 +191,13 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
           }
           return py::isinstance(obj, py::module_::import("numbers").attr("Number"));
       },
-      py::arg("obj"),
+      nb::arg("obj"),
       doc_plus(DOC(lasyten, is_scalar),
                R"pydoc(
 Also accepts Python numbers and duck-typed tensors with ``domain`` / ``codomain``.
 )pydoc"));
 
-    m.def("item", &item, py::arg("tensor"), DOC(lasyten, item));
+    m.def("item", &item, nb::arg("tensor"), DOC(lasyten, item));
 
     m.def(
       "linear_combination",
@@ -229,24 +231,24 @@ Also accepts Python numbers and duck-typed tensors with ``domain`` / ``codomain`
           return py_cast_vector_like(
             linear_combination(std::move(sa), std::move(v), std::move(sb), std::move(w)));
       },
-      py::arg("a").none(true),
-      py::arg("v"),
-      py::arg("b").none(true),
-      py::arg("w"),
+      nb::arg("a").none(),
+      nb::arg("v"),
+      nb::arg("b").none(),
+      nb::arg("w"),
       doc_cpp_ref(R"pydoc(The linear combination ``a * v + b * w``)pydoc",
                   "lasyten::linear_combination(BlockBackend::Scalar const &, VectorLikeCPtr, "
                   "BlockBackend::Scalar const &, VectorLikeCPtr)"));
 
     m.def("norm",
           static_cast<BlockBackend::Scalar (*)(VectorLikeCPtr)>(&norm),
-          py::arg("tensor"),
+          nb::arg("tensor"),
           DOC(lasyten, norm, 2));
 
     m.def("on_device",
           &on_device,
-          py::arg("tensor"),
-          py::arg("device"),
-          py::arg("copy") = true,
+          nb::arg("tensor"),
+          nb::arg("device"),
+          nb::arg("copy") = true,
           DOC(lasyten, on_device));
 
     m.def(
@@ -257,10 +259,10 @@ Also accepts Python numbers and duck-typed tensors with ``domain`` / ``codomain`
                        optional_relabel(relabel1),
                        optional_relabel(relabel2));
       },
-      py::arg("tensor1"),
-      py::arg("tensor2"),
-      py::arg("relabel1") = py::none(),
-      py::arg("relabel2") = py::none(),
+      nb::arg("tensor1"),
+      nb::arg("tensor2"),
+      nb::arg("relabel1").none() = nb::none(),
+      nb::arg("relabel2").none() = nb::none(),
       doc_plus(DOC(lasyten, outer),
                R"pydoc(
 In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabel).
@@ -279,18 +281,19 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
                                  optional_relabel(relabel1),
                                  optional_relabel(relabel2));
       },
-      py::arg("tensor1"),
-      py::arg("tensor2"),
-      py::arg("tensor1_first_leg"),
-      py::arg("relabel1") = py::none(),
-      py::arg("relabel2") = py::none(),
+      nb::arg("tensor1"),
+      nb::arg("tensor2"),
+      nb::arg("tensor1_first_leg"),
+      nb::arg("relabel1").none() = nb::none(),
+      nb::arg("relabel2").none() = nb::none(),
       doc_cpp_ref(
         R"pydoc(Tensor contraction / composition involving only a part of the full (co)domain.)pydoc",
         "lasyten::partial_compose()"));
 
     m.def(
       "partial_trace",
-      [](TensorCPtr tensor, py::args pairs, py::object levels) {
+      [](TensorCPtr tensor, nb::args pairs_nb, py::object levels) {
+          auto pairs = pyargs(pairs_nb);
           std::vector<std::vector<LegRef>> pair_vec;
           pair_vec.reserve(static_cast<std::size_t>(pairs.size()));
           for (auto item : pairs) {
@@ -312,17 +315,18 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
           return py_from_tensor_or_scalar(
             partial_trace(std::move(tensor), std::move(pair_vec), levels_opt));
       },
-      py::arg("tensor"),
-      py::kw_only(),
-      py::arg("levels") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("pairs"),
+      nb::kw_only(),
+      nb::arg("levels").none() = nb::none(),
       DOC(lasyten, partial_trace));
 
-    m.def("pinv", &pinv, py::arg("tensor"), py::arg("cutoff") = 1e-15, DOC(lasyten, pinv));
+    m.def("pinv", &pinv, nb::arg("tensor"), nb::arg("cutoff") = 1e-15, DOC(lasyten, pinv));
 
     m.def(
       "scalar_multiply",
       [](py::object a, py::object v) {
-          if (!py::isinstance<VectorLike>(v)) {
+          if (!lasyten::py_isinstance<VectorLike>(v)) {
               throw py::type_error("scalar_multiply() v must be VectorLike");
           }
           auto vec = v.cast<VectorLikeCPtr>();
@@ -344,8 +348,8 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
                      .cast<BlockBackend::Scalar>();
           return py_cast_vector_like(scalar_multiply(std::move(s), std::move(vec)));
       },
-      py::arg("a").none(true),
-      py::arg("v"),
+      nb::arg("a").none(),
+      nb::arg("v"),
       doc_cpp_ref(R"pydoc(The scalar multiplication ``a * v``)pydoc",
                   "lasyten::scalar_multiply(BlockBackend::Scalar const &, VectorLikeCPtr)"));
 
@@ -354,9 +358,9 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
       [](TensorCPtr tensor, DiagonalTensorCPtr diag, py::object leg) {
           return scale_axis(std::move(tensor), std::move(diag), py_as_leg_ref(leg));
       },
-      py::arg("tensor"),
-      py::arg("diag"),
-      py::arg("leg"),
+      nb::arg("tensor"),
+      nb::arg("diag"),
+      nb::arg("leg"),
       DOC(lasyten, scale_axis));
 
     m.def(
@@ -374,21 +378,21 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
                                                optional_relabel(relabel1),
                                                optional_relabel(relabel2)));
       },
-      py::arg("tensor1"),
-      py::arg("tensor2"),
-      py::arg("legs1"),
-      py::arg("legs2"),
-      py::arg("relabel1") = py::none(),
-      py::arg("relabel2") = py::none(),
+      nb::arg("tensor1"),
+      nb::arg("tensor2"),
+      nb::arg("legs1"),
+      nb::arg("legs2"),
+      nb::arg("relabel1").none() = nb::none(),
+      nb::arg("relabel2").none() = nb::none(),
       doc_plus(DOC(lasyten, tdot),
                R"pydoc(
 In Python, ``legs1`` / ``legs2`` are ``int``, ``str``, or a sequence thereof;
 ``relabel1`` / ``relabel2`` are ``dict | None``.
 )pydoc"));
 
-    m.def("trace", &trace, py::arg("tensor"), DOC(lasyten, trace));
+    m.def("trace", &trace, nb::arg("tensor"), DOC(lasyten, trace));
 
-    m.def("transpose", &transpose, py::arg("tensor"), DOC(lasyten, transpose));
+    m.def("transpose", &transpose, nb::arg("tensor"), DOC(lasyten, transpose));
 }
 
 } // namespace lasyten

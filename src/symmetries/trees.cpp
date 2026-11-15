@@ -1,6 +1,5 @@
 #include <lasyten/symmetries/trees.h>
 
-#include <lasyten/block_backend/numpy.h>
 #include <lasyten/config.h>
 #include <lasyten/symmetries/exceptions.h>
 #include <lasyten/symmetries/fusion_symbol.h>
@@ -1112,7 +1111,7 @@ FusionTree::to_dense_block(BlockBackend* backend,
 
     BlockBackend* block_backend = backend;
     if (block_backend == nullptr) {
-        block_backend = NumpyBlockBackend::from_factory("cpu");
+        block_backend = default_cpu_block_backend();
     }
 
     if (!dtype.has_value()) {

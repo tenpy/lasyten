@@ -29,10 +29,10 @@ as_space(py::handle obj)
 Symmetry::Ptr
 factor_symmetry(py::handle factor)
 {
-    if (py::isinstance<Space>(factor)) {
+    if (py_isinstance<Space>(factor)) {
         return factor.cast<Space*>()->symmetry;
     }
-    if (py::isinstance<Leg>(factor)) {
+    if ((py_isinstance<ElementarySpace>(factor) || py_isinstance<LegPipe>(factor))) {
         return factor.cast<Leg>().symmetry();
     }
     return factor.attr("symmetry").cast<Symmetry::Ptr>();
@@ -42,10 +42,10 @@ factor_symmetry(py::handle factor)
 float64
 factor_dim(py::handle factor)
 {
-    if (py::isinstance<Space>(factor)) {
+    if (py_isinstance<Space>(factor)) {
         return factor.cast<Space*>()->dim;
     }
-    if (py::isinstance<Leg>(factor)) {
+    if ((py_isinstance<ElementarySpace>(factor) || py_isinstance<LegPipe>(factor))) {
         return factor.cast<Leg>().dim();
     }
     return factor.attr("dim").cast<float64>();
@@ -316,7 +316,7 @@ tensor_product_from_python(py::object obj, Symmetry::Ptr symmetry)
         }
         return std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{}, std::move(symmetry));
     }
-    if (py::isinstance<TensorProduct>(obj)) {
+    if (py_isinstance<TensorProduct>(obj)) {
         return obj.cast<TensorProduct::Ptr>();
     }
     std::vector<Leg::Ptr> factors;
@@ -330,11 +330,11 @@ std::tuple<TensorProduct::Ptr, TensorProduct::Ptr, TensorBackend::Ptr, Symmetry:
 parse_tensor_init_args(py::object codomain, py::object domain, TensorBackend::Ptr backend)
 {
     Symmetry::Ptr symmetry;
-    if (py::isinstance<TensorProduct>(codomain)) {
+    if (py_isinstance<TensorProduct>(codomain)) {
         symmetry = codomain.cast<TensorProduct::Ptr>()->symmetry;
     } else if (py::len(codomain) > 0) {
         symmetry = factor_symmetry(codomain[py::int_(0)]);
-    } else if (!domain.is_none() && py::isinstance<TensorProduct>(domain)) {
+    } else if (!domain.is_none() && py_isinstance<TensorProduct>(domain)) {
         symmetry = domain.cast<TensorProduct::Ptr>()->symmetry;
     } else if (!domain.is_none() && py::len(domain) > 0) {
         symmetry = factor_symmetry(domain[py::int_(0)]);

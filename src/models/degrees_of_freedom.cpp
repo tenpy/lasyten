@@ -65,19 +65,19 @@ numpy()
 bool
 is_symmetric_tensor(py::object const& op)
 {
-    return py::isinstance<SymmetricTensor>(op);
+    return py_isinstance<SymmetricTensor>(op);
 }
 
 bool
 is_diagonal_tensor(py::object const& op)
 {
-    return py::isinstance<DiagonalTensor>(op) || py::isinstance<Identity>(op);
+    return py_isinstance<DiagonalTensor>(op) || py_isinstance<Identity>(op);
 }
 
 SymmetricTensorPtr
 as_symmetric_tensor(py::object op)
 {
-    if (py::isinstance<SymmetricTensor>(op)) {
+    if (py_isinstance<SymmetricTensor>(op)) {
         return op.cast<SymmetricTensorPtr>();
     }
     return op.cast<SymmetricTensorPtr>();

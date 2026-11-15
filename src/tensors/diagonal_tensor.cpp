@@ -4,7 +4,6 @@
 #include <lasyten/backends/abelian.h>
 #include <lasyten/backends/backend_factory.h>
 #include <lasyten/backends/fusion_tree_backend.h>
-#include <lasyten/block_backend/torch.h>
 #include <lasyten/symmetries/exceptions.h>
 #include <lasyten/tools.h>
 #include <lasyten/tools/warn.h>
@@ -960,9 +959,9 @@ DiagonalTensor::from_hdf5(lasyten::hdf5::Loader& loader,
       data, as_space(codomain->factors[0]), backend, symmetry, std::move(labels));
     obj->dtype = dt;
     obj->device = backend->get_device_from_data(data);
-    if (dynamic_cast<TorchBlockBackend*>(backend->block_backend.get()) != nullptr) {
-        obj->device = TorchBlockBackend::device_for_hdf5_load(
-          obj->device, backend->block_backend->default_device);
+    if (is_torch_block_backend(backend->block_backend.get())) {
+        obj->device =
+          torch_device_for_hdf5_load(obj->device, backend->block_backend->default_device);
         if (auto* abd = dynamic_cast<AbelianBackendData*>(data.get())) {
             abd->device = obj->device;
         } else if (auto* ftd = dynamic_cast<FusionTreeData*>(data.get())) {
@@ -1059,9 +1058,8 @@ Identity::from_hdf5(lasyten::hdf5::Loader& loader,
         labels.assign(2, "");
     }
 
-    if (dynamic_cast<TorchBlockBackend*>(backend->block_backend.get()) != nullptr) {
-        device =
-          TorchBlockBackend::device_for_hdf5_load(device, backend->block_backend->default_device);
+    if (is_torch_block_backend(backend->block_backend.get())) {
+        device = torch_device_for_hdf5_load(device, backend->block_backend->default_device);
     } else {
         device = backend->block_backend->as_device(device);
     }

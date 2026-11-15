@@ -5,13 +5,22 @@
 enable_testing()
 
 # C++ tests that exercise NumpyBlockBackend (or other py:: APIs) need
-# pybind11::embed so a Python interpreter is available. Pure C++ unit tests
-# that never touch numpy/pybind APIs would not need embed — none of the
-# current suite qualifies yet while public headers pull in py:: types.
+# pybind11::embed so a Python interpreter is available.
+#
+# With LASYTEN_WITH_PYTHON=OFF only the Python-free tests are built (Phase 5 scaffolding): the
+# Eigen block-backend test compiles its numpy round trip out (LASYTEN_HAS_PYTHON=0) and runs
+# without an interpreter. The other tests / examples use the full tensor stack, which still needs
+# Python.
 if(NOT LASYTEN_WITH_PYTHON)
   message(STATUS
-    "LASYTEN_WITH_PYTHON=OFF: skipping CommonCppTests / examples that need "
-    "numpy backends (excluded from liblasyten).")
+    "LASYTEN_WITH_PYTHON=OFF: building only the Python-free ctest (test_eigen_block_backend); "
+    "skipping the other tests / examples that need the Python-dependent liblasyten sources.")
+  add_executable(EigenNoPythonTests test_eigen_block_backend_main.cpp test_eigen_block_backend.cpp)
+  set_source_files_properties(test_eigen_block_backend_main.cpp test_eigen_block_backend.cpp
+    PROPERTIES SKIP_LINTING ON)
+  target_include_directories(EigenNoPythonTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+  target_link_libraries(EigenNoPythonTests PUBLIC lasyten)
+  add_test(NAME test_eigen_block_backend_no_python COMMAND EigenNoPythonTests)
   return()
 endif()
 
@@ -21,6 +30,7 @@ set (TestsToRun
   test_sector_casters.cpp
   test_block_inds.cpp
   test_lru_cache.cpp
+  test_eigen_block_backend.cpp
 )
 
 create_test_sourcelist(Tests CommonCppTests.cpp ${TestsToRun})

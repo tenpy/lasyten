@@ -47,6 +47,7 @@ class BlockBackend
                                     BlockCPtr // index-array or bool-mask Block (device-aware)
                                     >;
 
+#if LASYTEN_HAS_PYTHON
     /// Convert a native indexer to a Python key object (for numpy / Array API bridges).
     static py::object block_index_to_py(const BlockIndex& idx);
     /// Convert a sequence of native indexers to a Python key (single object or tuple).
@@ -54,6 +55,7 @@ class BlockBackend
     /// Try to parse a Python key into native ``BlockIndex`` entries. Returns nullopt for
     /// unsupported keys (Ellipsis, None/newaxis, plain lists, etc.).
     static std::optional<std::vector<BlockIndex>> try_py_key_to_block_indices(py::object key);
+#endif // LASYTEN_HAS_PYTHON
 
   public:
     /// Abstract base class for dense blocks. Subclassed per backend (e.g.
@@ -71,11 +73,13 @@ class BlockBackend
         /// Return the backend for this block's device (e.g.
         /// NumpyBlockBackend::from_factory(device())).
         virtual BlockBackend* get_backend() const = 0;
+#if LASYTEN_HAS_PYTHON
         /// convert to numpy array, might be copy or (immutable) view
         virtual py::array to_numpy() const = 0;
         /// convert to numpy array with given Dtype
         // default impl: `to_numpy()` then `asarray(..., dtype))`.
         virtual py::array to_numpy(Dtype dtype) const;
+#endif // LASYTEN_HAS_PYTHON
 
         /// Shape of the block (one size per axis).
         virtual std::vector<int64> shape() const = 0;
@@ -113,22 +117,26 @@ class BlockBackend
         virtual std::shared_ptr<Block> pow(const Scalar& exponent) const = 0;
         virtual std::shared_ptr<Block> pow(const Block& exponent) const = 0;
 
+#if LASYTEN_HAS_PYTHON
         /// Arbitrary access by Python key; returns new block (shared_ptr).
         std::shared_ptr<const Block> operator[](py::object key) const;
         std::shared_ptr<Block> operator[](py::object key);
-        /// Native C++ subblock access (slices / index arrays); does not route through py::object.
+#endif // LASYTEN_HAS_PYTHON
+       /// Native C++ subblock access (slices / index arrays); does not route through py::object.
         std::shared_ptr<const Block> operator[](std::span<const BlockIndex> key) const;
         std::shared_ptr<Block> operator[](std::span<const BlockIndex> key);
         std::shared_ptr<const Block> operator[](std::initializer_list<BlockIndex> key) const;
         std::shared_ptr<Block> operator[](std::initializer_list<BlockIndex> key);
 
+#if LASYTEN_HAS_PYTHON
         /// Assign to whole block; uses native full-slice ``set_item``.
         Block& operator=(py::object rhs);
 
         /// Arbitrary getitem; implemented by backends (e.g. numpy __getitem__).
         virtual std::shared_ptr<Block> get_item(py::object key) = 0;
         virtual std::shared_ptr<const Block> get_item(py::object key) const = 0;
-        /// Native C++ getitem by slices / ints / index arrays (one indexer per axis).
+#endif // LASYTEN_HAS_PYTHON
+       /// Native C++ getitem by slices / ints / index arrays (one indexer per axis).
         virtual std::shared_ptr<Block> get_item(std::span<const BlockIndex> key) = 0;
         virtual std::shared_ptr<const Block> get_item(std::span<const BlockIndex> key) const = 0;
         /// Get a single element by integer multi-index; returns a Scalar.
@@ -137,9 +145,11 @@ class BlockBackend
         /// Get a single element by integer index for 1D blocks; returns a Scalar.
         /// Default: delegates to get_item(std::vector{idx}) after checking ndim()==1.
         virtual Scalar get_item(int64 idx) const;
+#if LASYTEN_HAS_PYTHON
         /// Arbitrary setitem; implemented by backends (e.g. numpy __setitem__).
         virtual void set_item(py::object key, py::object value) = 0;
-        /// Native C++ setitem by slices / ints / index arrays.
+#endif // LASYTEN_HAS_PYTHON
+       /// Native C++ setitem by slices / ints / index arrays.
         virtual void set_item(std::span<const BlockIndex> key, const Block& value) = 0;
         /// Native C++ setitem from a Scalar value.
         virtual void set_item(std::span<const BlockIndex> key, const Scalar& value);
@@ -190,10 +200,12 @@ class BlockBackend
         int64 as_int64() const;
         /// As a bool scalar. Throws if dtype is not Int64.
         bool as_bool() const;
+#if LASYTEN_HAS_PYTHON
         /// Return as a numpy scalar (``np.bool_``, ``np.float32``, ``np.float64``,
         /// ``np.complex64``,
         /// ``np.complex128``).
         py::object to_numpy() const;
+#endif // LASYTEN_HAS_PYTHON
 
         Scalar operator+(const Scalar& other) const;
         Scalar operator-() const;
@@ -259,7 +271,9 @@ class BlockBackend
 
   public:
     virtual Scalar as_scalar(complex128 value, Dtype dtype) = 0;
+#if LASYTEN_HAS_PYTHON
     virtual Scalar as_scalar(py::object value, Dtype dtype) = 0;
+#endif // LASYTEN_HAS_PYTHON
     virtual Scalar as_scalar(const Scalar& value);
     virtual Scalar as_scalar(bool b) = 0;
     virtual Scalar as_scalar(int64 x) = 0;
@@ -302,9 +316,18 @@ class BlockBackend
     BlockPtr apply_basis_perm(const BlockCPtr& block,
                               const std::vector<LegCPtr>& legs,
                               bool inv = false);
+    /// Apply permutations to every axis of a dense block (native: one index vector per axis,
+    /// ``result.take(perm[ax], axis=ax)``).
+    ///
+    /// Default: forwards to the ``py::array_t`` overload (needs ``LASYTEN_WITH_PYTHON``); backends
+    /// that work without Python (EigenBlockBackend) override this directly.
+    virtual BlockPtr apply_axis_permutations(const BlockCPtr& block,
+                                             const std::vector<std::vector<int64>>& perms);
+#if LASYTEN_HAS_PYTHON
     /// Apply permutations to every axis of a dense block
     virtual BlockPtr apply_leg_permutations(const BlockCPtr& block,
                                             const std::vector<py::array_t<int64>>& perms) = 0;
+#endif // LASYTEN_HAS_PYTHON
     /// Convert objects to blocks.
     ///
     /// Should support blocks, numpy arrays, nested python containers. May support more.
@@ -315,9 +338,11 @@ class BlockBackend
     ///
     /// block_copy
     ///     Guarantees an independent copy.
+#if LASYTEN_HAS_PYTHON
     virtual BlockPtr as_block(py::object a,
                               std::optional<Dtype> dtype = std::nullopt,
                               std::optional<std::string> device = std::nullopt) = 0;
+#endif // LASYTEN_HAS_PYTHON
     /// Convert input string to unambiguous device name.
     ///
     /// In particular, this should map any possible aliases to one unique name, e.g.
@@ -431,9 +456,11 @@ class BlockBackend
     /// where N is the number of True entries. The result is the coefficient matrix of the
     /// projection map.
     virtual BlockPtr block_from_mask(const BlockCPtr& mask, Dtype dtype) = 0;
+#if LASYTEN_HAS_PYTHON
     virtual BlockPtr block_from_numpy(const py::array& a,
                                       std::optional<Dtype> dtype = std::nullopt,
                                       std::optional<std::string> device = std::nullopt) = 0;
+#endif // LASYTEN_HAS_PYTHON
     const std::string& get_device(const BlockCPtr& a);
     /// Get the diagonal of a 2D block as a 1D block
     virtual BlockPtr get_diagonal(const BlockCPtr& a,
@@ -594,7 +621,9 @@ class BlockBackend
     /// intended to be used with ``K == a_num_codomain_legs``.
     BlockPtr tensor_outer(const BlockCPtr& a, const BlockCPtr& b, int64 K);
     virtual BlockPtr to_dtype(const BlockCPtr& a, Dtype dtype) = 0;
+#if LASYTEN_HAS_PYTHON
     py::object to_numpy(const BlockCPtr& a, std::optional<py::object> numpy_dtype = std::nullopt);
+#endif // LASYTEN_HAS_PYTHON
     virtual Scalar trace_full(const BlockCPtr& a) = 0;
     virtual BlockPtr trace_partial(const BlockCPtr& a,
                                    const std::vector<int64>& idcs1,
@@ -705,4 +734,29 @@ BlockPtr operator>=(float64 left, const BlockBackend::Block& right);
 std::ostream& operator<<(std::ostream& os, const BlockBackend::Block& block);
 std::ostream& operator<<(std::ostream& os, const BlockBackend::Scalar& scalar);
 
+/// The block backend behind the ``"cpu"`` name of the backend factory (singleton).
+///
+/// This is `EigenBlockBackend` if ``LASYTEN_WITH_NUMPY_BACKEND`` is off, and still the
+/// transitional `NumpyBlockBackend` otherwise (until `EigenBlockBackend` passes the full
+/// test-suite; then this is the single place to switch). Library code that just needs "some CPU
+/// block backend" should call this instead of naming a concrete backend.
+std::shared_ptr<BlockBackend> default_cpu_block_backend_shared();
+
+/// Whether ``backend`` is a `TorchBlockBackend` (always false without
+/// ``LASYTEN_WITH_TORCH_BACKEND``). Lets Python-free code treat torch devices specially when
+/// loading from HDF5 without including the torch header.
+bool is_torch_block_backend(const BlockBackend* backend);
+/// `TorchBlockBackend::device_for_hdf5_load` (identity without ``LASYTEN_WITH_TORCH_BACKEND``).
+std::string torch_device_for_hdf5_load(std::string const& device,
+                                       std::optional<std::string> fallback = std::nullopt);
+inline BlockBackend*
+default_cpu_block_backend()
+{
+    return default_cpu_block_backend_shared().get();
+}
+
 } // namespace lasyten
+
+// pybind11 casters for nested bound types, delegating to nanobind (py_nanobind_bridge.h).
+LASYTEN_PY_BRIDGE_CLASS(::lasyten::BlockBackend::Block)
+LASYTEN_PY_BRIDGE_CLASS(::lasyten::BlockBackend::Scalar)

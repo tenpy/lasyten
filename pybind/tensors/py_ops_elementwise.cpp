@@ -3,7 +3,7 @@
 #include <lasyten/tensors/tensor.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/ops_elementwise.h"
 
@@ -24,7 +24,7 @@ is_number_or_scalar(py::object x)
 {
     return py::isinstance(x, py::module_::import("numbers").attr("Number")) ||
            py::isinstance(x, py::module_::import("lasyten.block_backends").attr("Scalar")) ||
-           (py::isinstance<Tensor>(x) &&
+           (lasyten::py_isinstance<Tensor>(x) &&
             py::module_::import("lasyten.tensors._tensors").attr("is_scalar")(x).cast<bool>());
 }
 
@@ -39,7 +39,7 @@ template<typename TensorFn, typename ScalarPyFn>
 py::object
 dispatch_elementwise(py::object x, TensorFn tensor_fn, ScalarPyFn scalar_py_fn)
 {
-    if (py::isinstance<DiagonalTensor>(x)) {
+    if (lasyten::py_isinstance<DiagonalTensor>(x)) {
         return py::cast(tensor_fn(x.cast<DiagonalTensorCPtr>()));
     }
     if (is_number_or_scalar(x)) {
@@ -51,7 +51,7 @@ dispatch_elementwise(py::object x, TensorFn tensor_fn, ScalarPyFn scalar_py_fn)
 } // namespace
 
 void
-bind_tensors_ops_elementwise(py::module_& m)
+bind_tensors_ops_elementwise(nb::module_& m)
 {
     m.def(
       "angle",
@@ -61,7 +61,7 @@ bind_tensors_ops_elementwise(py::module_& m)
             [](DiagonalTensorCPtr t) { return angle(t); },
             [](py::object n) { return numpy().attr("angle")(n); });
       },
-      py::arg("x"),
+      nb::arg("x"),
       doc_plus(DOC(lasyten, angle),
                R"pydoc(
 In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
@@ -81,8 +81,8 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
                 return py::object(py::float_(1.0) / n);
             });
       },
-      py::arg("x"),
-      py::arg("cutoff") = 1e-15,
+      nb::arg("x"),
+      nb::arg("cutoff") = 1e-15,
       doc_plus(DOC(lasyten, cutoff_inverse),
                R"pydoc(
 In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
@@ -95,12 +95,12 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
             x,
             [](DiagonalTensorCPtr t) { return complex_conj(t); },
             [](py::object n) {
-                if (py::isinstance<BlockBackend::Scalar>(n))
+                if (lasyten::py_isinstance<BlockBackend::Scalar>(n))
                     return py::cast(n.cast<BlockBackend::Scalar>().conj());
                 return numpy().attr("conj")(n);
             });
       },
-      py::arg("x"),
+      nb::arg("x"),
       doc_plus(DOC(lasyten, complex_conj),
                R"pydoc(
 In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
@@ -114,7 +114,7 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
             [](DiagonalTensorCPtr t) { return imag(t); },
             [](py::object n) { return numpy().attr("imag")(n); });
       },
-      py::arg("x"),
+      nb::arg("x"),
       doc_plus(DOC(lasyten, imag),
                R"pydoc(
 In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
@@ -128,7 +128,7 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
             [](DiagonalTensorCPtr t) { return real(t); },
             [](py::object n) { return numpy().attr("real")(n); });
       },
-      py::arg("x"),
+      nb::arg("x"),
       doc_plus(DOC(lasyten, real),
                R"pydoc(
 In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
@@ -141,13 +141,13 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
             x,
             [tol](DiagonalTensorCPtr t) { return real_if_close(t, tol); },
             [tol](py::object n) {
-                if (py::isinstance<BlockBackend::Scalar>(n))
+                if (lasyten::py_isinstance<BlockBackend::Scalar>(n))
                     return py::cast(n.cast<BlockBackend::Scalar>().real_if_close(tol));
-                return numpy().attr("real_if_close")(n, py::arg("tol") = tol);
+                return numpy().attr("real_if_close")(n, nb::arg("tol") = tol);
             });
       },
-      py::arg("x"),
-      py::arg("tol") = 100.,
+      nb::arg("x"),
+      nb::arg("tol") = 100.,
       doc_plus(DOC(lasyten, real_if_close),
                R"pydoc(
 In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
@@ -161,7 +161,7 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
             [](DiagonalTensorCPtr t) { return sqrt(t); },
             [](py::object n) { return numpy().attr("sqrt")(n); });
       },
-      py::arg("x"),
+      nb::arg("x"),
       doc_plus(DOC(lasyten, sqrt),
                R"pydoc(
 In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
@@ -178,8 +178,8 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
                 return np.attr("where")(np.attr("greater")(n, cutoff), np.attr("log")(n), 0.0);
             });
       },
-      py::arg("x"),
-      py::arg("cutoff") = 1e-30,
+      nb::arg("x"),
+      nb::arg("cutoff") = 1e-30,
       doc_plus(DOC(lasyten, stable_log),
                R"pydoc(
 In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
@@ -188,12 +188,12 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
     m.def(
       "exp",
       [](py::object obj) {
-          if (py::isinstance<Tensor>(obj)) {
+          if (lasyten::py_isinstance<Tensor>(obj)) {
               return py::cast(exp(obj.cast<TensorCPtr>()));
           }
           return numpy().attr("exp")(obj);
       },
-      py::arg("obj"),
+      nb::arg("obj"),
       doc_plus(DOC(lasyten, exp),
                R"pydoc(
 In Python, non-tensor inputs are forwarded to ``numpy.exp``.

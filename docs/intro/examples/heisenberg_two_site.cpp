@@ -19,6 +19,8 @@ main()
 {
     py::scoped_interpreter guard{};
     py::module_::import("lasyten");
+    // attach this program's copy of nanobind to the one of the lasyten._core extension
+    lasyten::init_embedded_nanobind();
 
     // Local spin-1/2 Hilbert space (no conserved quantum numbers).
     auto site0 = std::make_shared<SpinSite>(0.5);

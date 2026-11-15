@@ -1,6 +1,6 @@
 #include <lasyten/symmetries/factors/su2.h>
 
-#include <lasyten/block_backend/numpy.h>
+#include <lasyten/block_backend/block_backend.h>
 #include <lasyten/symmetries/fusion_symbol.h>
 
 #include <cmath>
@@ -255,7 +255,7 @@ _SU2::_fusion_tensor(Sector a, Sector b, Sector c, bool Z_a, bool Z_b) const
         return X;
     }
 
-    auto& be = *static_cast<BlockBackend*>(NumpyBlockBackend::from_factory("cpu"));
+    auto& be = *default_cpu_block_backend();
     auto Xb = block_from_fusion_symbol(be, X);
     if (Z_a && Z_b) {
         auto Za = block_from_fusion_symbol(be, Z_iso(dual_sector(a)));

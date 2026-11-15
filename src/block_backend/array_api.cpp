@@ -1,4 +1,5 @@
 #include <lasyten/block_backend/array_api.h>
+#include <lasyten/detail/python_api.h>
 #include <lasyten/tools.h>
 
 #include <algorithm>
@@ -7,9 +8,6 @@
 #include <cstdint>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
-#include <pybind11/numpy.h>
-#include <pybind11/pytypes.h>
-#include <pybind11/stl.h>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -216,23 +214,23 @@ void
 ArrayApiBlockBackend::Block::set_item(py::object key, py::object value)
 {
     if (auto idcs = BlockBackend::try_py_key_to_block_indices(key)) {
-        if (py::isinstance<BlockBackend::Block>(value)) {
+        if (py_isinstance<BlockBackend::Block>(value)) {
             set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Block&>());
             return;
         }
-        if (py::isinstance<BlockBackend::Scalar>(value)) {
+        if (py_isinstance<BlockBackend::Scalar>(value)) {
             set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Scalar&>());
             return;
         }
         arr_.attr("__setitem__")(BlockBackend::block_indices_to_py(*idcs), value);
         return;
     }
-    if (py::isinstance<ArrayApiBlockBackend::Block>(value)) {
+    if (py_isinstance<ArrayApiBlockBackend::Block>(value)) {
         auto* block = value.cast<ArrayApiBlockBackend::Block*>();
         arr_.attr("__setitem__")(key, block->obj());
         return;
     }
-    if (py::isinstance<BlockBackend::Block>(value)) {
+    if (py_isinstance<BlockBackend::Block>(value)) {
         auto* block = value.cast<BlockBackend::Block*>();
         arr_.attr("__setitem__")(key, backend_->api().attr("asarray")(block->to_numpy()));
         return;
@@ -446,7 +444,7 @@ ArrayApiBlockBackend::as_scalar(complex128 value, Dtype dt)
 BlockBackend::Scalar
 ArrayApiBlockBackend::as_scalar(py::object value, Dtype dt)
 {
-    if (py::isinstance<BlockBackend::Scalar>(value)) {
+    if (py_isinstance<BlockBackend::Scalar>(value)) {
         auto scalar = py::cast<BlockBackend::Scalar>(value);
         if (scalar.dtype() == dt)
             return scalar;
@@ -575,7 +573,7 @@ ArrayApiBlockBackend::as_block(py::object a,
     if (!device && !py::hasattr(a, "device"))
         device = default_device;
 
-    if (py::isinstance<ArrayApiBlockBackend::Block>(a)) {
+    if (py_isinstance<ArrayApiBlockBackend::Block>(a)) {
         auto* block = a.cast<ArrayApiBlockBackend::Block*>();
         BlockPtr out = block->shared_from_this();
         if (dtype_opt && get_dtype(out) != *dtype_opt)

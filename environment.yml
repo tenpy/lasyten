@@ -9,7 +9,9 @@ dependencies:
   - python>=3.12
   - pip
   - setuptools>=68.0.0
-  - pybind11>=3.0
+  - pybind11>=3.0  # still needed until public headers drop py:: (convert_nanobind.md Phase 4)
+  - nanobind>=3.0
+  - eigen  # header-only; Eigen/LAPACK BlockBackend (convert_EigenBlockBackend.md)
   - scikit-build-core
   - setuptools-scm
   - numpy>=2.0

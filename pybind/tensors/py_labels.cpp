@@ -1,7 +1,7 @@
 #include <lasyten/tensors/labels.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 #include "../tools/hdf5_bind.h"
 
 #include "docstrings/tensors/labels.h"
@@ -65,19 +65,19 @@ args_as_strings(py::args const& args)
     return out;
 }
 
-std::optional<py::class_<LegLabels, py::smart_holder>> g_labelled_legs;
+std::optional<nb::class_<LegLabels>> g_labelled_legs;
 
 } // namespace
 
 void
-declare_tensors_labels(py::module_& m)
+declare_tensors_labels(nb::module_& m)
 {
-    g_labelled_legs = py::class_<LegLabels, py::smart_holder>(m, "LegLabels");
+    g_labelled_legs = nb::class_<LegLabels>(m, "LegLabels");
     (*g_labelled_legs).doc() = DOC(lasyten, LegLabels);
 }
 
 void
-bind_tensors_labels(py::module_& m)
+bind_tensors_labels(nb::module_& m)
 {
     m.attr("CONTRACT_SYMBOL") = CONTRACT_SYMBOL;
     m.attr("LEG_SELECT_SYMBOL") = LEG_SELECT_SYMBOL;
@@ -101,13 +101,13 @@ bind_tensors_labels(py::module_& m)
           }
           return is_valid_leg_label(std::string{ label.cast<std::string>() });
       },
-      py::arg("label"),
+      nb::arg("label"),
       DOC(lasyten, is_valid_leg_label));
 
     m.def("_combine_leg_labels",
           &_combine_leg_labels,
-          py::arg("labels"),
-          py::arg("offset") = 0,
+          nb::arg("labels"),
+          nb::arg("offset") = 0,
           DOC(lasyten, _combine_leg_labels));
 
     m.def(
@@ -119,27 +119,27 @@ bind_tensors_labels(py::module_& m)
           }
           return _split_leg_label(as_leg_label(label), n);
       },
-      py::arg("label"),
-      py::arg("num") = py::none(),
+      nb::arg("label"),
+      nb::arg("num").none() = nb::none(),
       DOC(lasyten, _split_leg_label));
 
     m.def(
       "_dual_leg_label",
       [](py::object label) { return _dual_leg_label(as_leg_label(label)); },
-      py::arg("label"),
+      nb::arg("label"),
       DOC(lasyten, _dual_leg_label));
 
     m.def(
-      "_dual_label_list", &_dual_label_list, py::arg("labels"), DOC(lasyten, _dual_label_list));
+      "_dual_label_list", &_dual_label_list, nb::arg("labels"), DOC(lasyten, _dual_label_list));
 
     m.def(
       "_get_matching_labels",
       [](LegLabelList const& labels1, LegLabelList const& labels2, int64 /*stacklevel*/) {
           return _get_matching_labels(labels1, labels2);
       },
-      py::arg("labels1"),
-      py::arg("labels2"),
-      py::arg("stacklevel") = 1,
+      nb::arg("labels1"),
+      nb::arg("labels2"),
+      nb::arg("stacklevel") = 1,
       doc_plus(DOC(lasyten, _get_matching_labels),
                R"pydoc(
 The ``stacklevel`` argument is Python-only (accepted for API compatibility; unused).
@@ -148,9 +148,9 @@ In Python, unset labels are empty strings (``""``).
 
     auto& labelled_legs = *g_labelled_legs;
 
-    labelled_legs.def(py::init<LegLabelList>(), py::arg("labels"))
-      .def_property_readonly("num_legs", &LegLabels::num_legs)
-      .def_property_readonly("is_fully_labelled", &LegLabels::is_fully_labelled)
+    labelled_legs.def(lasyten::ctor<decltype(labelled_legs), LegLabelList>(), nb::arg("labels"))
+      .def_prop_ro("num_legs", &LegLabels::num_legs)
+      .def_prop_ro("is_fully_labelled", &LegLabels::is_fully_labelled)
       .def("as_list", &LegLabels::as_list, DOC(lasyten, LegLabels, as_list))
       .def("test_sanity", &LegLabels::test_sanity)
       .def(
@@ -158,21 +158,22 @@ In Python, unset labels are empty strings (``""``).
         [](LegLabels& self, LegLabelList labels) -> LegLabels& {
             return self.set(std::move(labels));
         },
-        py::arg("labels"),
-        py::return_value_policy::reference,
+        nb::arg("labels"),
+        nb::rv_policy::reference,
         DOC(lasyten, LegLabels, set))
       .def(
         "update",
         [](LegLabels& self, std::map<std::string, std::string> const& mapping) -> LegLabels& {
             return self.update(mapping);
         },
-        py::arg("mapping"),
-        py::return_value_policy::reference,
+        nb::arg("mapping"),
+        nb::rv_policy::reference,
         DOC(lasyten, LegLabels, update))
-      .def("index", &py_index, py::arg("idx"), DOC(lasyten, LegLabels, index))
-      .def("indices", &py_indices, py::arg("idcs"), DOC(lasyten, LegLabels, indices))
+      .def("index", &py_index, nb::arg("idx"), DOC(lasyten, LegLabels, index))
+      .def("indices", &py_indices, nb::arg("idcs"), DOC(lasyten, LegLabels, indices))
       .def("has",
-           [](LegLabels const& self, py::args args) {
+           [](LegLabels const& self, nb::args args_nb) {
+               auto args = pyargs(args_nb);
                if (args.size() == 0) {
                    throw py::value_error("has() requires at least one label");
                }
@@ -181,16 +182,18 @@ In Python, unset labels are empty strings (``""``).
       .def(
         "are",
         [](LegLabels const& self,
-           py::args args,
+           nb::args args_nb,
            bool planar,
            bool check_hidden,
            bool check_charged) {
+            auto args = pyargs(args_nb);
             return self.are(args_as_strings(args), planar, check_hidden, check_charged);
         },
-        py::kw_only(),
-        py::arg("planar") = false,
-        py::arg("check_hidden") = false,
-        py::arg("check_charged") = false,
+        nb::arg("labels"),
+        nb::kw_only(),
+        nb::arg("planar") = false,
+        nb::arg("check_hidden") = false,
+        nb::arg("check_charged") = false,
         DOC(lasyten, LegLabels, are))
       .def("__len__", &LegLabels::size)
       .def("__getitem__",
@@ -225,7 +228,7 @@ In Python, unset labels are empty strings (``""``).
       .def(
         "__eq__",
         [](LegLabels const& self, py::object other) {
-            if (py::isinstance<LegLabels>(other)) {
+            if (lasyten::py_isinstance<LegLabels>(other)) {
                 return self == other.cast<LegLabels const&>();
             }
             try {
@@ -234,17 +237,17 @@ In Python, unset labels are empty strings (``""``).
                 return false;
             }
         },
-        py::is_operator())
+        nb::is_operator())
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5_const<LegLabels>(),
-           py::arg("hdf5_saver"),
-           py::arg("h5gr"),
-           py::arg("subpath"))
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"))
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<LegLabels>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 }
 
 } // namespace lasyten

@@ -8,44 +8,43 @@
 namespace lasyten {
 
 void
-bind_block_backend_torch(py::module_& m)
+bind_block_backend_torch(nb::module_& m)
 {
-    py::class_<TorchBlockBackend, BlockBackend, py::smart_holder> torch_block_backend(
-      m, "TorchBlockBackend");
+    nb::class_<TorchBlockBackend, BlockBackend> torch_block_backend(m, "TorchBlockBackend");
     torch_block_backend.doc() = DOC(lasyten, TorchBlockBackend);
     torch_block_backend.def_static(
       "from_factory",
       &TorchBlockBackend::from_factory,
-      py::arg("device") = "cpu:0",
-      py::return_value_policy::reference,
+      nb::arg("device") = "cpu:0",
+      nb::rv_policy::reference,
       "Get the backend instance for the given device (nearly-singleton per device).");
     torch_block_backend.def_static("from_hdf5",
                                    lasyten::hdf5::wrap_from_hdf5<TorchBlockBackend>(),
-                                   py::arg("hdf5_loader"),
-                                   py::arg("h5gr"),
-                                   py::arg("subpath"),
+                                   nb::arg("hdf5_loader"),
+                                   nb::arg("h5gr"),
+                                   nb::arg("subpath"),
                                    "Load a TorchBlockBackend from an HDF5 file.");
 
-    py::class_<TorchBlockBackend::Block, BlockBackend::Block, py::smart_holder>(
+    nb::class_<TorchBlockBackend::Block, BlockBackend::Block>(
       torch_block_backend, "BlockCls", "Block that holds a torch::Tensor.")
       .def("to_numpy",
-           py::overload_cast<>(&TorchBlockBackend::Block::to_numpy, py::const_),
-           py::return_value_policy::reference_internal)
+           nb::overload_cast<>(&TorchBlockBackend::Block::to_numpy, nb::const_),
+           nb::rv_policy::reference_internal)
       .def("to_numpy",
-           py::overload_cast<Dtype>(&TorchBlockBackend::Block::to_numpy, py::const_),
-           py::arg("dtype"),
-           py::return_value_policy::reference_internal)
+           nb::overload_cast<Dtype>(&TorchBlockBackend::Block::to_numpy, nb::const_),
+           nb::arg("dtype"),
+           nb::rv_policy::reference_internal)
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5<TorchBlockBackend::Block>(),
-           py::arg("hdf5_saver"),
-           py::arg("h5gr"),
-           py::arg("subpath"),
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"),
            "Save block (via numpy) to HDF5.")
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<TorchBlockBackend::Block>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"),
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"),
                   "Load block from HDF5.");
 }
 

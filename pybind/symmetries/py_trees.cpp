@@ -1,6 +1,6 @@
 #include "../doc_plus.h"
 #include "docstrings/symmetries/trees.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 #include "symmetries/casters.hpp"
 
@@ -9,9 +9,6 @@
 #include <lasyten/symmetries/sector.h>
 #include <lasyten/symmetries/sector_numpy.h>
 #include <lasyten/symmetries/trees.h>
-
-#include <pybind11/numpy.h>
-#include <pybind11/stl.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -70,10 +67,10 @@ sector_array_from_python(py::handle obj, Symmetry const& symmetry)
     if (obj.is_none()) {
         return symmetry.empty_sector_array;
     }
-    if (py::isinstance<SectorArray>(obj)) {
+    if (lasyten::py_isinstance<SectorArray>(obj)) {
         return obj.cast<SectorArray>();
     }
-    if (py::isinstance<Sector>(obj)) {
+    if (lasyten::py_isinstance<Sector>(obj)) {
         return SectorArray::from_sector(obj.cast<Sector>());
     }
     // empty list / sequence → empty SectorArray with correct sector_ind_len
@@ -89,10 +86,10 @@ sector_array_from_python(py::handle obj, Symmetry const& symmetry)
 Symmetry::Ptr
 symmetry_from_python(py::object symmetry_obj)
 {
-    if (py::isinstance<Symmetry>(symmetry_obj)) {
+    if (lasyten::py_isinstance<Symmetry>(symmetry_obj)) {
         return symmetry_obj.cast<Symmetry::Ptr>();
     }
-    if (py::isinstance<SymmetryFactor>(symmetry_obj)) {
+    if (lasyten::py_isinstance<SymmetryFactor>(symmetry_obj)) {
         auto ptr = symmetry_obj.cast<SymmetryFactor::Ptr>();
         return std::make_shared<Symmetry>(std::vector<SymmetryFactor::Ptr>{ ptr });
     }
@@ -105,7 +102,7 @@ block_backend_from_python(py::object backend)
     if (backend.is_none()) {
         return nullptr;
     }
-    if (py::isinstance<BlockBackend>(backend)) {
+    if (lasyten::py_isinstance<BlockBackend>(backend)) {
         return backend.cast<BlockBackend*>();
     }
     return backend.attr("block_backend").cast<BlockBackend*>();
@@ -146,11 +143,11 @@ pair_linear_combination_to_python(FusionTreePairLinearCombination const& lc)
 } // namespace
 
 void
-bind_trees(py::module_& m)
+bind_trees(nb::module_& m)
 {
-    py::class_<FusionTree> cls(m, "FusionTree", DOC(lasyten, FusionTree));
+    nb::class_<FusionTree> cls(m, "FusionTree", DOC(lasyten, FusionTree));
 
-    cls.def(py::init([](py::object symmetry_obj,
+    cls.def(nb::new_([](py::object symmetry_obj,
                         py::object uncoupled,
                         Sector coupled,
                         py::object are_dual,
@@ -167,28 +164,28 @@ bind_trees(py::module_& m)
                                   std::move(inner),
                                   multiplicities_from_python(multiplicities));
             }),
-            py::arg("symmetry"),
-            py::arg("uncoupled"),
-            py::arg("coupled"),
-            py::arg("are_dual"),
-            py::arg("inner_sectors"),
-            py::arg("multiplicities") = py::none());
+            nb::arg("symmetry"),
+            nb::arg("uncoupled"),
+            nb::arg("coupled"),
+            nb::arg("are_dual"),
+            nb::arg("inner_sectors"),
+            nb::arg("multiplicities").none() = nb::none());
 
-    cls.def_readwrite("symmetry", &FusionTree::symmetry)
-      .def_readwrite("uncoupled", &FusionTree::uncoupled)
-      .def_readwrite("coupled", &FusionTree::coupled)
-      .def_readwrite("inner_sectors", &FusionTree::inner_sectors)
-      .def_readonly("num_uncoupled", &FusionTree::num_uncoupled)
-      .def_readonly("num_vertices", &FusionTree::num_vertices)
-      .def_readonly("num_inner_edges", &FusionTree::num_inner_edges)
-      .def_readonly("fusion_style", &FusionTree::fusion_style)
-      .def_readonly("is_abelian", &FusionTree::is_abelian)
-      .def_readonly("braiding_style", &FusionTree::braiding_style);
+    cls.def_rw("symmetry", &FusionTree::symmetry)
+      .def_rw("uncoupled", &FusionTree::uncoupled)
+      .def_rw("coupled", &FusionTree::coupled)
+      .def_rw("inner_sectors", &FusionTree::inner_sectors)
+      .def_ro("num_uncoupled", &FusionTree::num_uncoupled)
+      .def_ro("num_vertices", &FusionTree::num_vertices)
+      .def_ro("num_inner_edges", &FusionTree::num_inner_edges)
+      .def_ro("fusion_style", &FusionTree::fusion_style)
+      .def_ro("is_abelian", &FusionTree::is_abelian)
+      .def_ro("braiding_style", &FusionTree::braiding_style);
 
     // Writable NumPy views into C++ storage so in-place updates (e.g. fusion_trees)
     // remain visible on the FusionTree instance.
     cls
-      .def_property(
+      .def_prop_rw(
         "are_dual",
         [](py::object self_obj) {
             auto& self = self_obj.cast<FusionTree&>();
@@ -201,7 +198,7 @@ bind_trees(py::module_& m)
         [](FusionTree& self, py::object value) {
             self.are_dual = are_dual_from_python(value, self.num_uncoupled);
         })
-      .def_property(
+      .def_prop_rw(
         "multiplicities",
         [](py::object self_obj) {
             auto& self = self_obj.cast<FusionTree&>();
@@ -223,7 +220,7 @@ bind_trees(py::module_& m)
             }
         });
 
-    cls.def_property_readonly(
+    cls.def_prop_ro(
       "pre_Z_uncoupled", &FusionTree::pre_Z_uncoupled, DOC(lasyten, FusionTree, pre_Z_uncoupled));
 
     cls.def("test_sanity", &FusionTree::test_sanity, DOC(lasyten, FusionTree, test_sanity))
@@ -235,31 +232,31 @@ bind_trees(py::module_& m)
             auto dual = are_dual_from_python(are_dual, unc.size());
             return FusionTree::from_abelian_symmetry(std::move(symmetry), unc, dual);
         },
-        py::arg("symmetry"),
-        py::arg("uncoupled"),
-        py::arg("are_dual"),
+        nb::arg("symmetry"),
+        nb::arg("uncoupled"),
+        nb::arg("are_dual"),
         DOC(lasyten, FusionTree, from_abelian_symmetry))
       .def_static(
         "from_empty",
         [](py::object symmetry_obj) {
             return FusionTree::from_empty(symmetry_from_python(symmetry_obj));
         },
-        py::arg("symmetry"),
+        nb::arg("symmetry"),
         DOC(lasyten, FusionTree, from_empty))
       .def_static(
         "from_sector",
         [](py::object symmetry_obj, Sector sector, bool is_dual) {
             return FusionTree::from_sector(symmetry_from_python(symmetry_obj), sector, is_dual);
         },
-        py::arg("symmetry"),
-        py::arg("sector"),
-        py::arg("is_dual"),
+        nb::arg("symmetry"),
+        nb::arg("sector"),
+        nb::arg("is_dual"),
         DOC(lasyten, FusionTree, from_sector))
       .def("__hash__", &FusionTree::hash)
-      .def("__eq__", &FusionTree::operator==, py::arg("other"))
+      .def("__eq__", &FusionTree::operator==, nb::arg("other"))
       .def("ascii_diagram",
            &FusionTree::ascii_diagram,
-           py::arg("dagger") = false,
+           nb::arg("dagger") = false,
            DOC(lasyten, FusionTree, ascii_diagram))
       .def_static(
         "_str_uncoupled_coupled",
@@ -270,10 +267,10 @@ bind_trees(py::module_& m)
             auto dual = are_dual_from_python(are_dual, uncoupled.size());
             return FusionTree::str_uncoupled_coupled(symmetry, uncoupled, coupled, dual);
         },
-        py::arg("symmetry"),
-        py::arg("uncoupled"),
-        py::arg("coupled"),
-        py::arg("are_dual"),
+        nb::arg("symmetry"),
+        nb::arg("uncoupled"),
+        nb::arg("coupled"),
+        nb::arg("are_dual"),
         doc_cpp_ref(DOC(lasyten, FusionTree), "lasyten::FusionTree::_str_uncoupled_coupled()"))
       .def_static(
         "bend_leg",
@@ -281,33 +278,33 @@ bind_trees(py::module_& m)
             return pair_linear_combination_to_python(
               FusionTree::bend_leg(X, Y, bend_downward, do_conj));
         },
-        py::arg("X"),
-        py::arg("Y"),
-        py::arg("bend_downward"),
-        py::arg("do_conj") = false,
+        nb::arg("X"),
+        nb::arg("Y"),
+        nb::arg("bend_downward"),
+        nb::arg("do_conj") = false,
         DOC(lasyten, FusionTree, bend_leg))
       .def(
         "braid",
         [](FusionTree const& self, int64 j, bool overbraid, float64 cutoff, bool do_conj) {
             return linear_combination_to_python(self.braid(j, overbraid, cutoff, do_conj));
         },
-        py::arg("j"),
-        py::arg("overbraid"),
-        py::arg("cutoff") = 1e-16,
-        py::arg("do_conj") = false,
+        nb::arg("j"),
+        nb::arg("overbraid"),
+        nb::arg("cutoff") = 1e-16,
+        nb::arg("do_conj") = false,
         DOC(lasyten, FusionTree, braid))
       .def("vertex_labels",
            &FusionTree::vertex_labels,
-           py::arg("n"),
+           nb::arg("n"),
            DOC(lasyten, FusionTree, vertex_labels))
       .def("modify_vertex_labels",
            &FusionTree::modify_vertex_labels,
-           py::arg("n"),
-           py::arg("a"),
-           py::arg("b"),
-           py::arg("mu"),
-           py::arg("c"),
-           py::arg("copy") = true,
+           nb::arg("n"),
+           nb::arg("a"),
+           nb::arg("b"),
+           nb::arg("mu"),
+           nb::arg("c"),
+           nb::arg("copy") = true,
            DOC(lasyten, FusionTree, modify_vertex_labels))
       .def("__str__", &FusionTree::str)
       .def("__repr__", &FusionTree::repr)
@@ -322,37 +319,37 @@ bind_trees(py::module_& m)
             return self.to_dense_block(
               block_backend_from_python(backend), dt, understood_braiding);
         },
-        py::arg("backend") = py::none(),
-        py::arg("dtype") = py::none(),
-        py::arg("understood_braiding") = false,
+        nb::arg("backend").none() = nb::none(),
+        nb::arg("dtype").none() = nb::none(),
+        nb::arg("understood_braiding") = false,
         DOC(lasyten, FusionTree, to_dense_block))
-      .def("copy", &FusionTree::copy, py::arg("deep") = true, DOC(lasyten, FusionTree, copy))
+      .def("copy", &FusionTree::copy, nb::arg("deep") = true, DOC(lasyten, FusionTree, copy))
       .def("extended",
            &FusionTree::extended,
-           py::arg("new_uncoupled"),
-           py::arg("mu"),
-           py::arg("new_coupled"),
-           py::arg("is_dual"),
+           nb::arg("new_uncoupled"),
+           nb::arg("mu"),
+           nb::arg("new_coupled"),
+           nb::arg("is_dual"),
            DOC(lasyten, FusionTree, extended))
-      .def("insert", &FusionTree::insert, py::arg("t2"), DOC(lasyten, FusionTree, insert))
+      .def("insert", &FusionTree::insert, nb::arg("t2"), DOC(lasyten, FusionTree, insert))
       .def(
         "insert_at",
         [](FusionTree const& self, int64 n, FusionTree const& t2, float64 eps) {
             return linear_combination_to_python(self.insert_at(n, t2, eps));
         },
-        py::arg("n"),
-        py::arg("t2"),
-        py::arg("eps") = 1.0e-14,
+        nb::arg("n"),
+        nb::arg("t2"),
+        nb::arg("eps") = 1.0e-14,
         DOC(lasyten, FusionTree, insert_at))
       .def(
         "outer",
         [](FusionTree const& self, FusionTree const& right_tree, float64 eps) {
             return linear_combination_to_python(self.outer(right_tree, eps));
         },
-        py::arg("right_tree"),
-        py::arg("eps") = 1.0e-14,
+        nb::arg("right_tree"),
+        nb::arg("eps") = 1.0e-14,
         DOC(lasyten, FusionTree, outer))
-      .def("split", &FusionTree::split, py::arg("n"), DOC(lasyten, FusionTree, split))
+      .def("split", &FusionTree::split, nb::arg("n"), DOC(lasyten, FusionTree, split))
       .def("split_bottom_vertex",
            &FusionTree::split_bottom_vertex,
            DOC(lasyten, FusionTree, split_bottom_vertex))
@@ -361,14 +358,14 @@ bind_trees(py::module_& m)
         [](FusionTree const& self, std::vector<int64> const& idcs, bool overtwist) {
             return linear_combination_to_python(self.twist(idcs, overtwist));
         },
-        py::arg("idcs"),
-        py::arg("overtwist"),
+        nb::arg("idcs"),
+        nb::arg("overtwist"),
         DOC(lasyten, FusionTree, twist));
 
-    py::class_<fusion_trees> ft(m, "fusion_trees", DOC(lasyten, fusion_trees));
+    nb::class_<fusion_trees> ft(m, "fusion_trees", DOC(lasyten, fusion_trees));
 
     ft.def(
-      py::init(
+      nb::new_(
         [](py::object symmetry_obj, py::object uncoupled, Sector coupled, py::object are_dual) {
             auto symmetry = symmetry_from_python(symmetry_obj);
             SectorArray unc = sector_array_from_python(uncoupled, *symmetry);
@@ -378,16 +375,16 @@ bind_trees(py::module_& m)
             }
             return fusion_trees(std::move(symmetry), std::move(unc), coupled, std::move(dual));
         }),
-      py::arg("symmetry"),
-      py::arg("uncoupled"),
-      py::arg("coupled"),
-      py::arg("are_dual") = py::none());
+      nb::arg("symmetry"),
+      nb::arg("uncoupled"),
+      nb::arg("coupled"),
+      nb::arg("are_dual").none() = nb::none());
 
-    ft.def_readwrite("symmetry", &fusion_trees::symmetry)
-      .def_readwrite("uncoupled", &fusion_trees::uncoupled)
-      .def_readwrite("coupled", &fusion_trees::coupled)
-      .def_readonly("num_uncoupled", &fusion_trees::num_uncoupled)
-      .def_property(
+    ft.def_rw("symmetry", &fusion_trees::symmetry)
+      .def_rw("uncoupled", &fusion_trees::uncoupled)
+      .def_rw("coupled", &fusion_trees::coupled)
+      .def_ro("num_uncoupled", &fusion_trees::num_uncoupled)
+      .def_prop_rw(
         "are_dual",
         [](py::object self_obj) {
             auto& self = self_obj.cast<fusion_trees&>();
@@ -412,7 +409,7 @@ bind_trees(py::module_& m)
       .def("__len__", &fusion_trees::size)
       .def("__str__", &fusion_trees::str)
       .def("__repr__", &fusion_trees::repr)
-      .def("index", &fusion_trees::index, py::arg("tree"), DOC(lasyten, fusion_trees, index));
+      .def("index", &fusion_trees::index, nb::arg("tree"), DOC(lasyten, fusion_trees, index));
 }
 
 } // namespace lasyten

@@ -1,24 +1,30 @@
 #pragma once
 
-/// Optional conversion helpers: accept NumPy arrays / sequences as Sector arguments.
+/// nanobind casters / conversion helpers for the symmetries layer.
 ///
-/// ``py::class_<Sector>`` / ``SectorArray`` own the Python types. These casters only
-/// extend *load* so call sites can still pass ndarrays during migration; *cast*
-/// always produces bound Sector / SectorArray instances (never bare ndarrays).
+/// ``nb::class_<Sector>`` / ``SectorArray`` own the Python types. NumPy arrays and sequences are
+/// accepted wherever a ``Sector`` / ``SectorArray`` is expected through
+/// ``nb::implicitly_convertible`` (registered in ``py_sector.cpp``), which calls the
+/// ``Sector(values)`` / ``SectorArray(values)`` constructors. *Casting to Python* always produces
+/// bound Sector / SectorArray instances (never bare ndarrays).
 ///
-/// ``Leg`` value-type caster lives in ``include/lasyten/symmetries/spaces.h`` so library
-/// TUs that ``.cast<Leg>()`` see the same specialization.
+/// The pybind11-side counterparts used by liblasyten itself live in
+/// ``include/lasyten/py_nanobind_bridge.h`` (and, for ``Leg``,
+/// ``include/lasyten/symmetries/spaces.h``).
 
 #include <lasyten/symmetries/fusion_symbol.h>
 #include <lasyten/symmetries/sector.h>
 #include <lasyten/symmetries/sector_numpy.h>
 #include <lasyten/symmetries/spaces.h>
 
-#include <pybind11/cast.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/shared_ptr.h>
+
 #include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
 
 #include <vector>
+
+#include "../py_pybind11_bridge.h"
 
 namespace lasyten {
 
@@ -76,79 +82,96 @@ vector_f64_from_numpy(py::object obj)
 
 } // namespace lasyten
 
-namespace pybind11::detail {
+NAMESPACE_BEGIN(NB_NAMESPACE)
+NAMESPACE_BEGIN(detail)
 
-/// Transparent FusionSymbol ↔ numpy.ndarray for bindings / trampolines.
+/// Transparent FusionSymbol <-> numpy.ndarray for bindings.
 template<>
 struct type_caster<lasyten::FusionSymbol>
 {
-    PYBIND11_TYPE_CASTER(lasyten::FusionSymbol, const_name("numpy.ndarray"));
+    NB_TYPE_CASTER(lasyten::FusionSymbol, const_name("numpy.ndarray"))
 
-    bool load(handle src, bool convert)
+    bool from_python(handle src, uint32_t flags, cleanup_list*) noexcept
     {
-        if (!convert && !isinstance<array>(src)) {
+        pybind11::handle h(src.ptr());
+        bool const convert = (flags & (uint32_t)cast_flags::convert) != 0;
+        if (!convert && !pybind11::isinstance<pybind11::array>(h)) {
             return false;
         }
         try {
-            value = lasyten::fusion_symbol_from_numpy(array::ensure(src));
+            value = lasyten::fusion_symbol_from_numpy(pybind11::array::ensure(h));
             return true;
         } catch (...) {
+            PyErr_Clear();
             return false;
         }
     }
 
-    static handle cast(lasyten::FusionSymbol const& src,
-                       return_value_policy /*policy*/,
-                       handle /*parent*/)
+    static handle from_cpp(lasyten::FusionSymbol const& src, rv_policy, cleanup_list*) noexcept
     {
-        return lasyten::fusion_symbol_to_numpy(src).release();
+        try {
+            return handle(lasyten::fusion_symbol_to_numpy(src).release().ptr());
+        } catch (...) {
+            PyErr_Clear();
+            return handle();
+        }
     }
 };
 
+/// ``Leg`` is a value-type handle (not a bound class). Accept ``ElementarySpace`` / ``LegPipe``
+/// from Python (and ``None`` as the empty leg); unwrap to the held object on cast. Python exposes
+/// ``Leg`` as an ABC that registers the concrete types.
 template<>
-struct type_caster<lasyten::Sector> : type_caster_base<lasyten::Sector>
+struct type_caster<lasyten::Leg>
 {
-    using base = type_caster_base<lasyten::Sector>;
+    NB_TYPE_CASTER(lasyten::Leg, const_name("Leg"))
 
-    bool load(handle src, bool convert)
+    bool from_python(handle src, uint32_t flags, cleanup_list* cleanup) noexcept
     {
-        if (base::load(src, convert)) {
+        if (src.is_none()) {
+            value = lasyten::Leg(nullptr);
             return true;
         }
-        if (!convert) {
-            return false;
+        flags &= ~(uint32_t)cast_flags::convert;
+        {
+            make_caster<std::shared_ptr<lasyten::ElementarySpace>> c;
+            if (c.from_python(src, flags, cleanup)) {
+                value = lasyten::Leg(c.operator std::shared_ptr<lasyten::ElementarySpace>&());
+                return true;
+            }
         }
-        try {
-            lasyten::Sector tmp = lasyten::sector_from_numpy(src);
-            value = new lasyten::Sector(std::move(tmp));
-            return true;
-        } catch (...) {
-            return false;
+        {
+            make_caster<std::shared_ptr<lasyten::LegPipe>> c;
+            if (c.from_python(src, flags, cleanup)) {
+                value = lasyten::Leg(c.operator std::shared_ptr<lasyten::LegPipe>&());
+                return true;
+            }
         }
+        return false;
+    }
+
+    static handle from_cpp(lasyten::Leg const& src,
+                           rv_policy policy,
+                           cleanup_list* cleanup) noexcept
+    {
+        if (!src) {
+            return none().release();
+        }
+        if (auto es = src.as_elementary_space()) {
+            return make_caster<std::shared_ptr<lasyten::ElementarySpace>>::from_cpp(
+              es, policy, cleanup);
+        }
+        if (auto pipe = src.as_leg_pipe()) {
+            return make_caster<std::shared_ptr<lasyten::LegPipe>>::from_cpp(pipe, policy, cleanup);
+        }
+        return none().release();
     }
 };
 
+/// ``None`` is the empty ``Leg``.
 template<>
-struct type_caster<lasyten::SectorArray> : type_caster_base<lasyten::SectorArray>
-{
-    using base = type_caster_base<lasyten::SectorArray>;
+struct has_arg_defaults<lasyten::Leg> : std::true_type
+{};
 
-    bool load(handle src, bool convert)
-    {
-        if (base::load(src, convert)) {
-            return true;
-        }
-        if (!convert) {
-            return false;
-        }
-        try {
-            lasyten::SectorArray tmp = lasyten::sector_array_from_numpy(src);
-            value = new lasyten::SectorArray(std::move(tmp));
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-};
-
-} // namespace pybind11::detail
+NAMESPACE_END(detail)
+NAMESPACE_END(NB_NAMESPACE)

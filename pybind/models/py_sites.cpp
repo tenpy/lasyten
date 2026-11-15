@@ -1,7 +1,7 @@
 #include <lasyten/models/sites.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 #include "docstrings/models/sites.h"
 
 #include <optional>
@@ -11,186 +11,201 @@
 namespace lasyten {
 
 void
-bind_models_sites(py::module_& m)
+bind_models_sites(nb::module_& m)
 {
-    py::class_<SpinSite, Site, py::smart_holder> spin_site(m, "SpinSite");
+    nb::class_<SpinSite, Site> spin_site(m, "SpinSite");
     spin_site.doc() = DOC(lasyten, SpinSite);
 
     spin_site
-      .def(py::init<float64,
-                    std::optional<std::string>,
-                    TensorBackend::Ptr,
-                    std::optional<std::string>,
-                    bool>(),
-           py::arg("S") = 0.5,
-           py::arg("conserve") = py::none(),
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none(),
-           py::arg("use_test_su2") = false)
-      .def_readwrite("S", &SpinSite::S)
-      .def_readwrite("double_total_spin", &SpinSite::double_total_spin)
-      .def_readwrite("conserve", &SpinSite::conserve)
-      .def_readwrite("use_test_su2", &SpinSite::use_test_su2)
+      .def(lasyten::ctor<decltype(spin_site),
+                         float64,
+                         std::optional<std::string>,
+                         TensorBackend::Ptr,
+                         std::optional<std::string>,
+                         bool>(),
+           nb::arg("S") = 0.5,
+           nb::arg("conserve").none() = nb::none(),
+           nb::arg("backend").none() = nullptr,
+           nb::arg("default_device").none() = nb::none(),
+           nb::arg("use_test_su2") = false)
+      .def_rw("S", &SpinSite::S)
+      .def_rw("double_total_spin", &SpinSite::double_total_spin)
+      .def_rw("conserve", &SpinSite::conserve)
+      .def_rw("use_test_su2", &SpinSite::use_test_su2)
       .def("test_sanity", &SpinSite::test_sanity, DOC(lasyten, SpinSite, test_sanity))
       .def("__repr__", &SpinSite::repr);
 
-    py::class_<SpinlessBosonSite, Site, py::smart_holder> spinless_boson_site(m,
-                                                                              "SpinlessBosonSite");
+    nb::class_<SpinlessBosonSite, Site> spinless_boson_site(m, "SpinlessBosonSite");
     spinless_boson_site.doc() = DOC(lasyten, SpinlessBosonSite);
 
     spinless_boson_site
-      .def(py::init<py::object,
-                    py::object,
-                    std::optional<float64>,
-                    TensorBackend::Ptr,
-                    std::optional<std::string>>(),
-           py::arg("Nmax") = 1,
-           py::arg("conserve") = py::none(),
-           py::arg("filling") = py::none(),
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
-      .def_readwrite("conserve", &SpinlessBosonSite::conserve)
-      .def_readwrite("filling", &SpinlessBosonSite::filling)
+      .def(lasyten::ctor<decltype(spinless_boson_site),
+                         py::object,
+                         py::object,
+                         std::optional<float64>,
+                         TensorBackend::Ptr,
+                         std::optional<std::string>>(),
+           nb::arg("Nmax") = 1,
+           nb::arg("conserve").none() = nb::none(),
+           nb::arg("filling").none() = nb::none(),
+           nb::arg("backend").none() = nullptr,
+           nb::arg("default_device").none() = nb::none())
+      .def_rw("conserve", &SpinlessBosonSite::conserve)
+      .def_rw("filling", &SpinlessBosonSite::filling)
       .def("__repr__", &SpinlessBosonSite::repr);
 
-    py::class_<SpinlessFermionSite, Site, py::smart_holder> spinless_fermion_site(
-      m, "SpinlessFermionSite");
+    nb::class_<SpinlessFermionSite, Site> spinless_fermion_site(m, "SpinlessFermionSite");
     spinless_fermion_site.doc() = DOC(lasyten, SpinlessFermionSite);
 
     spinless_fermion_site
-      .def(py::init<int64,
-                    py::object,
-                    std::optional<float64>,
-                    TensorBackend::Ptr,
-                    std::optional<std::string>>(),
-           py::arg("num_species") = 1,
-           py::arg("conserve") = "parity",
-           py::arg("filling") = py::none(),
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
-      .def_readwrite("num_species", &SpinlessFermionSite::num_species)
-      .def_readwrite("conserve", &SpinlessFermionSite::conserve)
-      .def_readwrite("filling", &SpinlessFermionSite::filling)
+      .def(lasyten::ctor<decltype(spinless_fermion_site),
+                         int64,
+                         py::object,
+                         std::optional<float64>,
+                         TensorBackend::Ptr,
+                         std::optional<std::string>>(),
+           nb::arg("num_species") = 1,
+           nb::arg("conserve") = "parity",
+           nb::arg("filling").none() = nb::none(),
+           nb::arg("backend").none() = nullptr,
+           nb::arg("default_device").none() = nb::none())
+      .def_rw("num_species", &SpinlessFermionSite::num_species)
+      .def_rw("conserve", &SpinlessFermionSite::conserve)
+      .def_rw("filling", &SpinlessFermionSite::filling)
       .def("__repr__", &SpinlessFermionSite::repr);
 
-    py::class_<SpinHalfFermionSite, Site, py::smart_holder> spin_half_fermion_site(
-      m, "SpinHalfFermionSite");
+    nb::class_<SpinHalfFermionSite, Site> spin_half_fermion_site(m, "SpinHalfFermionSite");
     spin_half_fermion_site.doc() = DOC(lasyten, SpinHalfFermionSite);
 
     spin_half_fermion_site
-      .def(py::init<std::string,
-                    std::optional<std::string>,
-                    std::optional<float64>,
-                    TensorBackend::Ptr,
-                    std::optional<std::string>,
-                    bool>(),
-           py::arg("conserve_N") = "parity",
-           py::arg("conserve_S") = py::none(),
-           py::arg("filling") = py::none(),
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none(),
-           py::arg("use_test_su2") = false)
-      .def_readwrite("conserve_N", &SpinHalfFermionSite::conserve_N)
-      .def_readwrite("conserve_S", &SpinHalfFermionSite::conserve_S)
-      .def_readwrite("filling", &SpinHalfFermionSite::filling)
-      .def_readwrite("use_test_su2", &SpinHalfFermionSite::use_test_su2)
+      .def(lasyten::ctor<decltype(spin_half_fermion_site),
+                         std::string,
+                         std::optional<std::string>,
+                         std::optional<float64>,
+                         TensorBackend::Ptr,
+                         std::optional<std::string>,
+                         bool>(),
+           nb::arg("conserve_N") = "parity",
+           nb::arg("conserve_S").none() = nb::none(),
+           nb::arg("filling").none() = nb::none(),
+           nb::arg("backend").none() = nullptr,
+           nb::arg("default_device").none() = nb::none(),
+           nb::arg("use_test_su2") = false)
+      .def_rw("conserve_N", &SpinHalfFermionSite::conserve_N)
+      .def_rw("conserve_S", &SpinHalfFermionSite::conserve_S)
+      .def_rw("filling", &SpinHalfFermionSite::filling)
+      .def_rw("use_test_su2", &SpinHalfFermionSite::use_test_su2)
       .def("test_sanity",
            &SpinHalfFermionSite::test_sanity,
            doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::SpinHalfFermionSite::test_sanity()"))
       .def("__repr__", &SpinHalfFermionSite::repr);
 
-    py::class_<ClockSite, Site, py::smart_holder> clock_site(m, "ClockSite");
+    nb::class_<ClockSite, Site> clock_site(m, "ClockSite");
     clock_site.doc() = DOC(lasyten, ClockSite);
 
     clock_site
-      .def(py::init<int64,
-                    std::optional<std::string>,
-                    TensorBackend::Ptr,
-                    std::optional<std::string>>(),
-           py::arg("q"),
-           py::arg("conserve") = py::none(),
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
-      .def_readwrite("q", &ClockSite::q)
-      .def_readwrite("conserve", &ClockSite::conserve)
+      .def(lasyten::ctor<decltype(clock_site),
+                         int64,
+                         std::optional<std::string>,
+                         TensorBackend::Ptr,
+                         std::optional<std::string>>(),
+           nb::arg("q"),
+           nb::arg("conserve").none() = nb::none(),
+           nb::arg("backend").none() = nullptr,
+           nb::arg("default_device").none() = nb::none())
+      .def_rw("q", &ClockSite::q)
+      .def_rw("conserve", &ClockSite::conserve)
       .def("__repr__", &ClockSite::repr);
 
-    py::class_<AnyonSite, Site, py::smart_holder> anyon_site(m, "AnyonSite");
+    nb::class_<AnyonSite, Site> anyon_site(m, "AnyonSite");
     anyon_site.doc() = DOC(lasyten, AnyonSite);
 
     anyon_site
-      .def(py::init<Symmetry::Ptr, TensorBackend::Ptr, std::optional<std::string>>(),
-           py::arg("symmetry"),
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
+      .def(lasyten::ctor<decltype(anyon_site),
+                         Symmetry::Ptr,
+                         TensorBackend::Ptr,
+                         std::optional<std::string>>(),
+           nb::arg("symmetry"),
+           nb::arg("backend").none() = nullptr,
+           nb::arg("default_device").none() = nb::none())
       .def("__repr__", &AnyonSite::repr);
 
-    py::class_<FibonacciAnyonSite, AnyonSite, py::smart_holder> fibonacci_anyon_site(
-      m, "FibonacciAnyonSite");
+    nb::class_<FibonacciAnyonSite, AnyonSite> fibonacci_anyon_site(m, "FibonacciAnyonSite");
     fibonacci_anyon_site.doc() = DOC(lasyten, FibonacciAnyonSite);
 
     fibonacci_anyon_site
-      .def(py::init<TensorBackend::Ptr, std::optional<std::string>>(),
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
+      .def(lasyten::ctor<decltype(fibonacci_anyon_site),
+                         TensorBackend::Ptr,
+                         std::optional<std::string>>(),
+           nb::arg("backend").none() = nullptr,
+           nb::arg("default_device").none() = nb::none())
       .def("__repr__", &FibonacciAnyonSite::repr);
 
-    py::class_<IsingAnyonSite, AnyonSite, py::smart_holder> ising_anyon_site(m, "IsingAnyonSite");
+    nb::class_<IsingAnyonSite, AnyonSite> ising_anyon_site(m, "IsingAnyonSite");
     ising_anyon_site.doc() = DOC(lasyten, IsingAnyonSite);
 
     ising_anyon_site
-      .def(py::init<int, TensorBackend::Ptr, std::optional<std::string>>(),
-           py::arg("nu") = 1,
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
+      .def(
+        lasyten::
+          ctor<decltype(ising_anyon_site), int, TensorBackend::Ptr, std::optional<std::string>>(),
+        nb::arg("nu") = 1,
+        nb::arg("backend").none() = nullptr,
+        nb::arg("default_device").none() = nb::none())
       .def("__repr__", &IsingAnyonSite::repr);
 
-    py::class_<GoldenSite, Site, py::smart_holder> golden_site(m, "GoldenSite");
+    nb::class_<GoldenSite, Site> golden_site(m, "GoldenSite");
     golden_site.doc() = DOC(lasyten, GoldenSite);
 
     golden_site
-      .def(py::init<std::string, TensorBackend::Ptr, std::optional<std::string>>(),
-           py::arg("handedness") = "left",
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
+      .def(lasyten::ctor<decltype(golden_site),
+                         std::string,
+                         TensorBackend::Ptr,
+                         std::optional<std::string>>(),
+           nb::arg("handedness") = "left",
+           nb::arg("backend").none() = nullptr,
+           nb::arg("default_device").none() = nb::none())
       .def("__repr__", &GoldenSite::repr);
 
-    py::class_<SU2kSpin1Site, Site, py::smart_holder> su2k_spin1_site(m, "SU2kSpin1Site");
+    nb::class_<SU2kSpin1Site, Site> su2k_spin1_site(m, "SU2kSpin1Site");
     su2k_spin1_site.doc() = DOC(lasyten, SU2kSpin1Site);
 
     su2k_spin1_site
-      .def(py::init<int64, TensorBackend::Ptr, std::optional<std::string>>(),
-           py::arg("k"),
-           py::arg("backend") = nullptr,
-           py::arg("default_device") = py::none())
-      .def_readwrite("k", &SU2kSpin1Site::k)
+      .def(
+        lasyten::
+          ctor<decltype(su2k_spin1_site), int64, TensorBackend::Ptr, std::optional<std::string>>(),
+        nb::arg("k"),
+        nb::arg("backend").none() = nullptr,
+        nb::arg("default_device").none() = nb::none())
+      .def_rw("k", &SU2kSpin1Site::k)
       .def("__repr__", &SU2kSpin1Site::repr);
 
-    py::class_<GroupedSite, Site, py::smart_holder> grouped_site(m, "GroupedSite");
+    nb::class_<GroupedSite, Site> grouped_site(m, "GroupedSite");
     grouped_site.doc() = DOC(lasyten, GroupedSite);
 
     grouped_site
-      .def(
-        py::init<std::vector<Site::Ptr>, std::optional<std::vector<std::string>>, std::string>(),
-        py::arg("sites"),
-        py::arg("labels") = py::none(),
-        py::arg("symmetry_combine") = "same")
-      .def_readwrite("n_sites", &GroupedSite::n_sites)
-      .def_readwrite("sites", &GroupedSite::sites)
-      .def_readwrite("labels", &GroupedSite::labels)
-      .def_readwrite("symmetry_combine", &GroupedSite::symmetry_combine)
+      .def(lasyten::ctor<decltype(grouped_site),
+                         std::vector<Site::Ptr>,
+                         std::optional<std::vector<std::string>>,
+                         std::string>(),
+           nb::arg("sites"),
+           nb::arg("labels").none() = nb::none(),
+           nb::arg("symmetry_combine") = "same")
+      .def_rw("n_sites", &GroupedSite::n_sites)
+      .def_rw("sites", &GroupedSite::sites)
+      .def_rw("labels", &GroupedSite::labels)
+      .def_rw("symmetry_combine", &GroupedSite::symmetry_combine)
       .def("kroneckerproduct",
            &GroupedSite::kroneckerproduct,
-           py::arg("ops"),
+           nb::arg("ops"),
            DOC(lasyten, GroupedSite, kroneckerproduct))
       .def("__repr__", &GroupedSite::repr);
 
     m.def("group_sites",
           &group_sites,
-          py::arg("sites"),
-          py::arg("n") = 2,
-          py::arg("labels") = py::none(),
-          py::arg("symmetry_combine") = "same",
+          nb::arg("sites"),
+          nb::arg("n") = 2,
+          nb::arg("labels").none() = nb::none(),
+          nb::arg("symmetry_combine") = "same",
           DOC(lasyten, group_sites));
 }
 

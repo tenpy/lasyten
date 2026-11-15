@@ -3,40 +3,53 @@
 
 #include "doc_plus.h"
 #include "docstrings/tools.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 namespace py = pybind11;
 namespace lasyten {
 
 void
-bind_tools(py::module_& m)
+bind_tools(nb::module_& m)
 {
     // Translate C++ NotImplemented into Python's builtin NotImplementedError.
-    py::register_exception_translator([](std::exception_ptr p) {
+    nb::register_exception_translator([](std::exception_ptr const& p, void* /*payload*/) {
         try {
-            if (p)
-                std::rethrow_exception(p);
+            std::rethrow_exception(p);
         } catch (NotImplemented const& e) {
             PyErr_SetString(PyExc_NotImplementedError, e.what());
+        }
+    });
+
+    // liblasyten still throws pybind11 exceptions (py::error_already_set when a Python callback
+    // fails, py::value_error / py::type_error / ... from py::builtin_exception). nanobind does not
+    // know them (it would report RuntimeError); restore the original Python exception instead.
+    // Registered last, i.e. tried first.
+    nb::register_exception_translator([](std::exception_ptr const& p, void* /*payload*/) {
+        try {
+            std::rethrow_exception(p);
+        } catch (py::error_already_set& e) {
+            e.restore();
+        } catch (py::builtin_exception const& e) {
+            e.set_error();
         }
     });
 
     m.def("format_like_list",
           &lasyten::format_like_list,
           doc_cpp_ref(R"pydoc(format_like_list)pydoc", "lasyten::format_like_list"),
-          py::arg("it"));
+          nb::arg("it"));
 
-    m.def("is_iterable", &lasyten::is_iterable, py::arg("a"), "If the given object is iterable.");
+    m.def("is_iterable", &lasyten::is_iterable, nb::arg("a"), "If the given object is iterable.");
 
     m.def("to_iterable",
           &lasyten::to_iterable,
-          py::arg("a"),
+          nb::arg("a"),
           "If `a` is a not iterable or a string, return [a], else return a.");
 
     m.def("to_valid_idx",
           &lasyten::to_valid_idx,
-          py::arg("idx"),
-          py::arg("length"),
+          nb::arg("idx"),
+          nb::arg("length"),
           "Convert to a valid non-negative index into the given length.");
 
     auto stats_dict = [](CacheStats const& s) {
@@ -85,7 +98,7 @@ bind_tools(py::module_& m)
       "data_bytes_in_ram); not part of the symbol cache budget.");
     m.def("permutation_as_swaps",
           &lasyten::permutation_as_swaps,
-          py::arg("permutation"),
+          nb::arg("permutation"),
           DOC(lasyten, permutation_as_swaps));
 }
 

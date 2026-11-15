@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <format>
+#include <lasyten/detail/python_api.h>
 #include <numeric>
-#include <pybind11/numpy.h>
 #include <stdexcept>
 #include <utility>
 
@@ -12,6 +12,7 @@ namespace lasyten {
 NotImplemented::NotImplemented(std::string name)
   : std::logic_error(std::format("Not implemented: {}", name)) {};
 
+#if LASYTEN_HAS_PYTHON
 /// Format elements of an iterable as if it were a plain list.
 std::string
 format_like_list(py::iterable it)
@@ -51,6 +52,7 @@ to_iterable(py::object a)
     result[0] = a;
     return result;
 }
+#endif // LASYTEN_HAS_PYTHON
 
 int64
 to_valid_idx(int64 idx, int64 length)

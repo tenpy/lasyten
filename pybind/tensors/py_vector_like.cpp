@@ -4,9 +4,7 @@
 #include <lasyten/tensors/vector_like.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
-
-#include <pybind11/operators.h>
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/vector_like.h"
 
@@ -16,56 +14,6 @@
 namespace lasyten {
 
 namespace {
-
-class PyVectorLike
-  : public VectorLike
-  , public py::trampoline_self_life_support
-{
-  public:
-    using VectorLike::VectorLike;
-
-    Ptr clone() const override { PYBIND11_OVERRIDE_PURE_NAME(Ptr, VectorLike, "copy", clone); }
-
-    Dtype vector_dtype() const override
-    {
-        PYBIND11_OVERRIDE_PURE_NAME(Dtype, VectorLike, "dtype", vector_dtype);
-    }
-
-    std::string vector_device() const override
-    {
-        PYBIND11_OVERRIDE_PURE_NAME(std::string, VectorLike, "device", vector_device);
-    }
-
-    TensorBackend::Ptr vector_backend() const override
-    {
-        PYBIND11_OVERRIDE_PURE_NAME(TensorBackend::Ptr, VectorLike, "backend", vector_backend);
-    }
-
-    BlockBackend::Scalar vector_norm() const override
-    {
-        PYBIND11_OVERRIDE_PURE(BlockBackend::Scalar, VectorLike, vector_norm);
-    }
-
-    BlockBackend::Scalar vector_inner(CPtr other, bool do_dagger) const override
-    {
-        PYBIND11_OVERRIDE_PURE(BlockBackend::Scalar, VectorLike, vector_inner, other, do_dagger);
-    }
-
-    Ptr scaled(BlockBackend::Scalar const& a) const override
-    {
-        PYBIND11_OVERRIDE_PURE(Ptr, VectorLike, scaled, a);
-    }
-
-    Ptr axpy(BlockBackend::Scalar const& a, CPtr other) const override
-    {
-        PYBIND11_OVERRIDE_PURE(Ptr, VectorLike, axpy, a, other);
-    }
-
-    bool compatible_with(CPtr other) const override
-    {
-        PYBIND11_OVERRIDE_PURE(bool, VectorLike, compatible_with, other);
-    }
-};
 
 BlockBackend::Scalar
 as_scalar_for(VectorLike const& vec, py::object value)
@@ -90,53 +38,51 @@ py_cast_vector_like(VectorLike::Ptr p)
     return py::cast(std::move(p));
 }
 
-std::optional<py::class_<VectorLike, PyVectorLike, py::smart_holder>> g_vector_like;
+std::optional<nb::class_<VectorLike>> g_vector_like;
 
 } // namespace
 
 void
-declare_tensors_vector_like(py::module_& m)
+declare_tensors_vector_like(nb::module_& m)
 {
-    g_vector_like = py::class_<VectorLike, PyVectorLike, py::smart_holder>(m, "VectorLike");
+    g_vector_like = nb::class_<VectorLike>(m, "VectorLike");
     (*g_vector_like).doc() = DOC(lasyten, VectorLike);
 }
 
 void
-bind_tensors_vector_like(py::module_& m)
+bind_tensors_vector_like(nb::module_& m)
 {
     auto& cls = *g_vector_like;
 
     cls.attr("__array_ufunc__") = py::none();
-    cls.def(py::init<>());
+    cls.def(lasyten::ctor<decltype(cls)>());
 
     cls.def(
       "copy",
       [](VectorLike const& self) { return py_cast_vector_like(self.clone()); },
       DOC(lasyten, VectorLike, clone));
-    cls.def_property_readonly(
-      "dtype", &VectorLike::vector_dtype, DOC(lasyten, VectorLike, vector_dtype));
-    cls.def_property_readonly(
-      "device", &VectorLike::vector_device, DOC(lasyten, VectorLike, vector_device));
-    cls.def_property_readonly(
+    cls.def_prop_ro("dtype", &VectorLike::vector_dtype, DOC(lasyten, VectorLike, vector_dtype));
+    cls.def_prop_ro("device", &VectorLike::vector_device, DOC(lasyten, VectorLike, vector_device));
+    cls.def_prop_ro(
       "backend", &VectorLike::vector_backend, DOC(lasyten, VectorLike, vector_backend));
     cls.def("compatible_with",
             &VectorLike::compatible_with,
-            py::arg("other"),
+            nb::arg("other"),
             DOC(lasyten, VectorLike, compatible_with));
     cls.def(
       "scaled",
       [](VectorLike const& self, py::object a) {
           return py_cast_vector_like(self.scaled(as_scalar_for(self, a)));
       },
-      py::arg("a"),
+      nb::arg("a"),
       DOC(lasyten, VectorLike, scaled));
     cls.def(
       "axpy",
       [](VectorLike const& self, py::object a, VectorLike::CPtr other) {
           return py_cast_vector_like(self.axpy(as_scalar_for(self, a), std::move(other)));
       },
-      py::arg("a"),
-      py::arg("other"),
+      nb::arg("a"),
+      nb::arg("other"),
       DOC(lasyten, VectorLike, axpy));
 
     cls
@@ -146,26 +92,26 @@ bind_tensors_vector_like(py::module_& m)
             auto one = self->vector_backend()->block_backend->as_scalar(1.0);
             return py_cast_vector_like(self->axpy(one, std::move(other)));
         },
-        py::is_operator())
+        nb::is_operator())
       .def(
         "__sub__",
         [](VectorLike::Ptr self, VectorLike::CPtr other) {
             auto minus_one = self->vector_backend()->block_backend->as_scalar(-1.0);
             return py_cast_vector_like(other->axpy(minus_one, std::move(self)));
         },
-        py::is_operator())
+        nb::is_operator())
       .def(
         "__mul__",
         [](VectorLike::Ptr self, py::object other) {
             return py_cast_vector_like(self->scaled(as_scalar_for(*self, other)));
         },
-        py::is_operator())
+        nb::is_operator())
       .def(
         "__rmul__",
         [](VectorLike::Ptr self, py::object other) {
             return py_cast_vector_like(self->scaled(as_scalar_for(*self, other)));
         },
-        py::is_operator())
+        nb::is_operator())
       .def(
         "__truediv__",
         [](VectorLike::Ptr self, py::object other) {
@@ -177,14 +123,14 @@ bind_tensors_vector_like(py::module_& m)
             }
             return py_cast_vector_like(self->scaled(as_scalar_for(*self, inv)));
         },
-        py::is_operator())
+        nb::is_operator())
       .def(
         "__neg__",
         [](VectorLike::Ptr self) {
             auto minus_one = self->vector_backend()->block_backend->as_scalar(-1.0);
             return py_cast_vector_like(self->scaled(minus_one));
         },
-        py::is_operator())
+        nb::is_operator())
       .def("__pos__", [](VectorLike::Ptr self) { return self; });
 }
 
