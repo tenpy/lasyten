@@ -12,8 +12,9 @@
 #include <complex>
 #include <limits>
 
-// The one place that pulls in pybind11 / nanobind (or, with LASYTEN_WITH_PYTHON=OFF, opaque
-// stand-ins for the ``py::`` types): see lasyten/detail/python_api.h.
+// The one place that pulls in nanobind (or, with LASYTEN_WITH_PYTHON=OFF, opaque stand-ins for the
+// ``py::`` types): see lasyten/detail/python_api.h. ``lasyten::py`` is a thin pybind11-flavoured
+// layer over nanobind, so that the library compiles against the Stable ABI (no pybind11).
 #include <lasyten/detail/python_api.h>
 
 static_assert(std::numeric_limits<double>::is_iec559); // double is indeed 64 bit

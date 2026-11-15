@@ -21,11 +21,9 @@
 #include <lasyten/tools/hdf5_export.h>
 
 #if LASYTEN_HAS_PYTHON
-#include <pybind11/embed.h>
-#include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
+#include <lasyten/embed.h>
 
-namespace py = pybind11;
+namespace py = lasyten::py;
 #endif
 using namespace lasyten;
 
@@ -104,8 +102,11 @@ int
 test_eigen_block_backend(int /*argc*/, char** /*args*/)
 {
 #if LASYTEN_HAS_PYTHON
-    py::scoped_interpreter guard{};
-    py::module_::import("numpy");
+    lasyten::ScopedInterpreter guard;
+    py::module_::import_("numpy");
+    // to_numpy() builds arrays through nanobind: attach this program's nanobind to lasyten._core's
+    py::module_::import_("lasyten._core");
+    lasyten::init_embedded_nanobind();
 #endif
 
     // ---------------- factory ----------------
@@ -390,9 +391,9 @@ test_eigen_block_backend(int /*argc*/, char** /*args*/)
         py::array arr = eb(a).to_numpy();
         EIGEN_TEST_CHECK(arr.ndim() == 2);
         EIGEN_TEST_CHECK(arr.shape(0) == 2 && arr.shape(1) == 3);
-        py::object np = py::module_::import("numpy");
-        EIGEN_TEST_CHECK(py::str(arr.attr("dtype")).cast<std::string>() == "float64");
-        EIGEN_TEST_CHECK(arr.attr("sum")().cast<double>() == 15.);
+        py::object np = py::module_::import_("numpy");
+        EIGEN_TEST_CHECK(py::cast<std::string>(py::str(arr.attr("dtype"))) == "float64");
+        EIGEN_TEST_CHECK(py::cast<double>(arr.attr("sum")()) == 15.);
         BlockPtr back = be.block_from_numpy(arr, std::nullopt, std::nullopt);
         EIGEN_TEST_CHECK(back->shape() == a->shape());
         EIGEN_TEST_CHECK(allclose(be, a, back));
@@ -407,7 +408,7 @@ test_eigen_block_backend(int /*argc*/, char** /*args*/)
         // complex
         BlockPtr c = make_c128({ 2 }, { { 1, 2 }, { 3, -4 } });
         py::array carr = eb(c).to_numpy();
-        EIGEN_TEST_CHECK(py::str(carr.attr("dtype")).cast<std::string>() == "complex128");
+        EIGEN_TEST_CHECK(py::cast<std::string>(py::str(carr.attr("dtype"))) == "complex128");
         BlockPtr cback = be.block_from_numpy(carr, std::nullopt, std::nullopt);
         EIGEN_TEST_CHECK(allclose(be, c, cback));
     }

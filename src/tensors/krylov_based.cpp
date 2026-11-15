@@ -45,9 +45,9 @@ parse_options(py::object options)
         return py::dict();
     }
     if (py::isinstance<py::dict>(options)) {
-        return options.cast<py::dict>();
+        return py::to_dict(options);
     }
-    return py::dict(options);
+    return py::to_dict(py::module_::import("builtins").attr("dict")(options));
 }
 
 template<typename T>
@@ -55,7 +55,7 @@ T
 dict_get(py::dict const& d, char const* key, T const& def)
 {
     if (d.contains(key) && !d[key].is_none()) {
-        return d[key].cast<T>();
+        return py::cast<T>(d[key]);
     }
     return def;
 }
@@ -634,7 +634,7 @@ KrylovBased::KrylovBased(LinearOperator::Ptr H_,
     min_gap = dict_get<float64>(options, "min_gap", 1.0e-12);
     reortho = dict_get<bool>(options, "reortho", false);
     if (options.contains("E_shift") && !options["E_shift"].is_none()) {
-        E_shift = options["E_shift"].cast<float64>();
+        E_shift = py::cast<float64>(options["E_shift"]);
     }
     if (N_min < 2) {
         throw std::invalid_argument("Should perform at least 2 steps.");

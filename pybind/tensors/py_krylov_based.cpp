@@ -72,7 +72,7 @@ bind_tensors_krylov_based(nb::module_& m)
             if (v.is_none()) {
                 self.E_shift = std::nullopt;
             } else {
-                self.E_shift = v.cast<float64>();
+                self.E_shift = py::cast<float64>(v);
             }
         })
       .def_rw("_cutoff", &KrylovBased::_cutoff)
@@ -147,7 +147,7 @@ bind_tensors_krylov_based(nb::module_& m)
             if (v.is_none()) {
                 self.delta = std::nullopt;
             } else {
-                self.delta = v.cast<complex128>();
+                self.delta = py::cast<complex128>(v);
             }
         })
       .def("run",
@@ -186,7 +186,7 @@ bind_tensors_krylov_based(nb::module_& m)
             if (v.is_none()) {
                 self.delta = std::nullopt;
             } else {
-                self.delta = v.cast<complex128>();
+                self.delta = py::cast<complex128>(v);
             }
         })
       .def("run",

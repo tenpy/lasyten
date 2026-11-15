@@ -241,6 +241,3 @@ class TorchBlockBackend : public BlockBackend
 };
 
 } // namespace lasyten
-
-// pybind11 casters for nested bound types, delegating to nanobind (py_nanobind_bridge.h).
-LASYTEN_PY_BRIDGE_CLASS(::lasyten::TorchBlockBackend::Block)

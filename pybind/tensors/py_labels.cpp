@@ -22,24 +22,24 @@ as_leg_label(py::handle obj)
     if (obj.is_none()) {
         return "";
     }
-    return obj.cast<std::string>();
+    return py::cast<std::string>(obj);
 }
 
 std::vector<int64>
 py_indices(LegLabels const& self, py::object idcs)
 {
     if (py::isinstance<py::str>(idcs)) {
-        return { self.index(idcs.cast<std::string>()) };
+        return { self.index(py::cast<std::string>(idcs)) };
     }
     if (py::isinstance<py::int_>(idcs)) {
-        return { self.index(idcs.cast<int64>()) };
+        return { self.index(py::cast<int64>(idcs)) };
     }
     std::vector<std::variant<int64, std::string>> parsed;
     for (auto item : py::reinterpret_borrow<py::iterable>(to_iterable(idcs))) {
         if (py::isinstance<py::str>(item)) {
-            parsed.emplace_back(item.cast<std::string>());
+            parsed.emplace_back(py::cast<std::string>(item));
         } else {
-            parsed.emplace_back(item.cast<int64>());
+            parsed.emplace_back(py::cast<int64>(item));
         }
     }
     return self.indices(parsed);
@@ -49,9 +49,9 @@ int64
 py_index(LegLabels const& self, py::object idx)
 {
     if (py::isinstance<py::str>(idx)) {
-        return self.index(idx.cast<std::string>());
+        return self.index(py::cast<std::string>(idx));
     }
-    return self.index(idx.cast<int64>());
+    return self.index(py::cast<int64>(idx));
 }
 
 std::vector<std::string>
@@ -60,7 +60,7 @@ args_as_strings(py::args const& args)
     std::vector<std::string> out;
     out.reserve(args.size());
     for (auto a : args) {
-        out.push_back(a.cast<std::string>());
+        out.push_back(py::cast<std::string>(a));
     }
     return out;
 }
@@ -99,7 +99,7 @@ bind_tensors_labels(nb::module_& m)
           if (!py::isinstance<py::str>(label)) {
               return false;
           }
-          return is_valid_leg_label(std::string{ label.cast<std::string>() });
+          return is_valid_leg_label(std::string{ py::cast<std::string>(label) });
       },
       nb::arg("label"),
       DOC(lasyten, is_valid_leg_label));
@@ -115,7 +115,7 @@ bind_tensors_labels(nb::module_& m)
       [](py::object label, py::object num) {
           std::optional<int64> n;
           if (!num.is_none()) {
-              n = num.cast<int64>();
+              n = py::cast<int64>(num);
           }
           return _split_leg_label(as_leg_label(label), n);
       },
@@ -199,11 +199,11 @@ In Python, unset labels are empty strings (``""``).
       .def("__getitem__",
            [](LegLabels const& self, py::object key) -> py::object {
                if (py::isinstance<py::str>(key)) {
-                   return py::cast(
-                     static_cast<std::string const&>(self[self.index(key.cast<std::string>())]));
+                   return py::cast(static_cast<std::string const&>(
+                     self[self.index(py::cast<std::string>(key))]));
                }
                if (py::isinstance<py::int_>(key)) {
-                   return py::cast(static_cast<std::string const&>(self[key.cast<int64>()]));
+                   return py::cast(static_cast<std::string const&>(self[py::cast<int64>(key)]));
                }
                throw py::type_error("LegLabels indices must be int or str");
            })
@@ -211,9 +211,9 @@ In Python, unset labels are empty strings (``""``).
            [](LegLabels& self, py::object key, py::object value) {
                std::string lab = as_leg_label(value);
                if (py::isinstance<py::str>(key)) {
-                   self[key.cast<std::string>()] = std::move(lab);
+                   self[py::cast<std::string>(key)] = std::move(lab);
                } else if (py::isinstance<py::int_>(key)) {
-                   self[key.cast<int64>()] = std::move(lab);
+                   self[py::cast<int64>(key)] = std::move(lab);
                } else {
                    throw py::type_error("LegLabels indices must be int or str");
                }
@@ -223,16 +223,16 @@ In Python, unset labels are empty strings (``""``).
                if (!py::isinstance<py::str>(key)) {
                    return false;
                }
-               return self.has(key.cast<std::string>());
+               return self.has(py::cast<std::string>(key));
            })
       .def(
         "__eq__",
         [](LegLabels const& self, py::object other) {
-            if (lasyten::py_isinstance<LegLabels>(other)) {
-                return self == other.cast<LegLabels const&>();
+            if (py::isinstance<LegLabels>(other)) {
+                return self == py::cast<LegLabels const&>(other);
             }
             try {
-                return self == other.cast<LegLabelList>();
+                return self == py::cast<LegLabelList>(other);
             } catch (py::cast_error const&) {
                 return false;
             }

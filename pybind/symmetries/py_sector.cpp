@@ -45,7 +45,7 @@ indices_from_py(py::handle key, std::size_t n_rows)
     try {
         if (!py::isinstance<py::slice>(key) && !py::isinstance<py::tuple>(key) &&
             !py::isinstance<py::list>(key) && !py::isinstance<py::array>(key)) {
-            auto i = key.cast<std::ptrdiff_t>();
+            auto i = py::cast<std::ptrdiff_t>(key);
             if (i < 0) {
                 i += static_cast<std::ptrdiff_t>(n_rows);
             }
@@ -58,7 +58,7 @@ indices_from_py(py::handle key, std::size_t n_rows)
         // not a scalar int
     }
     if (py::isinstance<py::slice>(key)) {
-        auto sl = key.cast<py::slice>();
+        auto sl = py::cast<py::slice>(key);
         size_t start = 0, stop = 0, step = 0, slicelength = 0;
         if (!sl.compute(n_rows, &start, &stop, &step, &slicelength)) {
             throw py::error_already_set();
@@ -76,7 +76,7 @@ indices_from_py(py::handle key, std::size_t n_rows)
     }
     if (arr.ndim() == 0) {
         // 0-d numpy integer
-        auto i = arr.cast<std::ptrdiff_t>();
+        auto i = py::cast<std::ptrdiff_t>(arr);
         if (i < 0) {
             i += static_cast<std::ptrdiff_t>(n_rows);
         }
@@ -184,7 +184,7 @@ bind_sector(nb::module_& m)
       .def("__getitem__",
            [](Sector const& self, py::object key) -> py::object {
                if (py::isinstance<py::int_>(key)) {
-                   auto i = key.cast<std::ptrdiff_t>();
+                   auto i = py::cast<std::ptrdiff_t>(key);
                    auto const n = static_cast<std::ptrdiff_t>(self.len());
                    if (i < 0) {
                        i += n;
@@ -196,7 +196,7 @@ bind_sector(nb::module_& m)
                }
                // slice → list of ints
                if (py::isinstance<py::slice>(key)) {
-                   auto sl = key.cast<py::slice>();
+                   auto sl = py::cast<py::slice>(key);
                    size_t start = 0, stop = 0, step = 0, slicelength = 0;
                    if (!sl.compute(self.len(), &start, &stop, &step, &slicelength)) {
                        throw py::error_already_set();
@@ -212,7 +212,8 @@ bind_sector(nb::module_& m)
       .def(
         "__iter__",
         [](Sector const& self) {
-            return py::make_iterator(self.span().begin(), self.span().end());
+            return nb::make_iterator(
+              nb::type<Sector>(), "_SectorIterator", self.span().begin(), self.span().end());
         },
         nb::keep_alive<0, 1>())
       .def(nb::self == nb::self)
@@ -262,7 +263,7 @@ bind_sector(nb::module_& m)
            [](SectorArray const& self, py::object key) -> py::object {
                // ``arr[i, :]`` / ``arr[i, ...]`` → treat as row index only
                if (py::isinstance<py::tuple>(key)) {
-                   py::tuple t = key.cast<py::tuple>();
+                   py::tuple t = py::to_tuple(key);
                    if (t.size() == 2 &&
                        (py::isinstance<py::slice>(t[1]) || py::isinstance<py::ellipsis>(t[1]))) {
                        key = t[0];
@@ -279,7 +280,7 @@ bind_sector(nb::module_& m)
                    !py::isinstance<py::array>(key) && !py::isinstance<py::list>(key)) {
                    // scalar index → Sector (including NumPy integer scalars)
                    try {
-                       (void)key.cast<std::ptrdiff_t>();
+                       (void)py::cast<std::ptrdiff_t>(key);
                        return py::cast(self[idx[0]]);
                    } catch (py::cast_error const&) {
                        // fall through — e.g. length-1 fancy index
@@ -290,7 +291,7 @@ bind_sector(nb::module_& m)
       .def("__setitem__",
            [](SectorArray& self, py::object key, py::object value) {
                if (py::isinstance<py::tuple>(key)) {
-                   py::tuple t = key.cast<py::tuple>();
+                   py::tuple t = py::to_tuple(key);
                    if (t.size() == 2 &&
                        (py::isinstance<py::slice>(t[1]) || py::isinstance<py::ellipsis>(t[1]))) {
                        key = t[0];
@@ -301,7 +302,7 @@ bind_sector(nb::module_& m)
                    }
                }
                if (py::isinstance<py::int_>(key)) {
-                   auto i = key.cast<std::ptrdiff_t>();
+                   auto i = py::cast<std::ptrdiff_t>(key);
                    auto const n = static_cast<std::ptrdiff_t>(self.size());
                    if (i < 0) {
                        i += n;
@@ -310,10 +311,10 @@ bind_sector(nb::module_& m)
                        throw py::index_error("SectorArray index out of range");
                    }
                    Sector s;
-                   if (lasyten::py_isinstance<Sector>(value)) {
-                       s = value.cast<Sector>();
-                   } else if (lasyten::py_isinstance<SectorArray>(value)) {
-                       auto sa = value.cast<SectorArray>();
+                   if (py::isinstance<Sector>(value)) {
+                       s = py::cast<Sector>(value);
+                   } else if (py::isinstance<SectorArray>(value)) {
+                       auto sa = py::cast<SectorArray>(value);
                        if (sa.size() != 1) {
                            throw py::value_error("assigning multiple rows to a single index");
                        }
@@ -330,8 +331,8 @@ bind_sector(nb::module_& m)
                // fancy int index assignment of rows
                auto idx = indices_from_py(key, self.size());
                SectorArray src;
-               if (lasyten::py_isinstance<SectorArray>(value)) {
-                   src = value.cast<SectorArray>();
+               if (py::isinstance<SectorArray>(value)) {
+                   src = py::cast<SectorArray>(value);
                } else {
                    src = sector_array_from_numpy(value);
                }
@@ -344,7 +345,10 @@ bind_sector(nb::module_& m)
            })
       .def(
         "__iter__",
-        [](SectorArray const& self) { return py::make_iterator(self.begin(), self.end()); },
+        [](SectorArray const& self) {
+            return nb::make_iterator(
+              nb::type<SectorArray>(), "_SectorArrayIterator", self.begin(), self.end());
+        },
         nb::keep_alive<0, 1>())
       .def(nb::self == nb::self)
       .def(nb::self != nb::self)

@@ -1,16 +1,15 @@
 #pragma once
 
+#include <lasyten/lasyten.h>
 #include <lasyten/tools/hdf5.h>
 
 #include <highfive/highfive.hpp>
-#include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
 #include <string>
 #include <utility>
 
 namespace lasyten::hdf5 {
 
-namespace py = pybind11;
+namespace py = lasyten::py;
 
 /// h5py File/Group/Dataset → hid_t (``obj.id.id``).
 hid_t hid_from_h5py(py::handle obj);

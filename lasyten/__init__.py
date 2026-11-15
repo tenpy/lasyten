@@ -23,7 +23,7 @@ from . import (
     models,
 )
 
-# import pybind11 bindings from C++ code
+# import nanobind bindings from C++ code
 from .backends import TensorBackend, get_backend
 from .block_backends import (
     Block,

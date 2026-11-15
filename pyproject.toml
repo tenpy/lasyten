@@ -74,8 +74,8 @@ all = ["lasyten[io, test, lint, docbuild, stubs]"]
 
 [build-system]
 # torch is required at build time: CMake links against the same libtorch as `import torch`
-# pybind11 is kept temporarily: public headers still use py:: types (convert_nanobind.md, Phase 4).
-requires = ["scikit-build-core", "nanobind>=3.0", "pybind11", "numpy>=2.0", "torch", "setuptools-scm"]
+# pybind11 is not used anymore (it cannot be compiled with Py_LIMITED_API / the Stable ABI).
+requires = ["scikit-build-core", "nanobind>=3.0", "numpy>=2.0", "torch", "setuptools-scm"]
 build-backend = "scikit_build_core.build"
 
 
@@ -89,6 +89,10 @@ cmake.build-type = "Debug"  # TODO: for now setup debug builds - update this onc
 # Select the editable mode to use. Can be "redirect" (default) or "inplace".
 # editable.mode = "inplace"
 wheel.packages = ["lasyten"]
+# Stable ABI (abi3): ``lasyten._core`` is built with nanobind STABLE_ABI (Py_LIMITED_API 3.12), so one
+# ``cp312-abi3`` wheel serves Python >= 3.12 (the project requires >= 3.14). See CMake option
+# LASYTEN_STABLE_ABI (silently off for Python < 3.12). Set to "" to build version-specific wheels.
+wheel.py-api = "cp312"
 sdist.include = ["lasyten/_version.py"]
 
 [[tool.dynamic-metadata]]

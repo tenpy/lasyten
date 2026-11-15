@@ -37,7 +37,7 @@ is_py_integer_scalar_key(const py::handle& obj)
     if (py::isinstance<py::slice>(obj))
         return false;
     try {
-        (void)obj.cast<int64>();
+        (void)py::cast<int64>(obj);
         return true;
     } catch (const py::cast_error&) {
         return false;
@@ -47,8 +47,8 @@ is_py_integer_scalar_key(const py::handle& obj)
 std::optional<BlockBackend::BlockIndex>
 try_py_handle_to_block_index(py::handle key)
 {
-    if (py_isinstance<BlockBackend::Block>(key)) {
-        return BlockBackend::BlockCPtr(key.cast<BlockPtr>());
+    if (py::isinstance<BlockBackend::Block>(key)) {
+        return BlockBackend::BlockCPtr(py::cast<BlockPtr>(key));
     }
     if (py::isinstance<py::array>(key)) {
         py::array arr = py::reinterpret_borrow<py::array>(key);
@@ -79,7 +79,7 @@ try_py_handle_to_block_index(py::handle key)
         for (py::ssize_t i = 0; i < seq.size(); ++i) {
             if (!is_py_integer_scalar_key(seq[i]))
                 return std::nullopt;
-            vec.push_back(seq[i].cast<int64>());
+            vec.push_back(py::cast<int64>(seq[i]));
         }
         return vec;
     }
@@ -88,14 +88,14 @@ try_py_handle_to_block_index(py::handle key)
         auto as_opt_int = [](py::object o) -> std::optional<int64> {
             if (o.is_none())
                 return std::nullopt;
-            return o.cast<int64>();
+            return py::cast<int64>(o);
         };
         return BlockBackend::AxisSlice{ as_opt_int(sl.attr("start")),
                                         as_opt_int(sl.attr("stop")),
                                         as_opt_int(sl.attr("step")) };
     }
     if (is_py_integer_scalar_key(key))
-        return key.cast<int64>();
+        return py::cast<int64>(key);
     return std::nullopt;
 }
 
@@ -261,10 +261,10 @@ BlockBackend::Block&
 BlockBackend::Block::operator=(py::object rhs)
 {
     BlockIndex all = AxisSlice::all();
-    if (py_isinstance<Block>(rhs)) {
-        set_item(std::span<const BlockIndex>(&all, 1), rhs.cast<Block&>());
-    } else if (py_isinstance<Scalar>(rhs)) {
-        set_item(std::span<const BlockIndex>(&all, 1), rhs.cast<Scalar&>());
+    if (py::isinstance<Block>(rhs)) {
+        set_item(std::span<const BlockIndex>(&all, 1), py::cast<Block&>(rhs));
+    } else if (py::isinstance<Scalar>(rhs)) {
+        set_item(std::span<const BlockIndex>(&all, 1), py::cast<Scalar&>(rhs));
     } else {
         // Fall back: assign via Python key path with a converted full-slice key.
         set_item(block_indices_to_py(std::span<const BlockIndex>(&all, 1)), rhs);
@@ -1287,7 +1287,7 @@ operator<<(std::ostream& os, const BlockBackend::Block& block)
         os << ',';
     os << "), dtype=" << dtype::repr(block.dtype()) << ", device=" << block.device() << ")\n";
 #if LASYTEN_HAS_PYTHON
-    os << py::str(block.to_numpy()).cast<std::string>();
+    os << py::cast<std::string>(py::str(block.to_numpy()));
 #else
     for (auto const& line :
          block.get_backend()->_block_repr_lines(block.shared_from_this(), "", 80, 40))
@@ -1300,7 +1300,7 @@ std::ostream&
 operator<<(std::ostream& os, const BlockBackend::Scalar& scalar)
 {
 #if LASYTEN_HAS_PYTHON
-    os << "Scalar(" << py::str(scalar.to_numpy()).cast<std::string>()
+    os << "Scalar(" << py::cast<std::string>(py::str(scalar.to_numpy()))
        << ", dtype=" << dtype::repr(scalar.dtype()) << ')';
 #else
     os << "Scalar(" << scalar.as_complex128() << ", dtype=" << dtype::repr(scalar.dtype()) << ')';

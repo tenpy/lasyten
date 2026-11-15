@@ -5,14 +5,15 @@
 /// ``nb::ndarray`` is a *view/interchange* type only (NumPy, PyTorch, JAX, anything DLPack /
 /// buffer-protocol), it does not provide compute. The Eigen backend owns a contiguous C-order
 /// ``std::vector<std::byte>``; this header exposes it across the Python boundary without going
-/// through ``pybind11::array``:
+/// through the ``py::array`` adapter:
 ///
 /// - export: ``block_to_ndarray`` returns a *zero-copy* NumPy view, kept alive by the block.
 /// - import: ``block_from_ndarray`` copies (the backend owns its memory) from any CPU array that
 ///   supports DLPack / the buffer protocol.
 ///
 /// The classic ``to_numpy()`` / ``block_from_numpy()`` (``py::array``) remain for the numpy-based
-/// call paths inside liblasyten, until those are ported (leftover #10).
+/// call paths inside liblasyten (``py::array`` = ``detail/py_array.h``), until those are ported
+/// (leftover #10).
 
 #include <lasyten/block_backend/dtypes.h>
 #include <lasyten/block_backend/eigen.h>

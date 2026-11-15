@@ -98,7 +98,7 @@ bind_models_couplings(nb::module_& m)
             }
             std::optional<LevelsSpec> levels_spec;
             if (!levels.is_none()) {
-                levels_spec = levels.cast<LevelsSpec>();
+                levels_spec = py::cast<LevelsSpec>(levels);
             }
             Coupling result = self.permute(permutation, levels_spec);
             py::object result_obj = py::cast(std::move(result));
@@ -115,10 +115,10 @@ bind_models_couplings(nb::module_& m)
       .def(
         "__eq__",
         [](Coupling const& self, py::handle other) -> py::object {
-            if (!lasyten::py_isinstance<Coupling>(other)) {
+            if (!py::isinstance<Coupling>(other)) {
                 return not_implemented();
             }
-            return py::cast(self == other.cast<Coupling>());
+            return py::cast(self == py::cast<Coupling>(other));
         },
         nb::arg("other"))
       .def_prop_ro("num_sites", &Coupling::num_sites)

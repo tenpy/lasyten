@@ -70,18 +70,30 @@ CMake options for the block backends and a Python-free build
 
 ``LASYTEN_WITH_PYTHON`` (default ON)
     The long-term goal is to be able to use the C++ library without any Python interpreter.
-    This is **experimental scaffolding**, not yet a usable library: with
-    ``-DLASYTEN_WITH_PYTHON=OFF`` CMake does not look for Python, pybind11, nanobind or PyTorch, and builds
-    the subset of ``liblasyten`` that does not need Python (Eigen + LAPACK + HDF5, no ``_core``)
-    plus a CTest that exercises ``EigenBlockBackend`` (incl. HDF5 I/O) without an interpreter.
+    This is still **partial**: with ``-DLASYTEN_WITH_PYTHON=OFF`` CMake does not look for Python, nanobind,
+    numpy or PyTorch, and builds the subset of ``liblasyten`` that does not need Python: the native
+    ``EigenBlockBackend`` (Eigen + LAPACK: products, tensor contractions ``tdot``, SVD, QR, eigh, ...),
+    dtypes, config, the symmetry stack (``Sector``, ``Symmetry`` and all factors, fusion trees) and HDF5 I/O
+    of these -- but not yet ``Space`` / ``Leg``, the ``Tensor`` classes and the ``TensorBackend``\ s, and no ``_core``.
+    Two CTests exercise this without an interpreter (``ldd`` shows no ``libpython``):
+    ``test_eigen_block_backend_no_python`` (block operations, contraction, SVD, HDF5 round trip) and
+    ``test_symmetric_blocks_no_python`` (``U(1) x Z_3`` charge bookkeeping and a sector-wise block contraction + SVD).
     Needs only a C++ compiler, CMake, Eigen3, LAPACK/LAPACKE and HDF5 (e.g. from the conda env)::
 
         cmake -S . -B /tmp/lasyten_off -G Ninja -DLASYTEN_WITH_PYTHON=OFF
         cmake --build /tmp/lasyten_off
         ctest --test-dir /tmp/lasyten_off --output-on-failure
 
-    The configure step prints which parts are skipped and what is still blocking.
+    The configure step prints which parts are skipped.
     See ``docs/cpp_conversion/convert_nanobind.md`` (Phase 5) for the status.
+
+``LASYTEN_STABLE_ABI`` (default ON)
+    Build ``lasyten._core`` (and liblasyten) against the Python Stable ABI: nanobind's ``STABLE_ABI`` mode with
+    ``Py_LIMITED_API`` = 3.12, linked against ``nanobind-static-abi3``. The extension is then called
+    ``_core.abi3.so`` and the wheel is tagged ``cp312-abi3`` (``wheel.py-api = "cp312"`` in ``pyproject.toml``),
+    i.e. it works for every CPython >= 3.12. The option is silently turned OFF for Python < 3.12 or a
+    non-CPython interpreter (then ``_core.cpython-3XX-....so`` is built). pybind11 is not used anymore: it
+    cannot be compiled with ``Py_LIMITED_API``.
 
 
 Building from source on MacOS

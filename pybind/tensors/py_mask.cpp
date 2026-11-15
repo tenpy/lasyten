@@ -30,9 +30,9 @@ optional_leg_order(py::object obj)
     std::vector<std::variant<int64, std::string>> out;
     for (auto item : to_iterable(obj)) {
         if (py::isinstance<py::str>(item)) {
-            out.emplace_back(item.cast<std::string>());
+            out.emplace_back(py::cast<std::string>(item));
         } else {
-            out.emplace_back(item.cast<int64>());
+            out.emplace_back(py::cast<int64>(item));
         }
     }
     return out;
@@ -111,9 +111,9 @@ bind_tensors_mask(nb::module_& m)
       },
       [](Mask& self, py::object obj) {
           if (std::dynamic_pointer_cast<NoSymmetryBackend>(self.backend)) {
-              self.data = NoSymmetryBackend::wrap(obj.cast<BlockBackend::BlockPtr>());
+              self.data = NoSymmetryBackend::wrap(py::cast<BlockBackend::BlockPtr>(obj));
           } else {
-              self.data = obj.cast<TensorBackend::DataPtr>();
+              self.data = py::cast<TensorBackend::DataPtr>(obj);
           }
       });
 
@@ -161,7 +161,9 @@ bind_tensors_mask(nb::module_& m)
 
     cls.def_static(
       "from_DiagonalTensor",
-      [](py::object diag) { return Mask::from_DiagonalTensor(diag.cast<DiagonalTensorCPtr>()); },
+      [](py::object diag) {
+          return Mask::from_DiagonalTensor(py::cast<DiagonalTensorCPtr>(diag));
+      },
       nb::arg("diag"),
       DOC(lasyten, Mask, from_DiagonalTensor));
 
@@ -331,15 +333,15 @@ bind_tensors_mask(nb::module_& m)
          bool return_NotImplemented) -> py::object {
           auto adapted = adapt_block_bool_binary(func, self.backend->block_backend);
           if (py::isinstance<py::bool_>(other)) {
-              return py::cast(self._binary_operand(other.cast<bool>(), adapted, operand));
+              return py::cast(self._binary_operand(py::to_bool(other), adapted, operand));
           }
-          if (lasyten::py_isinstance<Mask>(other) ||
+          if (py::isinstance<Mask>(other) ||
               py::isinstance(other,
                              py::module_::import("lasyten.tensors._tensors").attr("Mask"))) {
-              return py::cast(self._binary_operand(other.cast<MaskCPtr>(), adapted, operand));
+              return py::cast(self._binary_operand(py::cast<MaskCPtr>(other), adapted, operand));
           }
           if (return_NotImplemented &&
-              !(lasyten::py_isinstance<Tensor>(other) ||
+              !(py::isinstance<Tensor>(other) ||
                 py::isinstance(other,
                                py::module_::import("lasyten.tensors._tensors").attr("Tensor")) ||
                 py::isinstance(other, py::module_::import("numbers").attr("Number")))) {
@@ -378,14 +380,14 @@ bind_tensors_mask(nb::module_& m)
               auto func = adapt_block_bool_binary(py::module_::import("operator").attr(op_name),
                                                   self.backend->block_backend);
               if (py::isinstance<py::bool_>(other)) {
-                  return py::cast(self._binary_operand(other.cast<bool>(), func, operand));
+                  return py::cast(self._binary_operand(py::to_bool(other), func, operand));
               }
-              if (lasyten::py_isinstance<Mask>(other) ||
+              if (py::isinstance<Mask>(other) ||
                   py::isinstance(other,
                                  py::module_::import("lasyten.tensors._tensors").attr("Mask"))) {
-                  return py::cast(self._binary_operand(other.cast<MaskCPtr>(), func, operand));
+                  return py::cast(self._binary_operand(py::cast<MaskCPtr>(other), func, operand));
               }
-              if (!(lasyten::py_isinstance<Tensor>(other) ||
+              if (!(py::isinstance<Tensor>(other) ||
                     py::isinstance(
                       other, py::module_::import("lasyten.tensors._tensors").attr("Tensor")) ||
                     py::isinstance(other, py::module_::import("numbers").attr("Number")))) {

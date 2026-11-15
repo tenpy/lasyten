@@ -5,7 +5,7 @@
 #include "docstrings/tools.h"
 #include "py_lasyten_nanobind.h"
 
-namespace py = pybind11;
+namespace py = lasyten::py;
 namespace lasyten {
 
 void
@@ -17,20 +17,6 @@ bind_tools(nb::module_& m)
             std::rethrow_exception(p);
         } catch (NotImplemented const& e) {
             PyErr_SetString(PyExc_NotImplementedError, e.what());
-        }
-    });
-
-    // liblasyten still throws pybind11 exceptions (py::error_already_set when a Python callback
-    // fails, py::value_error / py::type_error / ... from py::builtin_exception). nanobind does not
-    // know them (it would report RuntimeError); restore the original Python exception instead.
-    // Registered last, i.e. tried first.
-    nb::register_exception_translator([](std::exception_ptr const& p, void* /*payload*/) {
-        try {
-            std::rethrow_exception(p);
-        } catch (py::error_already_set& e) {
-            e.restore();
-        } catch (py::builtin_exception const& e) {
-            e.set_error();
         }
     });
 

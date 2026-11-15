@@ -48,7 +48,7 @@ backend_type_name(TensorBackend const& self)
 {
     try {
         py::object py_self = py::cast(const_cast<TensorBackend*>(&self));
-        return py::str(py::type::of(py_self).attr("__name__")).cast<std::string>();
+        return py::cast<std::string>(py::str(py::type::of(py_self).attr("__name__")));
     } catch (py::cast_error const&) {
         return "TensorBackend";
     } catch (py::error_already_set const&) {
@@ -83,7 +83,7 @@ TensorBackend::__repr__() const
     std::ostringstream oss;
     oss << backend_type_name(*this) << '(';
     try {
-        oss << py::repr(py::cast(block_backend)).cast<std::string>();
+        oss << py::cast<std::string>(py::repr(py::cast(block_backend)));
     } catch (...) {
         oss << "BlockBackend";
     }
@@ -204,7 +204,7 @@ TensorBackend::_truncate_singular_values_selection(py::array S,
             marginal_errs[i] = S_v[i] * S_v[i];
         }
     } else {
-        auto q = f64_array_to_vector(qdims.cast<py::array>());
+        auto q = f64_array_to_vector(py::cast<py::array>(qdims));
         if (q.size() != S_v.size()) {
             throw std::invalid_argument(
               "_truncate_singular_values_selection: qdims size mismatch");
@@ -337,7 +337,7 @@ TensorBackend::from_hdf5(py::object cls,
 {
     auto block_backend = hdf5_export::load_block_backend(loader, subpath + "block_backend");
     py::object obj = cls(block_backend);
-    auto ptr = obj.cast<Ptr>();
+    auto ptr = py::cast<Ptr>(obj);
     loader.memorize_load(h5gr.getId(), std::static_pointer_cast<void>(ptr));
     return ptr;
 }
@@ -360,11 +360,11 @@ conventional_leg_order(py::object tensor_or_codomain, py::object domain)
     TensorProduct::Ptr codomain_ptr;
     TensorProduct::Ptr domain_ptr;
     if (domain.is_none()) {
-        codomain_ptr = tensor_or_codomain.attr("codomain").cast<TensorProduct::Ptr>();
-        domain_ptr = tensor_or_codomain.attr("domain").cast<TensorProduct::Ptr>();
+        codomain_ptr = py::cast<TensorProduct::Ptr>(tensor_or_codomain.attr("codomain"));
+        domain_ptr = py::cast<TensorProduct::Ptr>(tensor_or_codomain.attr("domain"));
     } else {
-        codomain_ptr = tensor_or_codomain.cast<TensorProduct::Ptr>();
-        domain_ptr = domain.cast<TensorProduct::Ptr>();
+        codomain_ptr = py::cast<TensorProduct::Ptr>(tensor_or_codomain);
+        domain_ptr = py::cast<TensorProduct::Ptr>(domain);
     }
     return conventional_leg_order(codomain_ptr, domain_ptr);
 }
@@ -386,9 +386,9 @@ get_same_backend(const std::vector<py::object>& objs, std::string error_msg)
               "get_same_backend() requires non-null Tensor arguments (null at index {})", i));
         }
     }
-    TensorBackend::Ptr backend = objs[0].attr("backend").cast<TensorBackend::Ptr>();
+    TensorBackend::Ptr backend = py::cast<TensorBackend::Ptr>(objs[0].attr("backend"));
     for (std::size_t i = 1; i < objs.size(); ++i) {
-        TensorBackend::Ptr other = objs[i].attr("backend").cast<TensorBackend::Ptr>();
+        TensorBackend::Ptr other = py::cast<TensorBackend::Ptr>(objs[i].attr("backend"));
         // Value equality: HDF5 round-trips reconstruct equivalent backend instances.
         if (!backend || !other || !(*backend == *other))
             throw std::invalid_argument(std::move(error_msg));

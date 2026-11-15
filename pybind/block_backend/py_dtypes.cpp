@@ -49,7 +49,7 @@ bind_block_backend_dtypes(nb::module_& m)
         dtypes.reserve(1 + rest.size());
         dtypes.push_back(first);
         for (py::handle h : rest)
-            dtypes.push_back(h.cast<Dtype>());
+            dtypes.push_back(py::cast<Dtype>(h));
         return dtype::common(dtypes);
     });
 

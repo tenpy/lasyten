@@ -18,9 +18,8 @@ namespace {
 BlockBackend::Scalar
 as_scalar_for(VectorLike const& vec, py::object value)
 {
-    return py::cast(vec.vector_backend()->block_backend)
-      .attr("as_scalar")(value)
-      .cast<BlockBackend::Scalar>();
+    return py::cast<BlockBackend::Scalar>(
+      py::cast(vec.vector_backend()->block_backend).attr("as_scalar")(value));
 }
 
 py::object

@@ -57,15 +57,20 @@ option(BUILD_TESTING "Build ctest tests" ON)
 option(LASYTEN_WITH_HDF5 "Link hdf5_io_core for native HDF5 I/O" ON)
 # When ON (default): build Numpy/Torch/Array-API backends, models, _SU2, and
 # the nanobind ``_core`` extension. NumpyBlockBackend requires a live Python
-# interpreter (extension or pybind11::embed) — it is not a pure-C++ backend.
-# When OFF: those Python-owned TUs are excluded from liblasyten; ``_core`` is
-# not built; Python / pybind11 / nanobind / Torch are not looked for. Public headers
+# interpreter (extension or an embedding program) — it is not a pure-C++ backend.
+# When OFF: the Python-owned TUs are excluded from liblasyten; ``_core`` is
+# not built; Python / nanobind / Torch are not looked for. Public headers
 # still mention ``py::`` (see include/lasyten/detail/python_api.h); in this mode ``py::`` is a
 # set of opaque stand-in types so declarations compile, but anything that really needs Python
-# does not. This is *scaffolding* (convert_nanobind.md, Phase 5): not every TU of liblasyten
-# builds yet — the status message printed at configure time lists what is skipped.
+# does not. Builds Eigen + the symmetry stack and two Python-free ctests (no libpython). See
+# convert_nanobind.md (Phase 5): the status message printed at configure time lists what is skipped.
 option(LASYTEN_WITH_PYTHON
-  "Include Python/pybind11-dependent liblasyten sources and build _core" ON)
+  "Include Python/nanobind-dependent liblasyten sources and build _core" ON)
+# nanobind Stable ABI (abi3): ``_core`` and liblasyten are compiled with Py_LIMITED_API (3.12) and
+# linked against nanobind-static-abi3, so one ``_core.abi3.so`` works for all Python >= 3.12.
+# Only effective with LASYTEN_WITH_PYTHON=ON and a CPython >= 3.12 (otherwise silently OFF).
+# pybind11 can not be used with Py_LIMITED_API; liblasyten does not use it anymore.
+option(LASYTEN_STABLE_ABI "Build _core against the Python Stable ABI (abi3, Python >= 3.12)" ON)
 # The Python-dispatch CPU backends (NumpyBlockBackend, ArrayApiBlockBackend) are transitional
 # (convert_nanobind.md leftover #5): EigenBlockBackend ("eigen") is the preferred CPU backend and
 # TorchBlockBackend the GPU one. Turning this OFF drops numpy.cpp / array_api.cpp (and their
@@ -104,22 +109,38 @@ cmake_print_variables(PROJECT_SOURCE_DIR)
 cmake_print_variables(CMAKE_CXX_STANDARD)
 
 # #####################################################################
-# ## find python / pybind11 / nanobind (only with LASYTEN_WITH_PYTHON)
+# ## find python / nanobind (only with LASYTEN_WITH_PYTHON)
 # #####################################################################
 # With LASYTEN_WITH_PYTHON=OFF none of these is required: no Development.Module /
-# Development.Embed, no pybind11, no nanobind. (An interpreter is searched for optionally, only
+# Development.Embed, no nanobind. (An interpreter is searched for optionally, only
 # so that tools like the stub generator could use it; failing to find one is fine.)
 
 if(LASYTEN_WITH_PYTHON)
   set(Python_FIND_VIRTUALENV ONLY)
   set(Python_FIND_STRATEGY LOCATION)
-  find_package(Python REQUIRED COMPONENTS Interpreter Development.Module Development.Embed)
 
-  # pybind11 is kept until the public headers drop py:: (convert_nanobind.md Phase 4).
-  find_package(pybind11 CONFIG REQUIRED)
+  # Stable ABI needs CPython >= 3.12 (nanobind's linked abi3 mode); decide before asking
+  # FindPython for the Development.SABIModule component.
+  find_package(Python REQUIRED COMPONENTS Interpreter)
+  if(LASYTEN_STABLE_ABI AND (Python_VERSION VERSION_LESS 3.12 OR NOT Python_INTERPRETER_ID STREQUAL "Python"))
+    message(STATUS "LASYTEN_STABLE_ABI: needs CPython >= 3.12 (found ${Python_INTERPRETER_ID} "
+      "${Python_VERSION}); building a version-specific extension instead")
+    set(LASYTEN_STABLE_ABI OFF)
+  endif()
+  if(LASYTEN_STABLE_ABI)
+    find_package(Python REQUIRED COMPONENTS Interpreter Development.Module Development.Embed
+      Development.SABIModule)
+    set(LASYTEN_NB_STABLE_ABI_ARG STABLE_ABI)
+    set(LASYTEN_NB_LIB_NAME nanobind-static-abi3)
+  else()
+    find_package(Python REQUIRED COMPONENTS Interpreter Development.Module Development.Embed)
+    set(LASYTEN_NB_STABLE_ABI_ARG "")
+    set(LASYTEN_NB_LIB_NAME nanobind-static)
+  endif()
+  message(STATUS "LASYTEN_STABLE_ABI: ${LASYTEN_STABLE_ABI}")
 
-  # nanobind builds the ``_core`` extension. Headers under include/lasyten/ still use
-  # pybind11 types; pybind/py_lasyten_nanobind.h bridges the two (see pybind/py_pybind11_bridge.h).
+  # nanobind builds the ``_core`` extension and provides the Python object API (``nb::``) that
+  # liblasyten uses as well (include/lasyten/detail/python_api.h). pybind11 is not used.
   if(NOT nanobind_DIR AND NOT nanobind_ROOT)
     execute_process(
       COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
@@ -133,19 +154,16 @@ if(LASYTEN_WITH_PYTHON)
   endif()
   find_package(nanobind CONFIG REQUIRED)
   # Build libnanobind once and link it into liblasyten: library TUs convert bound
-  # C++ types via nanobind (see include/lasyten/py_nanobind_bridge.h), so every
-  # executable that links lasyten (ctests, examples) needs the nanobind symbols too.
-  nanobind_build_library(nanobind-static)
-  # Find the module development requirements (requires FindPython from 3.17 or
-  # scikit-build-core's built-in backport)
+  # C++ types via nanobind, so every executable that links lasyten (ctests, examples) needs
+  # the nanobind symbols too. The same target is what nanobind_add_module(_core [STABLE_ABI])
+  # links, so the module, the library and the test programs share one libnanobind.
+  nanobind_build_library(${LASYTEN_NB_LIB_NAME})
   cmake_print_variables(Python_VERSION)
   cmake_print_variables(Python_INCLUDE_DIRS)
-  cmake_print_variables(Python_NumPy_VERSION)
-  cmake_print_variables(Python_NumPy_INCLUDE_DIRS)
 else()
   find_package(Python QUIET COMPONENTS Interpreter)
   message(STATUS "LASYTEN_WITH_PYTHON=OFF: not requiring Python Development.Module/Embed, "
-    "pybind11, nanobind or Torch")
+    "nanobind or Torch")
 endif()
 
 # #####################################################################
@@ -166,22 +184,17 @@ cmake_print_variables(LAPACK_LIBRARIES)
 cmake_print_variables(LASYTEN_LAPACKE_INCLUDE_DIR)
 
 if(NOT LASYTEN_WITH_PYTHON)
-  # NOTE: keep this list in sync with src/CMakeLists.txt (LASYTEN_PYTHON_API_SOURCES) and
+  # NOTE: keep this in sync with src/CMakeLists.txt (LASYTEN_PYTHON_API_SOURCES) and
   # docs/cpp_conversion/convert_nanobind.md (Phase 5).
   message(STATUS "")
-  message(STATUS "LASYTEN_WITH_PYTHON=OFF: EXPERIMENTAL Python-free configuration (Phase 5 scaffolding)")
-  message(STATUS "  Builds: liblasyten (Eigen + LAPACK + HDF5) from the TUs that compile against the")
-  message(STATUS "  opaque py:: stubs of include/lasyten/detail/python_api.h, and the ctest")
-  message(STATUS "  'test_eigen_block_backend_no_python' (EigenBlockBackend, native HDF5, no interpreter).")
-  message(STATUS "  Not built (LASYTEN_PYTHON_API_SOURCES in src/CMakeLists.txt, still py::-typed):")
-  message(STATUS "   - spaces.cpp, tensor*.cpp, TensorBackends, krylov_based.cpp, backend_factory.cpp")
-  message(STATUS "   - models (Site / Coupling hold py::array / py::object), su2.cpp, torch.cpp")
-  message(STATUS "   - Numpy / ArrayApi block backends, the nanobind module _core, python ctests")
-  message(STATUS "  Remaining blockers for a *complete* Python-free liblasyten:")
-  message(STATUS "   - py::object / py::array in the Tensor / TensorBackend / Space / Site public APIs")
-  message(STATUS "   - BlockBackend::block_from_numpy / to_numpy / apply_leg_permutations virtuals")
-  message(STATUS "   - repr() code calling Python __repr__ of legs / factors (spaces.cpp)")
-  message(STATUS "   - tests/ctest programs embed Python (only the Eigen test is built)")
+  message(STATUS "LASYTEN_WITH_PYTHON=OFF: Python-free liblasyten (no Python, nanobind, numpy, PyTorch)")
+  message(STATUS "  Builds: liblasyten with EigenBlockBackend (Eigen + LAPACK), dtypes, config, the")
+  message(STATUS "  symmetry stack (Sector, SymmetryFactor / Symmetry, all factors, fusion trees), HDF5")
+  message(STATUS "  (de)serialization of those, and the Python-free ctests (test_eigen_block_backend_no_python,")
+  message(STATUS "  test_symmetric_blocks_no_python); none of them links libpython.")
+  message(STATUS "  Not built (LASYTEN_PYTHON_API_SOURCES in src/CMakeLists.txt, py::-typed in their")
+  message(STATUS "  implementation): Space / Leg (spaces.cpp), Tensor classes, TensorBackends, krylov, models,")
+  message(STATUS "  Numpy / ArrayApi / Torch block backends, _core and the ctests that embed an interpreter.")
   message(STATUS "  Details: docs/cpp_conversion/convert_nanobind.md (Phase 5 / leftover #1)")
   message(STATUS "")
 endif()
@@ -294,11 +307,10 @@ add_library(lasyten STATIC)
 set_property(TARGET lasyten PROPERTY C_VISIBILITY_PRESET hidden)
 set_property(TARGET lasyten PROPERTY CXX_VISIBILITY_PRESET hidden)
 set_property(TARGET lasyten PROPERTY VISIBILITY_INLINES_HIDDEN ON)
-# CXX_VISIBILITY_PRESET is ignored for STATIC libraries; pybind11 (still used by the public
-# headers) needs -fvisibility=hidden on every TU that includes pybind types (see FAQ:
-# "'SomeClass' declared with greater visibility than the type of its field").
-# PUBLIC so dependents (examples, ctests, user programs) get the same flag;
-# otherwise SpinSite/Coupling headers warn about py::array / py::object fields.
+# CXX_VISIBILITY_PRESET is ignored for STATIC libraries; nanobind types (nb::object members, ...)
+# in bound class layouts need -fvisibility=hidden on every TU that includes them (otherwise GCC
+# warns "'SomeClass' declared with greater visibility than the type of its field").
+# PUBLIC so dependents (examples, ctests, user programs) get the same flag.
 # nanobind_add_module(_core) already adds the flag for the extension module.
 target_compile_options(lasyten PRIVATE
   $<$<COMPILE_LANGUAGE:C>:-fvisibility=hidden>
@@ -318,13 +330,13 @@ target_include_directories(lasyten
 add_subdirectory(src)
 target_compile_options(lasyten PUBLIC -fPIC)
 
-# With LASYTEN_WITH_PYTHON=ON, pybind11::headers are required while public APIs still use
-# py:: types (include/lasyten/detail/python_api.h -> lasyten.h), nanobind-static provides the
-# pybind11 <-> nanobind bridge symbols and libtorch backs TorchBlockBackend. NumpyBlockBackend
-# additionally needs a Python interpreter at runtime.
+# With LASYTEN_WITH_PYTHON=ON, liblasyten uses nanobind's object API (include/lasyten/detail/python_api.h)
+# and libtorch backs TorchBlockBackend. NumpyBlockBackend additionally needs a Python interpreter
+# at runtime. Linking nanobind-static[-abi3] PUBLIC propagates Py_LIMITED_API (Stable ABI mode) to
+# every consumer, so library, module and test programs are compiled consistently.
 # With LASYTEN_WITH_PYTHON=OFF none of these is linked (py:: is a set of opaque stubs).
 if(LASYTEN_WITH_PYTHON)
-  target_link_libraries(lasyten PUBLIC pybind11::pybind11 nanobind-static "${TORCH_LIBRARIES}")
+  target_link_libraries(lasyten PUBLIC ${LASYTEN_NB_LIB_NAME} "${TORCH_LIBRARIES}")
 endif()
 
 # Feature switches seen by the public headers (lasyten/detail/python_api.h and users).
@@ -372,7 +384,7 @@ endif()
 # ``_core`` (not liblasyten).
 
 if(LASYTEN_WITH_PYTHON)
-  nanobind_add_module(_core pybind/_core.cpp)
+  nanobind_add_module(_core ${LASYTEN_NB_STABLE_ABI_ARG} pybind/_core.cpp)
 
   target_include_directories(_core
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/pybind

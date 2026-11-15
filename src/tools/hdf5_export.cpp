@@ -1,8 +1,10 @@
 #include <lasyten/tools/hdf5_export.h>
 
+#if LASYTEN_HAS_PYTHON
 #include <lasyten/backends/abelian.h>
 #include <lasyten/backends/fusion_tree_backend.h>
 #include <lasyten/backends/no_symmetry.h>
+#endif
 #include <lasyten/block_backend/eigen.h>
 #if LASYTEN_WITH_NUMPY_BACKEND
 #include <lasyten/block_backend/array_api.h>
@@ -17,7 +19,9 @@
 #include <lasyten/symmetries/factors/ising_anyon_category.h>
 #include <lasyten/symmetries/factors/no_symmetry.h>
 #include <lasyten/symmetries/factors/quantum_double_zn_anyon_category.h>
+#if LASYTEN_HAS_PYTHON
 #include <lasyten/symmetries/factors/su2.h>
+#endif
 #include <lasyten/symmetries/factors/su2_k_anyon_category.h>
 #include <lasyten/symmetries/factors/su3_3_anyon_category.h>
 #include <lasyten/symmetries/factors/sun.h>
@@ -338,8 +342,10 @@ symmetry_factor_class_name(SymmetryFactor const& factor)
         return "U1";
     if (dynamic_cast<NoSymmetry const*>(&factor))
         return "NoSymmetry";
+#if LASYTEN_HAS_PYTHON // _SU2 (test-only, su2.cpp) needs numpy
     if (dynamic_cast<_SU2 const*>(&factor))
         return "_SU2";
+#endif
     if (dynamic_cast<SUN const*>(&factor))
         return "SUN";
     if (dynamic_cast<FermionParity const*>(&factor))
@@ -400,8 +406,10 @@ load_symmetry_factor(lasyten::hdf5::Loader& loader, std::string const& path)
           if (cls == "NoSymmetry")
               return std::static_pointer_cast<SymmetryFactor>(
                 NoSymmetry::from_hdf5(loader, g, sub));
+#if LASYTEN_HAS_PYTHON
           if (cls == "_SU2" || cls == "SU2")
               return std::static_pointer_cast<SymmetryFactor>(_SU2::from_hdf5(loader, g, sub));
+#endif
           if (cls == "SUN")
               return std::static_pointer_cast<SymmetryFactor>(SUN::from_hdf5(loader, g, sub));
           if (cls == "FermionParity")
@@ -462,6 +470,7 @@ load_symmetry(lasyten::hdf5::Loader& loader, std::string const& path)
     });
 }
 
+#if LASYTEN_HAS_PYTHON // Space / Leg / TensorBackend / Tensor (de)serialization
 namespace {
 
 char const*
@@ -689,5 +698,6 @@ load_tensor_backend_data(lasyten::hdf5::Loader& loader, std::string const& path)
           throw std::runtime_error("hdf5_export: unknown TensorBackend::Data class " + cls);
       });
 }
+#endif // LASYTEN_HAS_PYTHON
 
 } // namespace lasyten::hdf5_export

@@ -31,9 +31,9 @@ optional_leg_order(py::object obj)
     std::vector<std::variant<int64, std::string>> out;
     for (auto item : to_iterable(obj)) {
         if (py::isinstance<py::str>(item)) {
-            out.emplace_back(item.cast<std::string>());
+            out.emplace_back(py::cast<std::string>(item));
         } else {
-            out.emplace_back(item.cast<int64>());
+            out.emplace_back(py::cast<int64>(item));
         }
     }
     return out;
@@ -48,22 +48,21 @@ tensors_mod()
 bool
 is_py_tensor(py::object obj)
 {
-    return py::isinstance(obj, tensors_mod().attr("Tensor")) ||
-           lasyten::py_isinstance<Tensor>(obj);
+    return py::isinstance(obj, tensors_mod().attr("Tensor")) || py::isinstance<Tensor>(obj);
 }
 
 bool
 is_py_diagonal(py::object obj)
 {
     return py::isinstance(obj, tensors_mod().attr("DiagonalTensor")) ||
-           lasyten::py_isinstance<DiagonalTensor>(obj);
+           py::isinstance<DiagonalTensor>(obj);
 }
 
 bool
 is_py_number_or_scalar(py::object obj, std::shared_ptr<BlockBackend> const& bb)
 {
     return py::isinstance(obj, py::module_::import("numbers").attr("Number")) ||
-           lasyten::py_isinstance<BlockBackend::Scalar>(obj) ||
+           py::isinstance<BlockBackend::Scalar>(obj) ||
            py::isinstance(obj, py::type::of(py::cast(bb)).attr("Scalar"));
 }
 
@@ -71,7 +70,7 @@ BlockBackend::Scalar
 scalar_from_py(std::shared_ptr<BlockBackend> const& bb, py::object obj)
 {
     // Match Python: as_scalar(other) without forcing self.dtype (complex * float tensor).
-    return py::cast(bb).attr("as_scalar")(obj).cast<BlockBackend::Scalar>();
+    return py::cast<BlockBackend::Scalar>(py::cast(bb).attr("as_scalar")(obj));
 }
 
 BlockBinaryFn
@@ -140,22 +139,23 @@ py_diagonal_binary_operand(DiagonalTensor& self,
           self._binary_operand(scalar_from_py(bb, other), std::move(func), operand, right));
     }
     if (is_py_diagonal(other)) {
-        return py::cast(
-          self._binary_operand(other.cast<DiagonalTensorCPtr>(), std::move(func), operand, right));
+        return py::cast(self._binary_operand(
+          py::cast<DiagonalTensorCPtr>(other), std::move(func), operand, right));
     }
     if (return_NotImplemented && !is_py_tensor(other)) {
         return py::reinterpret_borrow<py::object>(Py_NotImplemented);
     }
     if (right) {
-        throw std::invalid_argument(std::format("Invalid types for operand \"{}\": {} and {}",
-                                                operand,
-                                                py::str(py::type::of(other)).cast<std::string>(),
-                                                self.class_name()));
+        throw std::invalid_argument(
+          std::format("Invalid types for operand \"{}\": {} and {}",
+                      operand,
+                      py::cast<std::string>(py::str(py::type::of(other))),
+                      self.class_name()));
     }
     throw std::invalid_argument(std::format("Invalid types for operand \"{}\": {} and {}",
                                             operand,
                                             self.class_name(),
-                                            py::str(py::type::of(other)).cast<std::string>()));
+                                            py::cast<std::string>(py::str(py::type::of(other)))));
 }
 
 std::optional<nb::class_<DiagonalTensor, SymmetricTensor>> g_diagonal_tensor;
@@ -198,9 +198,9 @@ bind_tensors_diagonal_tensor(nb::module_& m)
       },
       [](DiagonalTensor& self, py::object obj) {
           if (std::dynamic_pointer_cast<NoSymmetryBackend>(self.backend)) {
-              self.data = NoSymmetryBackend::wrap(obj.cast<BlockBackend::BlockPtr>());
+              self.data = NoSymmetryBackend::wrap(py::cast<BlockBackend::BlockPtr>(obj));
           } else {
-              self.data = obj.cast<TensorBackend::DataPtr>();
+              self.data = py::cast<TensorBackend::DataPtr>(obj);
           }
       });
 
@@ -387,7 +387,7 @@ bind_tensors_diagonal_tensor(nb::module_& m)
     cls.def_static(
       "from_tensor",
       [](py::object tens, std::optional<float64> tol) {
-          return DiagonalTensor::from_tensor(tens.cast<SymmetricTensorCPtr>(), tol);
+          return DiagonalTensor::from_tensor(py::cast<SymmetricTensorCPtr>(tens), tol);
       },
       nb::arg("tens"),
       nb::arg("tol") = 1e-12,
@@ -451,7 +451,7 @@ bind_tensors_diagonal_tensor(nb::module_& m)
       "elementwise_almost_equal",
       [](DiagonalTensor& self, py::object other, float64 rtol, float64 atol) {
           return self.elementwise_almost_equal(
-            other.attr("as_DiagonalTensor")().cast<DiagonalTensorCPtr>(), rtol, atol);
+            py::cast<DiagonalTensorCPtr>(other.attr("as_DiagonalTensor")()), rtol, atol);
       },
       nb::arg("other"),
       nb::arg("rtol") = 1e-5,
@@ -477,7 +477,7 @@ bind_tensors_diagonal_tensor(nb::module_& m)
               throw std::invalid_argument("Expected a DiagonalTensor");
           }
           return self._elementwise_binary(
-            other.attr("as_DiagonalTensor")().cast<DiagonalTensorCPtr>(),
+            py::cast<DiagonalTensorCPtr>(other.attr("as_DiagonalTensor")()),
             block_binary_from_python(func, func_kwargs),
             partial_zero_is_zero);
       },
@@ -552,8 +552,8 @@ bind_tensors_diagonal_tensor(nb::module_& m)
     cls.def("__abs__", &DiagonalTensor::abs);
     cls.def("__bool__", [](DiagonalTensor& self) {
         auto tensors_mod = py::module_::import("lasyten.tensors._tensors");
-        if (self.dtype == Dtype::Bool && tensors_mod.attr("is_scalar")(self).cast<bool>()) {
-            return tensors_mod.attr("item")(self).cast<bool>();
+        if (self.dtype == Dtype::Bool && py::to_bool(tensors_mod.attr("is_scalar")(self))) {
+            return py::to_bool(tensors_mod.attr("item")(self));
         }
         throw std::invalid_argument(
           "The truth value of a non-scalar DiagonalTensor is ambiguous. Use a.any() or a.all()");
@@ -726,7 +726,7 @@ bind_tensors_diagonal_tensor(nb::module_& m)
     id_cls.def("__abs__", &Identity::abs);
     id_cls.def("__bool__", [](Identity& self) {
         auto tensors_mod = py::module_::import("lasyten.tensors._tensors");
-        if (self.dtype == Dtype::Bool && tensors_mod.attr("is_scalar")(self).cast<bool>()) {
+        if (self.dtype == Dtype::Bool && py::to_bool(tensors_mod.attr("is_scalar")(self))) {
             return true;
         }
         throw std::invalid_argument(

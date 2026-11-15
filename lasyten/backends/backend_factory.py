@@ -1,6 +1,6 @@
 """Utility functions to access backend instances.
 
-C++ ``get_backend`` via pybind11 (``lasyten._core``).
+C++ ``get_backend`` via nanobind (``lasyten._core``).
 """
 
 # Copyright (C) TeNPy Developers, Apache license

@@ -212,17 +212,17 @@ get_backend(py::object symmetry, py::object block_backend)
 
     std::string tensor_backend;
     Symmetry::Ptr sym_ptr;
-    if (py_isinstance<Symmetry>(symmetry)) {
-        sym_ptr = symmetry.cast<Symmetry::Ptr>();
+    if (py::isinstance<Symmetry>(symmetry)) {
+        sym_ptr = py::cast<Symmetry::Ptr>(symmetry);
         tensor_backend = tensor_backend_for_symmetry(*sym_ptr);
     } else if (py::isinstance<py::str>(symmetry)) {
-        tensor_backend = symmetry.cast<std::string>();
+        tensor_backend = py::cast<std::string>(symmetry);
     } else {
         throw py::type_error("Invalid type for symmetry. Expected Symmetry or str");
     }
 
     return py::cast(
-      get_backend_by_name(tensor_backend, block_backend.cast<std::string>(), sym_ptr));
+      get_backend_by_name(tensor_backend, py::cast<std::string>(block_backend), sym_ptr));
 }
 #endif // LASYTEN_HAS_PYTHON
 

@@ -26,14 +26,14 @@ namespace {
 Symmetry::Ptr
 symmetry_from_python(py::object symmetry_obj)
 {
-    if (lasyten::py_isinstance<Symmetry>(symmetry_obj)) {
-        return symmetry_obj.cast<Symmetry::Ptr>();
+    if (py::isinstance<Symmetry>(symmetry_obj)) {
+        return py::cast<Symmetry::Ptr>(symmetry_obj);
     }
-    if (lasyten::py_isinstance<SymmetryFactor>(symmetry_obj)) {
-        auto ptr = symmetry_obj.cast<SymmetryFactor::Ptr>();
+    if (py::isinstance<SymmetryFactor>(symmetry_obj)) {
+        auto ptr = py::cast<SymmetryFactor::Ptr>(symmetry_obj);
         return std::make_shared<Symmetry>(std::vector<SymmetryFactor::Ptr>{ ptr });
     }
-    return symmetry_obj.attr("as_Symmetry")().cast<Symmetry::Ptr>();
+    return py::cast<Symmetry::Ptr>(symmetry_obj.attr("as_Symmetry")());
 }
 
 std::optional<std::vector<int64>>
@@ -90,7 +90,7 @@ sector_order_from_python(py::handle obj)
     if (obj.is_none()) {
         return std::nullopt;
     }
-    return obj.cast<std::string>();
+    return py::cast<std::string>(obj);
 }
 
 py::array_t<float64>
@@ -126,26 +126,26 @@ drop_which_from_python(py::handle obj)
         return std::nullopt;
     }
     if (py::isinstance<py::str>(obj)) {
-        auto s = obj.cast<std::string>();
+        auto s = py::cast<std::string>(obj);
         if (s == "all") {
             return std::nullopt;
         }
         throw py::value_error("which must be 'all', an int, or a list of ints");
     }
     if (py::isinstance<py::int_>(obj)) {
-        return std::vector<int64>{ obj.cast<int64>() };
+        return std::vector<int64>{ py::cast<int64>(obj) };
     }
-    return obj.cast<std::vector<int64>>();
+    return py::cast<std::vector<int64>>(obj);
 }
 
 SectorArray
 sector_array_from_python(py::handle obj, Symmetry const& symmetry)
 {
-    if (lasyten::py_isinstance<SectorArray>(obj)) {
-        return obj.cast<SectorArray>();
+    if (py::isinstance<SectorArray>(obj)) {
+        return py::cast<SectorArray>(obj);
     }
-    if (lasyten::py_isinstance<Sector>(obj)) {
-        return SectorArray::from_sector(obj.cast<Sector>());
+    if (py::isinstance<Sector>(obj)) {
+        return SectorArray::from_sector(py::cast<Sector>(obj));
     }
     // empty list / sequence → empty SectorArray with correct sector_ind_len
     // (np.asarray([]) is 1D and rejected by sector_array_from_numpy)
@@ -175,15 +175,16 @@ optional_symmetry_from_python(py::handle obj)
 SectorMapFn
 sector_map_from_python(py::function sector_map)
 {
-    return
-      [sector_map](SectorArray const& sectors) { return sector_map(sectors).cast<SectorArray>(); };
+    return [sector_map](SectorArray const& sectors) {
+        return py::cast<SectorArray>(sector_map(sectors));
+    };
 }
 
 Sector
 sector_from_python(py::handle obj)
 {
-    if (lasyten::py_isinstance<Sector>(obj)) {
-        return obj.cast<Sector>();
+    if (py::isinstance<Sector>(obj)) {
+        return py::cast<Sector>(obj);
     }
     return sector_from_numpy(obj);
 }
@@ -209,7 +210,7 @@ legs_from_python(py::handle obj)
 {
     std::vector<Leg::Ptr> out;
     for (py::handle item : obj) {
-        out.push_back(item.cast<Leg::Ptr>());
+        out.push_back(py::cast<Leg::Ptr>(item));
     }
     return out;
 }
@@ -375,7 +376,7 @@ the sector multiplicities.)pydoc")
         [](Space& self, py::object symmetry_obj, py::function sector_map, bool injective) {
             auto symmetry = symmetry_from_python(symmetry_obj);
             SectorMapFn map = [sector_map](SectorArray const& sectors) {
-                return sector_map(sectors).cast<SectorArray>();
+                return py::cast<SectorArray>(sector_map(sectors));
             };
             return self.change_symmetry(std::move(symmetry), std::move(map), injective);
         },
@@ -413,7 +414,7 @@ the sector multiplicities.)pydoc")
                  std::vector<Leg::Ptr> legs;
                  legs.reserve(static_cast<std::size_t>(legs_obj.size()));
                  for (py::handle item : legs_obj) {
-                     legs.push_back(item.cast<Leg::Ptr>());
+                     legs.push_back(py::cast<Leg::Ptr>(item));
                  }
                  return std::make_shared<LegPipe>(std::move(legs), is_dual, combine_cstyle);
              }),
@@ -425,7 +426,9 @@ the sector multiplicities.)pydoc")
       .def_prop_rw(
         "dim",
         [](LegPipe const& self) { return dim_to_python(self.dim); },
-        [](LegPipe& self, py::object dim_obj) { self.dim = py::float_(dim_obj).cast<float64>(); })
+        [](LegPipe& self, py::object dim_obj) {
+            self.dim = py::cast<float64>(py::float_(dim_obj));
+        })
       .def_rw("is_dual", &LegPipe::is_dual)
       .def_rw("legs", &LegPipe::legs)
       .def_ro("num_legs", &LegPipe::num_legs)
@@ -450,16 +453,19 @@ the sector multiplicities.)pydoc")
         DOC(lasyten, ElementarySpace, as_ElementarySpace))
       .def("__eq__",
            [](LegPipe const& self, py::object other) -> py::object {
-               if (!lasyten::py_isinstance<LegPipe>(other)) {
+               if (!py::isinstance<LegPipe>(other)) {
                    return py::reinterpret_borrow<py::object>(Py_NotImplemented);
                }
-               return py::cast(self == other.cast<LegPipe const&>());
+               return py::cast(self == py::cast<LegPipe const&>(other));
            })
       .def("__getitem__", &LegPipe::operator[], nb::arg("idx"))
       .def("__len__", [](LegPipe const& self) { return self.num_legs; })
       .def(
         "__iter__",
-        [](LegPipe& self) { return py::make_iterator(self.legs.begin(), self.legs.end()); },
+        [](LegPipe& self) {
+            return nb::make_iterator(
+              nb::type<LegPipe>(), "_LegPipeIterator", self.legs.begin(), self.legs.end());
+        },
         nb::keep_alive<0, 1>())
       .def("__repr__", [](LegPipe const& self) { return self.repr(); })
       .def("repr", &LegPipe::repr, nb::arg("show_symmetry") = true, nb::arg("one_line") = false);
@@ -524,7 +530,7 @@ bind_elementary_space(nb::module_& m)
           std::vector<ElementarySpace::Ptr> descriptions;
           descriptions.reserve(static_cast<std::size_t>(independent_descriptions.size()));
           for (py::handle item : independent_descriptions) {
-              descriptions.push_back(item.cast<ElementarySpace::Ptr>());
+              descriptions.push_back(py::cast<ElementarySpace::Ptr>(item));
           }
           return ElementarySpace::from_independent_symmetries(descriptions);
       },
@@ -539,7 +545,7 @@ bind_elementary_space(nb::module_& m)
           std::vector<Space::Ptr> spaces;
           spaces.reserve(static_cast<std::size_t>(spaces_obj.size()));
           for (py::handle item : spaces_obj) {
-              spaces.push_back(item.cast<Space::Ptr>());
+              spaces.push_back(py::cast<Space::Ptr>(item));
           }
           return ElementarySpace::from_largest_common_subspace(spaces, is_dual);
       },
@@ -644,10 +650,10 @@ bind_elementary_space(nb::module_& m)
            nb::arg("one_line") = false)
       .def("__eq__",
            [](ElementarySpace const& self, py::object other) -> py::object {
-               if (!lasyten::py_isinstance<ElementarySpace>(other)) {
+               if (!py::isinstance<ElementarySpace>(other)) {
                    return py::reinterpret_borrow<py::object>(py::handle(Py_NotImplemented));
                }
-               return py::cast(self.equals_es(other.cast<ElementarySpace const&>()));
+               return py::cast(self.equals_es(py::cast<ElementarySpace const&>(other)));
            })
       .def("as_Space", &ElementarySpace::as_Space, DOC(lasyten, Space, as_Space))
       .def("as_ElementarySpace",
@@ -682,7 +688,7 @@ bind_elementary_space(nb::module_& m)
             std::vector<ElementarySpace::Ptr> others;
             others.reserve(static_cast<std::size_t>(others_obj.size()));
             for (py::handle item : others_obj) {
-                others.push_back(item.cast<ElementarySpace::Ptr>());
+                others.push_back(py::cast<ElementarySpace::Ptr>(item));
             }
             return self.direct_sum(others, std::move(summand_labels));
         },
@@ -747,7 +753,7 @@ bind_direct_sum_space(nb::module_& m)
             std::vector<ElementarySpace::Ptr> spaces;
             spaces.reserve(static_cast<std::size_t>(spaces_obj.size()));
             for (py::handle item : spaces_obj) {
-                spaces.push_back(item.cast<ElementarySpace::Ptr>());
+                spaces.push_back(py::cast<ElementarySpace::Ptr>(item));
             }
             return std::make_shared<DirectSumSpace>(
               std::move(spaces), is_dual, std::move(summand_labels));
@@ -767,7 +773,7 @@ bind_direct_sum_space(nb::module_& m)
             std::vector<ElementarySpace::Ptr> spaces;
             spaces.reserve(static_cast<std::size_t>(spaces_obj.size()));
             for (py::handle item : spaces_obj) {
-                spaces.push_back(item.cast<ElementarySpace::Ptr>());
+                spaces.push_back(py::cast<ElementarySpace::Ptr>(item));
             }
             return DirectSumSpace::from_spaces(
               std::move(spaces), is_dual, std::move(summand_labels));
@@ -780,9 +786,9 @@ bind_direct_sum_space(nb::module_& m)
         "get_summand_idx",
         [](DirectSumSpace const& self, py::object which) {
             if (py::isinstance<py::str>(which)) {
-                return self.get_summand_idx(which.cast<std::string>());
+                return self.get_summand_idx(py::cast<std::string>(which));
             }
-            return self.get_summand_idx(which.cast<int64>());
+            return self.get_summand_idx(py::cast<int64>(which));
         },
         nb::arg("which"),
         DOC(lasyten, DirectSumSpace, get_summand_idx))
@@ -854,8 +860,8 @@ bind_direct_sum_space(nb::module_& m)
            std::optional<std::string> device) {
             DirectSumSpace::SummandRef ref =
               py::isinstance<py::str>(which)
-                ? DirectSumSpace::SummandRef{ which.cast<std::string>() }
-                : DirectSumSpace::SummandRef{ which.cast<int64>() };
+                ? DirectSumSpace::SummandRef{ py::cast<std::string>(which) }
+                : DirectSumSpace::SummandRef{ py::cast<int64>(which) };
             return self.projection_onto_summand(
               std::move(ref), std::move(backend), std::move(labels), std::move(device));
         },
@@ -873,8 +879,8 @@ bind_direct_sum_space(nb::module_& m)
            std::optional<std::string> device) {
             DirectSumSpace::SummandRef ref =
               py::isinstance<py::str>(which)
-                ? DirectSumSpace::SummandRef{ which.cast<std::string>() }
-                : DirectSumSpace::SummandRef{ which.cast<int64>() };
+                ? DirectSumSpace::SummandRef{ py::cast<std::string>(which) }
+                : DirectSumSpace::SummandRef{ py::cast<int64>(which) };
             return self.inclusion_of_summand(
               std::move(ref), std::move(backend), std::move(labels), std::move(device));
         },
@@ -908,10 +914,10 @@ bind_direct_sum_space(nb::module_& m)
            nb::arg("one_line") = false)
       .def("__eq__",
            [](DirectSumSpace const& self, py::object other) -> py::object {
-               if (!lasyten::py_isinstance<DirectSumSpace>(other)) {
+               if (!py::isinstance<DirectSumSpace>(other)) {
                    return py::reinterpret_borrow<py::object>(py::handle(Py_NotImplemented));
                }
-               return py::cast(self.equals_dss(other.cast<DirectSumSpace const&>()));
+               return py::cast(self.equals_dss(py::cast<DirectSumSpace const&>(other)));
            })
       // Shadow unsupported ElementarySpace factories
       .def_static("from_basis",
@@ -1001,7 +1007,7 @@ bind_tensor_product(nb::module_& m)
           std::vector<TensorProduct::Ptr> factors;
           factors.reserve(static_cast<std::size_t>(factors_obj.size()));
           for (py::handle item : factors_obj) {
-              factors.push_back(item.cast<TensorProduct::Ptr>());
+              factors.push_back(py::cast<TensorProduct::Ptr>(item));
           }
           return TensorProduct::from_partial_products(factors);
       },
@@ -1015,7 +1021,7 @@ bind_tensor_product(nb::module_& m)
         "block_size",
         [](TensorProduct const& self, py::object coupled) {
             if (py::isinstance<py::int_>(coupled)) {
-                return self.block_size(coupled.cast<int64>());
+                return self.block_size(py::cast<int64>(coupled));
             }
             return self.block_size(sector_from_python(coupled));
         },
@@ -1148,11 +1154,11 @@ bind_tensor_product(nb::module_& m)
     cls
       .def("__eq__",
            [](TensorProduct const& self, py::object other) -> py::object {
-               if (!lasyten::py_isinstance<TensorProduct>(other)) {
+               if (!py::isinstance<TensorProduct>(other)) {
                    return py::reinterpret_borrow<py::object>(py::handle(Py_NotImplemented));
                }
-               return py::cast(
-                 self.operator==(static_cast<Space const&>(other.cast<TensorProduct const&>())));
+               return py::cast(self.operator==(
+                 static_cast<Space const&>(py::cast<TensorProduct const&>(other))));
            })
       .def("__getitem__",
            [](TensorProduct const& self, py::object idx) -> py::object {
@@ -1161,14 +1167,19 @@ bind_tensor_product(nb::module_& m)
                    for (auto const& f : self.factors) {
                        all.append(py::cast(f));
                    }
-                   return all[idx];
+                   return all.attr("__getitem__")(idx);
                }
-               return py::cast(self[idx.cast<int64>()]);
+               return py::cast(self[py::cast<int64>(idx)]);
            })
       .def("__len__", [](TensorProduct const& self) { return self.num_factors; })
       .def(
         "__iter__",
-        [](TensorProduct const& self) { return py::make_iterator(self.factors); },
+        [](TensorProduct const& self) {
+            return nb::make_iterator(nb::type<TensorProduct>(),
+                                     "_TensorProductIterator",
+                                     self.factors.begin(),
+                                     self.factors.end());
+        },
         nb::keep_alive<0, 1>())
       .def("__repr__",
            &TensorProduct::repr,
@@ -1199,7 +1210,7 @@ bind_abelian_leg_pipe(nb::module_& m)
                 std::vector<ElementarySpace::Ptr> legs;
                 legs.reserve(static_cast<std::size_t>(legs_obj.size()));
                 for (py::handle item : legs_obj) {
-                    legs.push_back(item.cast<ElementarySpace::Ptr>());
+                    legs.push_back(py::cast<ElementarySpace::Ptr>(item));
                 }
                 return std::make_shared<AbelianLegPipe>(std::move(legs), is_dual, combine_cstyle);
             }),
@@ -1239,7 +1250,7 @@ bind_abelian_leg_pipe(nb::module_& m)
           std::vector<AbelianLegPipe::Ptr> descriptions;
           descriptions.reserve(static_cast<std::size_t>(independent_descriptions.size()));
           for (py::handle item : independent_descriptions) {
-              descriptions.push_back(item.cast<AbelianLegPipe::Ptr>());
+              descriptions.push_back(py::cast<AbelianLegPipe::Ptr>(item));
           }
           return AbelianLegPipe::from_independent_symmetries(descriptions);
       },
@@ -1328,15 +1339,20 @@ bind_abelian_leg_pipe(nb::module_& m)
       .def("__len__", [](AbelianLegPipe const& self) { return self.num_legs; })
       .def(
         "__iter__",
-        [](AbelianLegPipe& self) { return py::make_iterator(self.legs.begin(), self.legs.end()); },
+        [](AbelianLegPipe& self) {
+            return nb::make_iterator(nb::type<AbelianLegPipe>(),
+                                     "_AbelianLegPipeIterator",
+                                     self.legs.begin(),
+                                     self.legs.end());
+        },
         nb::keep_alive<0, 1>())
       .def("__eq__",
            [](AbelianLegPipe const& self, py::object other) -> py::object {
-               if (!lasyten::py_isinstance<AbelianLegPipe>(other)) {
+               if (!py::isinstance<AbelianLegPipe>(other)) {
                    return py::reinterpret_borrow<py::object>(py::handle(Py_NotImplemented));
                }
-               return py::cast(
-                 self.operator==(static_cast<Space const&>(other.cast<AbelianLegPipe const&>())));
+               return py::cast(self.operator==(
+                 static_cast<Space const&>(py::cast<AbelianLegPipe const&>(other))));
            })
       .def("__repr__", [](AbelianLegPipe const& self) { return self.repr(); })
       .def("repr",
@@ -1373,7 +1389,7 @@ bind_abelian_leg_pipe(nb::module_& m)
           std::vector<Leg::Ptr> legs;
           legs.reserve(static_cast<std::size_t>(legs_obj.size()));
           for (py::handle item : legs_obj) {
-              legs.push_back(item.cast<Leg::Ptr>());
+              legs.push_back(py::cast<Leg::Ptr>(item));
           }
           return flat_leg_permutation(legs);
       },

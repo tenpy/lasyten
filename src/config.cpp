@@ -458,7 +458,7 @@ LasytenConfig::update(py::dict options)
         py::handle val = item.second;
         // bool is a subclass of int in Python; check bool first.
         if (py::isinstance<py::bool_>(val)) {
-            set_option(key, py::cast<bool>(val));
+            set_option(key, py::to_bool(val));
         } else if (py::isinstance<py::int_>(val)) {
             set_option(key, py::cast<int64>(val));
         } else if (py::isinstance<py::float_>(val)) {

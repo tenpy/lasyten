@@ -20,13 +20,13 @@ bind_tensors_hidden_leg_tensor(nb::module_& m)
 
     cls.def(
       nb::new_([](py::object tensor, py::object which_legs) {
-          auto tens = tensor.cast<Tensor::Ptr>();
+          auto tens = py::cast<Tensor::Ptr>(tensor);
           std::vector<std::variant<int64, std::string>> legs;
           for (auto item : which_legs) {
               if (py::isinstance<py::str>(item)) {
-                  legs.emplace_back(item.cast<std::string>());
+                  legs.emplace_back(py::cast<std::string>(item));
               } else {
-                  legs.emplace_back(item.cast<int64>());
+                  legs.emplace_back(py::cast<int64>(item));
               }
           }
           return HiddenLegTensor::from_tensor(std::move(tens), std::move(legs));
@@ -38,13 +38,13 @@ bind_tensors_hidden_leg_tensor(nb::module_& m)
     cls.def_static(
       "from_tensor",
       [](py::object tensor, py::object which_legs) {
-          auto tens = tensor.cast<Tensor::Ptr>();
+          auto tens = py::cast<Tensor::Ptr>(tensor);
           std::vector<std::variant<int64, std::string>> legs;
           for (auto item : which_legs) {
               if (py::isinstance<py::str>(item)) {
-                  legs.emplace_back(item.cast<std::string>());
+                  legs.emplace_back(py::cast<std::string>(item));
               } else {
-                  legs.emplace_back(item.cast<int64>());
+                  legs.emplace_back(py::cast<int64>(item));
               }
           }
           return HiddenLegTensor::from_tensor(std::move(tens), std::move(legs));
@@ -59,7 +59,7 @@ bind_tensors_hidden_leg_tensor(nb::module_& m)
           if (label.is_none()) {
               return false;
           }
-          return HiddenLegTensor::is_hidden_leg_label(label.cast<std::string>());
+          return HiddenLegTensor::is_hidden_leg_label(py::cast<std::string>(label));
       },
       nb::arg("label"),
       DOC(lasyten, HiddenLegTensor, is_hidden_leg_label));
@@ -70,7 +70,7 @@ bind_tensors_hidden_leg_tensor(nb::module_& m)
           if (label.is_none()) {
               return false;
           }
-          return HiddenLegTensor::is_charge_temp_label(label.cast<std::string>());
+          return HiddenLegTensor::is_charge_temp_label(py::cast<std::string>(label));
       },
       nb::arg("label"),
       DOC(lasyten, HiddenLegTensor, is_charge_temp_label));
@@ -93,7 +93,7 @@ bind_tensors_hidden_leg_tensor(nb::module_& m)
       [](HiddenLegTensor& self, bool guarantee_copy, py::object warning) {
           std::optional<std::string> warn;
           if (!warning.is_none()) {
-              warn = warning.cast<std::string>();
+              warn = py::cast<std::string>(warning);
           }
           return self.as_SymmetricTensor(guarantee_copy, warn);
       },

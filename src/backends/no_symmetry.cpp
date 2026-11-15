@@ -50,7 +50,7 @@ parse_leg_index(Leg const& leg, int64 idx)
 int64
 leg_dim_i64(py::object leg)
 {
-    return static_cast<int64>(leg.attr("dim").cast<float64>());
+    return static_cast<int64>(py::cast<float64>(leg.attr("dim")));
 }
 
 int64
@@ -184,7 +184,7 @@ NoSymmetryBackend::test_mask_sanity(MaskCPtr a)
     auto data = block_from_tensor(a);
     block_backend->test_block_sanity(
       data, std::vector<int64>{ leg_dim_i64(py::cast(a->large_leg())) }, Dtype::Bool, a->device);
-    auto small_dim = static_cast<int64>(py::cast(a->small_leg()).attr("dim").cast<float64>());
+    auto small_dim = static_cast<int64>(py::cast<float64>(py::cast(a->small_leg()).attr("dim")));
     check(block_backend->sum_all(data).as_int64() == small_dim,
           "test_mask_sanity: mask block sum mismatch");
 }
@@ -340,7 +340,7 @@ NoSymmetryBackend::diagonal_tensor_to_block(DiagonalTensorCPtr a)
 std::tuple<TensorBackend::DataPtr, ElementarySpace::Ptr>
 NoSymmetryBackend::diagonal_to_mask(DiagonalTensorCPtr tens)
 {
-    auto large_leg = py::cast(tens->leg()).cast<Space::Ptr>();
+    auto large_leg = py::cast<Space::Ptr>(py::cast(tens->leg()));
     auto data = block_from_tensor(tens);
     py::object basis_perm_obj = py::cast(tens->leg()).attr("_basis_perm");
     auto basis_perm = rank_basis_perm_masked(basis_perm_obj, *block_backend, data);
@@ -352,7 +352,7 @@ NoSymmetryBackend::diagonal_to_mask(DiagonalTensorCPtr tens)
 std::tuple<Space::Ptr, TensorBackend::DataPtr>
 NoSymmetryBackend::diagonal_transpose(DiagonalTensorCPtr tens)
 {
-    auto leg = py::cast(tens->leg()).cast<Space::Ptr>();
+    auto leg = py::cast<Space::Ptr>(py::cast(tens->leg()));
     return { leg->dual_space(), wrap(block_from_tensor(tens)) };
 }
 
@@ -369,7 +369,7 @@ NoSymmetryBackend::eigh(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<
     for (int64 i = N - 1; i >= J; --i)
         perm.push_back(i);
     auto mat = block_backend->permute_axes(block_from_tensor(a), perm);
-    int64 k = space_dim_i64(*py::cast(a->domain).cast<TensorProduct::Ptr>());
+    int64 k = space_dim_i64(*py::cast<TensorProduct::Ptr>(py::cast(a->domain)));
     mat = block_backend->reshape(mat, { k, k });
     auto [w, v] = block_backend->eigh(mat, sort);
     auto shape_codom = shape_from_tensor(a);
@@ -403,7 +403,7 @@ no_sym_as_square_matrix(NoSymmetryBackend& self, SymmetricTensorCPtr a, bool new
     for (int64 i = N - 1; i >= out.J; --i)
         perm.push_back(i);
     out.mat = self.block_backend->permute_axes(NoSymmetryBackend::block_from_tensor(a), perm);
-    out.k = space_dim_i64(*py::cast(a->domain).cast<TensorProduct::Ptr>());
+    out.k = space_dim_i64(*py::cast<TensorProduct::Ptr>(py::cast(a->domain)));
     out.mat = self.block_backend->reshape(out.mat, { out.k, out.k });
     return out;
 }
@@ -520,7 +520,7 @@ NoSymmetryBackend::from_grid(std::vector<std::vector<py::object>> grid,
             py::tuple key = py::tuple(slcs);
             auto view = data->get_item(key);
             auto updated = block_backend->linear_combination(
-              one, view, one, block_from_tensor(op.cast<TensorCPtr>()));
+              one, view, one, block_from_tensor(py::cast<TensorCPtr>(op)));
             data->set_item(key, py::cast(updated));
         }
     }
@@ -598,10 +598,8 @@ NoSymmetryBackend::get_element(SymmetricTensorCPtr a, std::vector<int64> idcs)
     std::vector<int64> internal;
     internal.reserve(idcs.size());
     for (std::size_t i = 0; i < idcs.size(); ++i) {
-        internal.push_back(py::cast(legs[i])
-                             .attr("apply_basis_perm")(
-                               idcs[i], py::arg("inverse") = true, py::arg("pre_compose") = true)
-                             .cast<int64>());
+        internal.push_back(py::cast<int64>(py::cast(legs[i]).attr("apply_basis_perm")(
+          idcs[i], py::arg("inverse") = true, py::arg("pre_compose") = true)));
     }
     return block_backend->get_block_element(block_from_tensor(a), internal);
 }
@@ -691,7 +689,7 @@ NoSymmetryBackend::lq(SymmetricTensorCPtr tensor, TensorProduct::Ptr new_co_doma
 std::tuple<TensorBackend::DataPtr, ElementarySpace::Ptr>
 NoSymmetryBackend::mask_binary_operand(MaskCPtr mask1, MaskCPtr mask2, BlockBinaryFn func)
 {
-    auto large_leg = py::cast(mask1->large_leg()).cast<Space::Ptr>();
+    auto large_leg = py::cast<Space::Ptr>(py::cast(mask1->large_leg()));
     auto data = func(block_from_tensor(mask1), block_from_tensor(mask2));
     auto basis_perm = rank_basis_perm_masked(
       py::cast(mask1->large_leg()).attr("_basis_perm"), *block_backend, data);
@@ -712,12 +710,12 @@ NoSymmetryBackend::mask_contract_large_leg(TensorCPtr tensor, MaskCPtr mask, int
     TensorProduct::Ptr codomain;
     TensorProduct::Ptr domain;
     if (in_domain) {
-        codomain = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
+        codomain = py::cast<TensorProduct::Ptr>(py::cast(tensor->codomain));
         auto spaces = tensor->domain->factors;
         spaces[static_cast<std::size_t>(co_domain_idx)] = mask->small_leg();
         domain = std::make_shared<TensorProduct>(std::move(spaces), tensor->symmetry);
     } else {
-        domain = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
+        domain = py::cast<TensorProduct::Ptr>(py::cast(tensor->domain));
         auto spaces = tensor->codomain->factors;
         spaces[static_cast<std::size_t>(co_domain_idx)] = mask->small_leg();
         codomain = std::make_shared<TensorProduct>(std::move(spaces), tensor->symmetry);
@@ -737,12 +735,12 @@ NoSymmetryBackend::mask_contract_small_leg(TensorCPtr tensor, MaskCPtr mask, int
     TensorProduct::Ptr codomain;
     TensorProduct::Ptr domain;
     if (in_domain) {
-        codomain = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
+        codomain = py::cast<TensorProduct::Ptr>(py::cast(tensor->codomain));
         auto spaces = tensor->domain->factors;
         spaces[static_cast<std::size_t>(co_domain_idx)] = mask->large_leg();
         domain = std::make_shared<TensorProduct>(std::move(spaces), tensor->symmetry);
     } else {
-        domain = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
+        domain = py::cast<TensorProduct::Ptr>(py::cast(tensor->domain));
         auto spaces = tensor->codomain->factors;
         spaces[static_cast<std::size_t>(co_domain_idx)] = mask->large_leg();
         codomain = std::make_shared<TensorProduct>(std::move(spaces), tensor->symmetry);
@@ -782,15 +780,16 @@ std::tuple<Space::Ptr, Space::Ptr, TensorBackend::DataPtr>
 NoSymmetryBackend::mask_transpose(MaskCPtr tens)
 {
     auto space_in =
-      py::cast(tens->codomain).attr("__getitem__")(0).attr("dual").cast<Space::Ptr>();
-    auto space_out = py::cast(tens->domain).attr("__getitem__")(0).attr("dual").cast<Space::Ptr>();
+      py::cast<Space::Ptr>(py::cast(tens->codomain).attr("__getitem__")(0).attr("dual"));
+    auto space_out =
+      py::cast<Space::Ptr>(py::cast(tens->domain).attr("__getitem__")(0).attr("dual"));
     return { std::move(space_in), std::move(space_out), wrap(block_from_tensor(tens)) };
 }
 
 std::tuple<TensorBackend::DataPtr, ElementarySpace::Ptr>
 NoSymmetryBackend::mask_unary_operand(MaskCPtr mask, BlockUnaryFn func)
 {
-    auto large_leg = py::cast(mask->large_leg()).cast<Space::Ptr>();
+    auto large_leg = py::cast<Space::Ptr>(py::cast(mask->large_leg()));
     auto data = func(block_from_tensor(mask));
     auto basis_perm = rank_basis_perm_masked(
       py::cast(mask->large_leg()).attr("_basis_perm"), *block_backend, data);
@@ -893,8 +892,8 @@ NoSymmetryBackend::partial_trace(SymmetricTensorCPtr tensor,
         // Python returns item(data), None, None — keep 0-d block as Data for abstract API.
         return { wrap(std::move(data)), nullptr, nullptr };
     }
-    auto codomain_legs = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
-    auto domain_legs = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
+    auto codomain_legs = py::cast<TensorProduct::Ptr>(py::cast(tensor->codomain));
+    auto domain_legs = py::cast<TensorProduct::Ptr>(py::cast(tensor->domain));
     std::vector<Leg::Ptr> codom_factors;
     for (std::size_t n = 0; n < tensor->codomain->factors.size(); ++n) {
         if (std::ranges::find(remaining, static_cast<int64>(n)) != remaining.end())
@@ -974,9 +973,9 @@ NoSymmetryBackend::split_legs(TensorCPtr a,
     py::object legs = py::cast(a->legs());
     for (int64 n : leg_idcs) {
         py::object pipe = legs.attr("__getitem__")(n);
-        bool cstyle = pipe.attr("combine_cstyle").cast<bool>();
+        bool cstyle = py::to_bool(pipe.attr("combine_cstyle"));
         cstyles.push_back(cstyle);
-        auto pipe_legs = pipe.attr("legs").cast<std::vector<py::object>>();
+        auto pipe_legs = py::cast<std::vector<py::object>>(pipe.attr("legs"));
         std::vector<int64> d;
         if (cstyle) {
             for (auto const& s : pipe_legs)
@@ -1088,18 +1087,18 @@ NoSymmetryBackend::truncate_singular_values(DiagonalTensorCPtr S,
                                             std::optional<float64> svd_min,
                                             bool minimize_error)
 {
-    py::array S_np = block_backend->to_numpy(block_from_tensor(S)).cast<py::array>();
+    py::array S_np = py::cast<py::array>(block_backend->to_numpy(block_from_tensor(S)));
     auto [keep, err, new_norm] = _truncate_singular_values_selection(
       S_np, py::none(), chi_max, chi_min, degeneracy_tol, trunc_cut, svd_min, minimize_error);
     auto mask_data = block_backend->block_from_numpy(keep, Dtype::Bool);
     bool is_dual = true;
     py::object leg = py::cast(S->leg());
-    if (py_isinstance<ElementarySpace>(leg))
-        is_dual = leg.cast<ElementarySpace::Ptr>()->is_dual;
+    if (py::isinstance<ElementarySpace>(leg))
+        is_dual = py::cast<ElementarySpace::Ptr>(leg)->is_dual;
     // keep.sum() via numpy
-    int64 dim = keep.attr("sum")().cast<int64>();
+    int64 dim = py::cast<int64>(keep.attr("sum")());
     auto new_leg = ElementarySpace::from_trivial_sector(
-      dim, py::cast(S->symmetry).cast<Symmetry::Ptr>(), is_dual);
+      dim, py::cast<Symmetry::Ptr>(py::cast(S->symmetry)), is_dual);
     return { wrap(std::move(mask_data)), std::move(new_leg), err, new_norm };
 }
 

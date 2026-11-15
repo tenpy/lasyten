@@ -28,17 +28,17 @@ std::shared_ptr<BlockBackend>
 as_shared_block_backend(py::object obj)
 {
 #if LASYTEN_WITH_NUMPY_BACKEND
-    if (lasyten::py_isinstance<NumpyBlockBackend>(obj)) {
-        auto* p = obj.cast<NumpyBlockBackend*>();
+    if (py::isinstance<NumpyBlockBackend>(obj)) {
+        auto* p = py::cast<NumpyBlockBackend*>(obj);
         return NumpyBlockBackend::from_factory_shared(p->default_device);
     }
 #endif
-    if (lasyten::py_isinstance<TorchBlockBackend>(obj)) {
-        auto* p = obj.cast<TorchBlockBackend*>();
+    if (py::isinstance<TorchBlockBackend>(obj)) {
+        auto* p = py::cast<TorchBlockBackend*>(obj);
         return TorchBlockBackend::from_factory_shared(p->default_device);
     }
     // Other backends (e.g. ArrayApi): keep a non-owning shared_ptr.
-    auto* raw = obj.cast<BlockBackend*>();
+    auto* raw = py::cast<BlockBackend*>(obj);
     return std::shared_ptr<BlockBackend>(raw, [](BlockBackend*) {});
 }
 
@@ -52,9 +52,9 @@ py_block(TensorBackend::DataPtr d)
 TensorBackend::DataPtr
 py_data(py::object obj)
 {
-    if (lasyten::py_isinstance<TensorBackend::Data>(obj))
-        return obj.cast<TensorBackend::DataPtr>();
-    return NoSymmetryBackend::wrap(obj.cast<BlockBackend::BlockPtr>());
+    if (py::isinstance<TensorBackend::Data>(obj))
+        return py::cast<TensorBackend::DataPtr>(obj);
+    return NoSymmetryBackend::wrap(py::cast<BlockBackend::BlockPtr>(obj));
 }
 
 } // namespace

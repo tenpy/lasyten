@@ -4,16 +4,16 @@
 
 enable_testing()
 
-# C++ tests that exercise NumpyBlockBackend (or other py:: APIs) need
-# pybind11::embed so a Python interpreter is available.
+# C++ tests that exercise NumpyBlockBackend (or other py:: APIs) embed a Python interpreter
+# (<lasyten/embed.h>) and link Python::Python (Development.Embed, found in the root CMakeLists).
 #
-# With LASYTEN_WITH_PYTHON=OFF only the Python-free tests are built (Phase 5 scaffolding): the
-# Eigen block-backend test compiles its numpy round trip out (LASYTEN_HAS_PYTHON=0) and runs
-# without an interpreter. The other tests / examples use the full tensor stack, which still needs
-# Python.
+# With LASYTEN_WITH_PYTHON=OFF only the Python-free tests are built: the Eigen block-backend test
+# compiles its numpy round trip out (LASYTEN_HAS_PYTHON=0) and the symmetric-blocks test uses only
+# Symmetry / Sector / EigenBlockBackend; neither links libpython. The other tests / examples use
+# the full tensor stack, which still needs Python.
 if(NOT LASYTEN_WITH_PYTHON)
   message(STATUS
-    "LASYTEN_WITH_PYTHON=OFF: building only the Python-free ctest (test_eigen_block_backend); "
+    "LASYTEN_WITH_PYTHON=OFF: building only the Python-free ctests (Eigen block backend, symmetric blocks); "
     "skipping the other tests / examples that need the Python-dependent liblasyten sources.")
   add_executable(EigenNoPythonTests test_eigen_block_backend_main.cpp test_eigen_block_backend.cpp)
   set_source_files_properties(test_eigen_block_backend_main.cpp test_eigen_block_backend.cpp
@@ -21,6 +21,15 @@ if(NOT LASYTEN_WITH_PYTHON)
   target_include_directories(EigenNoPythonTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(EigenNoPythonTests PUBLIC lasyten)
   add_test(NAME test_eigen_block_backend_no_python COMMAND EigenNoPythonTests)
+
+  # Symmetry-aware block contraction + SVD (product Symmetry U(1) x Z_3, Sector arithmetic,
+  # EigenBlockBackend): Python-free, no libpython.
+  add_executable(SymmetricBlocksNoPythonTests test_symmetric_blocks_no_python.cpp)
+  set_source_files_properties(test_symmetric_blocks_no_python.cpp PROPERTIES SKIP_LINTING ON)
+  target_compile_definitions(SymmetricBlocksNoPythonTests PRIVATE LASYTEN_TEST_STANDALONE_MAIN)
+  target_include_directories(SymmetricBlocksNoPythonTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+  target_link_libraries(SymmetricBlocksNoPythonTests PUBLIC lasyten)
+  add_test(NAME test_symmetric_blocks_no_python COMMAND SymmetricBlocksNoPythonTests)
   return()
 endif()
 
@@ -31,6 +40,7 @@ set (TestsToRun
   test_block_inds.cpp
   test_lru_cache.cpp
   test_eigen_block_backend.cpp
+  test_symmetric_blocks_no_python.cpp
 )
 
 create_test_sourcelist(Tests CommonCppTests.cpp ${TestsToRun})
@@ -47,9 +57,8 @@ target_include_directories(CommonCppTests
   PRIVATE ${PROJECT_SOURCE_DIR}/pybind
   PUBLIC ${PROJECT_SOURCE_DIR}/include
 )
-# embed: NumpyBlockBackend and related tests need an interpreter; keep even if
-# some tests look "pure C++" until headers no longer require py::.
-target_link_libraries(CommonCppTests PUBLIC lasyten pybind11::embed)
+# NumpyBlockBackend and related tests need an interpreter.
+target_link_libraries(CommonCppTests PUBLIC lasyten Python::Python)
 
 # Add all the ADD_TEST for each test
 foreach (test ${TestsToRun})
@@ -65,7 +74,7 @@ set_source_files_properties(${example_heisenberg_src} PROPERTIES SKIP_LINTING ON
 target_include_directories(example_heisenberg_two_site
   PUBLIC ${PROJECT_SOURCE_DIR}/include
 )
-target_link_libraries(example_heisenberg_two_site PUBLIC lasyten pybind11::embed)
+target_link_libraries(example_heisenberg_two_site PUBLIC lasyten Python::Python)
 set_target_properties(example_heisenberg_two_site PROPERTIES
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN ON

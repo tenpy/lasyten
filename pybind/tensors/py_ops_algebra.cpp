@@ -27,16 +27,16 @@ optional_relabel(py::object obj)
     if (obj.is_none()) {
         return std::nullopt;
     }
-    return obj.cast<std::map<std::string, std::string>>();
+    return py::cast<std::map<std::string, std::string>>(obj);
 }
 
 LegRef
 py_as_leg_ref(py::object obj)
 {
     if (py::isinstance<py::str>(obj)) {
-        return obj.cast<std::string>();
+        return py::cast<std::string>(obj);
     }
-    return obj.cast<int64>();
+    return py::cast<int64>(obj);
 }
 
 std::vector<LegRef>
@@ -80,7 +80,7 @@ BlockBackend::Scalar
 py_as_scalar(py::object obj, TensorCPtr hint)
 {
     try {
-        return obj.cast<BlockBackend::Scalar>();
+        return py::cast<BlockBackend::Scalar>(obj);
     } catch (py::cast_error const&) {
     }
     return hint->backend->block_backend->as_scalar(obj, hint->dtype);
@@ -146,7 +146,7 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
           std::vector<TensorCPtr> vec;
           vec.reserve(static_cast<std::size_t>(tensors.size()));
           for (auto item : tensors) {
-              vec.push_back(item.cast<TensorCPtr>());
+              vec.push_back(py::cast<TensorCPtr>(item));
           }
           return get_same_device(vec, std::move(error_msg));
       },
@@ -167,24 +167,24 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
       "is_scalar",
       [](py::object obj) {
           if (py::hasattr(obj, "domain") && py::hasattr(obj, "codomain")) {
-              if (obj.attr("domain").attr("num_sectors").cast<int64>() != 1) {
+              if (py::cast<int64>(obj.attr("domain").attr("num_sectors")) != 1) {
                   return false;
               }
-              if (obj.attr("codomain").attr("num_sectors").cast<int64>() != 1) {
+              if (py::cast<int64>(obj.attr("codomain").attr("num_sectors")) != 1) {
                   return false;
               }
               auto np = py::module_::import("numpy");
-              if (!np.attr("array_equal")(obj.attr("domain").attr("sector_decomposition"),
-                                          obj.attr("codomain").attr("sector_decomposition"))
-                     .cast<bool>()) {
+              if (!py::to_bool(
+                    np.attr("array_equal")(obj.attr("domain").attr("sector_decomposition"),
+                                           obj.attr("codomain").attr("sector_decomposition")))) {
                   return false;
               }
-              if (!np.attr("all")(obj.attr("domain").attr("multiplicities").attr("__eq__")(1))
-                     .cast<bool>()) {
+              if (!py::to_bool(
+                    np.attr("all")(obj.attr("domain").attr("multiplicities").attr("__eq__")(1)))) {
                   return false;
               }
-              if (!np.attr("all")(obj.attr("codomain").attr("multiplicities").attr("__eq__")(1))
-                     .cast<bool>()) {
+              if (!py::to_bool(np.attr("all")(
+                    obj.attr("codomain").attr("multiplicities").attr("__eq__")(1)))) {
                   return false;
               }
               return true;
@@ -207,7 +207,7 @@ Also accepts Python numbers and duck-typed tensors with ``domain`` / ``codomain`
                   return true;
               }
               try {
-                  (void)o.cast<BlockBackend::Scalar>();
+                  (void)py::cast<BlockBackend::Scalar>(o);
                   return true;
               } catch (py::cast_error const&) {
                   return false;
@@ -222,12 +222,10 @@ Also accepts Python numbers and duck-typed tensors with ``domain`` / ``codomain`
                             std::string(py::str(py::type::of(a).attr("__name__"))),
                             std::string(py::str(py::type::of(b).attr("__name__")))));
           }
-          auto sa = py::cast(v->vector_backend()->block_backend)
-                      .attr("as_scalar")(a)
-                      .cast<BlockBackend::Scalar>();
-          auto sb = py::cast(w->vector_backend()->block_backend)
-                      .attr("as_scalar")(b)
-                      .cast<BlockBackend::Scalar>();
+          auto sa = py::cast<BlockBackend::Scalar>(
+            py::cast(v->vector_backend()->block_backend).attr("as_scalar")(a));
+          auto sb = py::cast<BlockBackend::Scalar>(
+            py::cast(w->vector_backend()->block_backend).attr("as_scalar")(b));
           return py_cast_vector_like(
             linear_combination(std::move(sa), std::move(v), std::move(sb), std::move(w)));
       },
@@ -307,7 +305,7 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
                   if (o.is_none()) {
                       spec.push_back(std::nullopt);
                   } else {
-                      spec.push_back(o.cast<int64>());
+                      spec.push_back(py::cast<int64>(o));
                   }
               }
               levels_opt = std::move(spec);
@@ -326,14 +324,14 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
     m.def(
       "scalar_multiply",
       [](py::object a, py::object v) {
-          if (!lasyten::py_isinstance<VectorLike>(v)) {
+          if (!py::isinstance<VectorLike>(v)) {
               throw py::type_error("scalar_multiply() v must be VectorLike");
           }
-          auto vec = v.cast<VectorLikeCPtr>();
+          auto vec = py::cast<VectorLikeCPtr>(v);
           bool ok = py::isinstance(a, py::module_::import("numbers").attr("Number"));
           if (!ok) {
               try {
-                  (void)a.cast<BlockBackend::Scalar>();
+                  (void)py::cast<BlockBackend::Scalar>(a);
                   ok = true;
               } catch (py::cast_error const&) {
               }
@@ -343,9 +341,8 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
                 std::format("unsupported scalar type: {}",
                             std::string(py::str(py::type::of(a).attr("__name__")))));
           }
-          auto s = py::cast(vec->vector_backend()->block_backend)
-                     .attr("as_scalar")(a)
-                     .cast<BlockBackend::Scalar>();
+          auto s = py::cast<BlockBackend::Scalar>(
+            py::cast(vec->vector_backend()->block_backend).attr("as_scalar")(a));
           return py_cast_vector_like(scalar_multiply(std::move(s), std::move(vec)));
       },
       nb::arg("a").none(),

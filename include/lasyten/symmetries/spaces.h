@@ -1119,56 +1119,67 @@ parse_inputs_drop_symmetry_public(std::optional<std::vector<int64>> which, Symme
 #include <lasyten/detail/python_api.h>
 
 #if LASYTEN_HAS_PYTHON
-namespace pybind11::detail {
+NAMESPACE_BEGIN(NB_NAMESPACE)
+NAMESPACE_BEGIN(detail)
 
-/// Accept `ElementarySpace` / `LegPipe` shared_ptrs from Python; unwrap to the held object on
-/// cast.
+/// ``Leg`` is a value-type handle (not a bound class). Accept ``ElementarySpace`` / ``LegPipe``
+/// from Python (and ``None`` as the empty leg); unwrap to the held object on cast. Python exposes
+/// ``Leg`` as an ABC that registers the concrete types.
 ///
-/// C++ `Leg` is a value-type handle (not a bound polymorphic class). Python exposes `Leg` as an
-/// ABC that registers the concrete types.
+/// Defined here (not in ``pybind/``) so that liblasyten TUs and the bindings convert ``Leg``
+/// identically.
 template<>
 struct type_caster<lasyten::Leg>
 {
-    PYBIND11_TYPE_CASTER(lasyten::Leg, const_name("Leg"));
+    NB_TYPE_CASTER(lasyten::Leg, const_name("Leg"))
 
-    bool load(handle src, bool convert)
+    bool from_python(handle src, uint32_t flags, cleanup_list* cleanup) noexcept
     {
         if (src.is_none()) {
             value = lasyten::Leg(nullptr);
             return true;
         }
-        (void)convert;
-        try {
-            if (lasyten::py_isinstance<lasyten::ElementarySpace>(src)) {
-                value = lasyten::Leg(src.cast<std::shared_ptr<lasyten::ElementarySpace>>());
+        flags &= ~(uint32_t)cast_flags::convert;
+        {
+            make_caster<std::shared_ptr<lasyten::ElementarySpace>> c;
+            if (c.from_python(src, flags, cleanup)) {
+                value = lasyten::Leg(c.operator std::shared_ptr<lasyten::ElementarySpace>&());
                 return true;
             }
-            if (lasyten::py_isinstance<lasyten::LegPipe>(src)) {
-                value = lasyten::Leg(src.cast<std::shared_ptr<lasyten::LegPipe>>());
+        }
+        {
+            make_caster<std::shared_ptr<lasyten::LegPipe>> c;
+            if (c.from_python(src, flags, cleanup)) {
+                value = lasyten::Leg(c.operator std::shared_ptr<lasyten::LegPipe>&());
                 return true;
             }
-        } catch (cast_error const&) {
-            return false;
-        } catch (std::exception const&) {
-            return false;
         }
         return false;
     }
 
-    static handle cast(lasyten::Leg const& src, return_value_policy policy, handle parent)
+    static handle from_cpp(lasyten::Leg const& src,
+                           rv_policy policy,
+                           cleanup_list* cleanup) noexcept
     {
         if (!src) {
-            return none().inc_ref();
+            return none().release();
         }
         if (auto es = src.as_elementary_space()) {
-            return pybind11::cast(std::move(es), policy, parent).release();
+            return make_caster<std::shared_ptr<lasyten::ElementarySpace>>::from_cpp(
+              es, policy, cleanup);
         }
         if (auto pipe = src.as_leg_pipe()) {
-            return pybind11::cast(std::move(pipe), policy, parent).release();
+            return make_caster<std::shared_ptr<lasyten::LegPipe>>::from_cpp(pipe, policy, cleanup);
         }
-        return none().inc_ref();
+        return none().release();
     }
 };
 
-} // namespace pybind11::detail
+/// ``None`` is the empty ``Leg``.
+template<>
+struct has_arg_defaults<lasyten::Leg> : std::true_type
+{};
+
+NAMESPACE_END(detail)
+NAMESPACE_END(NB_NAMESPACE)
 #endif // LASYTEN_HAS_PYTHON

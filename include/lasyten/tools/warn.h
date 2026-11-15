@@ -20,7 +20,10 @@ warn(std::string_view message, int stack_level = 2)
         std::cerr << "UserWarning: " << message << '\n';
         return;
     }
-    pybind11::warnings::warn(std::string(message).c_str(), PyExc_UserWarning, stack_level);
+    // Stable-ABI safe; with ``-W error`` (pytest) the warning becomes an exception.
+    if (PyErr_WarnEx(PyExc_UserWarning, std::string(message).c_str(), stack_level) < 0) {
+        throw py::error_already_set();
+    }
 #else
     (void)stack_level;
     std::cerr << "UserWarning: " << message << '\n';

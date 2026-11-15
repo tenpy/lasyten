@@ -24,8 +24,8 @@ is_number_or_scalar(py::object x)
 {
     return py::isinstance(x, py::module_::import("numbers").attr("Number")) ||
            py::isinstance(x, py::module_::import("lasyten.block_backends").attr("Scalar")) ||
-           (lasyten::py_isinstance<Tensor>(x) &&
-            py::module_::import("lasyten.tensors._tensors").attr("is_scalar")(x).cast<bool>());
+           (py::isinstance<Tensor>(x) &&
+            py::to_bool(py::module_::import("lasyten.tensors._tensors").attr("is_scalar")(x)));
 }
 
 [[noreturn]] void
@@ -39,8 +39,8 @@ template<typename TensorFn, typename ScalarPyFn>
 py::object
 dispatch_elementwise(py::object x, TensorFn tensor_fn, ScalarPyFn scalar_py_fn)
 {
-    if (lasyten::py_isinstance<DiagonalTensor>(x)) {
-        return py::cast(tensor_fn(x.cast<DiagonalTensorCPtr>()));
+    if (py::isinstance<DiagonalTensor>(x)) {
+        return py::cast(tensor_fn(py::cast<DiagonalTensorCPtr>(x)));
     }
     if (is_number_or_scalar(x)) {
         return scalar_py_fn(x);
@@ -75,7 +75,7 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
             [cutoff](DiagonalTensorCPtr t) { return cutoff_inverse(t, cutoff); },
             [cutoff](py::object n) {
                 py::object abs_x = py::module_::import("builtins").attr("abs")(n);
-                if (abs_x.cast<float64>() < cutoff) {
+                if (py::cast<float64>(abs_x) < cutoff) {
                     return py::object(py::int_(0));
                 }
                 return py::object(py::float_(1.0) / n);
@@ -95,8 +95,8 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
             x,
             [](DiagonalTensorCPtr t) { return complex_conj(t); },
             [](py::object n) {
-                if (lasyten::py_isinstance<BlockBackend::Scalar>(n))
-                    return py::cast(n.cast<BlockBackend::Scalar>().conj());
+                if (py::isinstance<BlockBackend::Scalar>(n))
+                    return py::cast(py::cast<BlockBackend::Scalar>(n).conj());
                 return numpy().attr("conj")(n);
             });
       },
@@ -141,8 +141,8 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
             x,
             [tol](DiagonalTensorCPtr t) { return real_if_close(t, tol); },
             [tol](py::object n) {
-                if (lasyten::py_isinstance<BlockBackend::Scalar>(n))
-                    return py::cast(n.cast<BlockBackend::Scalar>().real_if_close(tol));
+                if (py::isinstance<BlockBackend::Scalar>(n))
+                    return py::cast(py::cast<BlockBackend::Scalar>(n).real_if_close(tol));
                 return numpy().attr("real_if_close")(n, nb::arg("tol") = tol);
             });
       },
@@ -188,8 +188,8 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
     m.def(
       "exp",
       [](py::object obj) {
-          if (lasyten::py_isinstance<Tensor>(obj)) {
-              return py::cast(exp(obj.cast<TensorCPtr>()));
+          if (py::isinstance<Tensor>(obj)) {
+              return py::cast(exp(py::cast<TensorCPtr>(obj)));
           }
           return numpy().attr("exp")(obj);
       },

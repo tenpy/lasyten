@@ -868,6 +868,3 @@ TensorBackend::Ptr get_same_backend(const std::vector<TensorCPtr>& objs,
                                     std::string error_msg = "Incompatible backends.");
 
 } // namespace lasyten
-
-// pybind11 casters for nested bound types, delegating to nanobind (py_nanobind_bridge.h).
-LASYTEN_PY_BRIDGE_CLASS(::lasyten::TensorBackend::Data)

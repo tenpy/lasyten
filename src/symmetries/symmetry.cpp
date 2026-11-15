@@ -127,7 +127,7 @@ Symmetry::Symmetry(std::vector<SymmetryFactor::Ptr> factors_in)
             any_none = true;
             break;
         }
-        dtypes.push_back(dt_py.cast<Dtype>());
+        dtypes.push_back(py::cast<Dtype>(dt_py));
 #else
         if (!f->fusion_tensor_dtype.has_value()) {
             any_none = true;

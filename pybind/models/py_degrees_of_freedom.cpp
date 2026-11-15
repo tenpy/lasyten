@@ -390,15 +390,15 @@ bind_models_degrees_of_freedom(nb::module_& m)
           std::vector<Site::Ptr> sites;
           sites.reserve(static_cast<std::size_t>(py::len(sites_obj)));
           for (py::handle item : sites_obj) {
-              sites.push_back(item.cast<Site::Ptr>());
+              sites.push_back(py::cast<Site::Ptr>(item));
           }
           Symmetry::Ptr new_symmetry;
           if (!new_symmetry_obj.is_none()) {
-              new_symmetry = new_symmetry_obj.cast<Symmetry::Ptr>();
+              new_symmetry = py::cast<Symmetry::Ptr>(new_symmetry_obj);
           }
 
           if (py::isinstance<py::str>(symmetry_combine)) {
-              set_common_symmetry(sites, symmetry_combine.cast<std::string>(), new_symmetry);
+              set_common_symmetry(sites, py::cast<std::string>(symmetry_combine), new_symmetry);
               return;
           }
           if (py::isinstance<py::list>(symmetry_combine) ||
@@ -407,13 +407,14 @@ bind_models_degrees_of_freedom(nb::module_& m)
               for (py::handle col_obj : symmetry_combine) {
                   CommonSymmetryComboColumn col;
                   for (py::handle term_obj : col_obj) {
-                      py::tuple term = term_obj.cast<py::tuple>();
+                      py::tuple term = py::to_tuple(term_obj);
                       if (term.size() != 3) {
                           throw py::value_error(
                             "symmetry_combine terms must be (prefactor, site_idx, old_col_idx)");
                       }
-                      col.emplace_back(
-                        term[0].cast<float64>(), term[1].cast<int64>(), term[2].cast<int64>());
+                      col.emplace_back(py::cast<float64>(term[0]),
+                                       py::cast<int64>(term[1]),
+                                       py::cast<int64>(term[2]));
                   }
                   spec.push_back(std::move(col));
               }
@@ -424,13 +425,13 @@ bind_models_degrees_of_freedom(nb::module_& m)
               py::hasattr(symmetry_combine, "__call__")) {
               py::object fn = symmetry_combine;
               SiteSectorMapFn map = [fn](int64 site_idx, SectorArray const& old_sectors) {
-                  return fn(site_idx, old_sectors).cast<SectorArray>();
+                  return py::cast<SectorArray>(fn(site_idx, old_sectors));
               };
               set_common_symmetry(sites, std::move(map), new_symmetry);
               return;
           }
           throw py::type_error("symmetry_combine must be str, callable, or list; got " +
-                               py::str(py::type::of(symmetry_combine)).cast<std::string>());
+                               py::cast<std::string>(py::str(py::type::of(symmetry_combine))));
       },
       nb::arg("sites"),
       nb::arg("symmetry_combine") = "by_name",

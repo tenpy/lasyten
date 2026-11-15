@@ -22,7 +22,7 @@ format_like_list(py::iterable it)
     for (auto&& item : it) {
         if (!first)
             result += ", ";
-        result += py::str(item).cast<std::string>();
+        result += py::cast<std::string>(py::str(item));
         first = false;
     }
     result += "]";

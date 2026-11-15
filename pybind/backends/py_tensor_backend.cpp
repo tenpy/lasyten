@@ -52,10 +52,10 @@ bind_tensor_backend(nb::module_& m)
       .def("__str__", &TensorBackend::__str__)
       .def("__eq__",
            [](TensorBackend const& self, py::object other) {
-               if (!lasyten::py_isinstance<TensorBackend>(other)) {
+               if (!py::isinstance<TensorBackend>(other)) {
                    return false;
                }
-               return self == other.cast<TensorBackend const&>();
+               return self == py::cast<TensorBackend const&>(other);
            })
       .def("item", &TensorBackend::item, nb::arg("a"), DOC(lasyten, TensorBackend, item))
       .def("test_tensor_sanity",
@@ -558,7 +558,7 @@ bind_tensor_backend(nb::module_& m)
           auto objs = pyargs(objs_nb);
           std::string error_msg = "Incompatible backends.";
           if (kwargs.contains("error_msg"))
-              error_msg = kwargs["error_msg"].cast<std::string>();
+              error_msg = py::cast<std::string>(kwargs["error_msg"]);
           std::vector<py::object> vec;
           vec.reserve(objs.size());
           for (auto const& o : objs)

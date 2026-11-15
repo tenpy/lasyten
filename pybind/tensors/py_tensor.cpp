@@ -27,9 +27,9 @@ optional_leg_order(py::object obj)
     std::vector<std::variant<int64, std::string>> out;
     for (auto item : to_iterable(obj)) {
         if (py::isinstance<py::str>(item)) {
-            out.emplace_back(item.cast<std::string>());
+            out.emplace_back(py::cast<std::string>(item));
         } else {
-            out.emplace_back(item.cast<int64>());
+            out.emplace_back(py::cast<int64>(item));
         }
     }
     return out;
@@ -39,9 +39,9 @@ std::variant<int64, std::string>
 as_leg_ref(py::handle obj)
 {
     if (py::isinstance<py::str>(obj)) {
-        return obj.cast<std::string>();
+        return py::cast<std::string>(obj);
     }
-    return obj.cast<int64>();
+    return py::cast<int64>(obj);
 }
 
 std::optional<nb::class_<Tensor, VectorLike>> g_tensor;
@@ -86,10 +86,10 @@ bind_tensors_tensor(nb::module_& m)
         "labels",
         [](Tensor& self) -> LegLabels& { return self.labels; },
         [](Tensor& self, py::object value) {
-            if (lasyten::py_isinstance<LegLabels>(value)) {
-                self.labels.set(value.cast<LegLabels const&>().as_list());
+            if (py::isinstance<LegLabels>(value)) {
+                self.labels.set(py::cast<LegLabels const&>(value).as_list());
             } else {
-                self.labels.set(value.cast<LegLabelList>());
+                self.labels.set(py::cast<LegLabelList>(value));
             }
         },
         nb::rv_policy::reference_internal)
@@ -108,7 +108,7 @@ bind_tensors_tensor(nb::module_& m)
             return py::tuple(out);
         },
         [](Tensor& self, py::object shape_obj) {
-            self.shape = shape_obj.cast<std::vector<float64>>();
+            self.shape = py::cast<std::vector<float64>>(shape_obj);
         });
 
     cls.def_static(
@@ -146,7 +146,7 @@ bind_tensors_tensor(nb::module_& m)
       [](Tensor& self, bool guarantee_copy, py::object warning) {
           std::optional<std::string> w;
           if (!warning.is_none()) {
-              w = warning.cast<std::string>();
+              w = py::cast<std::string>(warning);
           }
           return self.as_SymmetricTensor(guarantee_copy, w);
       },
@@ -160,10 +160,10 @@ bind_tensors_tensor(nb::module_& m)
           std::optional<std::string> dev;
           std::optional<Dtype> dt;
           if (!device.is_none()) {
-              dev = device.cast<std::string>();
+              dev = py::cast<std::string>(device);
           }
           if (!dtype.is_none()) {
-              dt = dtype.cast<Dtype>();
+              dt = py::cast<Dtype>(dtype);
           }
           return self.copy(deep, dev, dt);
       },
@@ -178,10 +178,10 @@ bind_tensors_tensor(nb::module_& m)
           std::optional<Dtype> dt;
           std::optional<std::string> dev;
           if (!dtype.is_none()) {
-              dt = dtype.cast<Dtype>();
+              dt = py::cast<Dtype>(dtype);
           }
           if (!device.is_none()) {
-              dev = device.cast<std::string>();
+              dev = py::cast<std::string>(device);
           }
           return self.to_backend(std::move(backend), dt, dev);
       },
@@ -195,7 +195,7 @@ bind_tensors_tensor(nb::module_& m)
       [](Tensor& self, py::object leg_order, py::object dtype, bool understood_braiding) {
           std::optional<Dtype> dt;
           if (!dtype.is_none()) {
-              dt = dtype.cast<Dtype>();
+              dt = py::cast<Dtype>(dtype);
           }
           return self.to_dense_block(optional_leg_order(leg_order), dt, understood_braiding);
       },
@@ -258,7 +258,7 @@ bind_tensors_tensor(nb::module_& m)
           auto it = to_iterable(idx);
           std::vector<int64> parsed;
           for (auto item : it) {
-              parsed.push_back(item.cast<int64>());
+              parsed.push_back(py::cast<int64>(item));
           }
           if (static_cast<int64>(parsed.size()) != self.num_legs) {
               throw py::index_error(std::format(

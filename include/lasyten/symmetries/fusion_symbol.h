@@ -164,3 +164,43 @@ class FusionSymbol
 [[nodiscard]] FusionSymbol fusion_symbol_from_block(BlockBackend::BlockCPtr const& block);
 
 } // namespace lasyten
+
+#if LASYTEN_HAS_PYTHON
+NAMESPACE_BEGIN(NB_NAMESPACE)
+NAMESPACE_BEGIN(detail)
+
+/// Transparent FusionSymbol <-> numpy.ndarray (library and bindings).
+template<>
+struct type_caster<lasyten::FusionSymbol>
+{
+    NB_TYPE_CASTER(lasyten::FusionSymbol, const_name("numpy.ndarray"))
+
+    bool from_python(handle src, uint32_t flags, cleanup_list*) noexcept
+    {
+        bool const convert = (flags & (uint32_t)cast_flags::convert) != 0;
+        if (!convert && !lasyten::py::array::check_(src)) {
+            return false;
+        }
+        try {
+            value = lasyten::fusion_symbol_from_numpy(lasyten::py::array(src));
+            return true;
+        } catch (...) {
+            PyErr_Clear();
+            return false;
+        }
+    }
+
+    static handle from_cpp(lasyten::FusionSymbol const& src, rv_policy, cleanup_list*) noexcept
+    {
+        try {
+            return lasyten::fusion_symbol_to_numpy(src).release();
+        } catch (...) {
+            PyErr_Clear();
+            return handle();
+        }
+    }
+};
+
+NAMESPACE_END(detail)
+NAMESPACE_END(NB_NAMESPACE)
+#endif // LASYTEN_HAS_PYTHON

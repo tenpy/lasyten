@@ -756,7 +756,3 @@ default_cpu_block_backend()
 }
 
 } // namespace lasyten
-
-// pybind11 casters for nested bound types, delegating to nanobind (py_nanobind_bridge.h).
-LASYTEN_PY_BRIDGE_CLASS(::lasyten::BlockBackend::Block)
-LASYTEN_PY_BRIDGE_CLASS(::lasyten::BlockBackend::Scalar)

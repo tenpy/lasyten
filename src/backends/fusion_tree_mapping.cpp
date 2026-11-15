@@ -18,8 +18,8 @@ namespace {
 BlockInds
 as_block_inds(py::object obj)
 {
-    if (py_isinstance<BlockInds>(obj)) {
-        return obj.cast<BlockInds>();
+    if (py::isinstance<BlockInds>(obj)) {
+        return py::cast<BlockInds>(obj);
     }
     return block_inds_from_numpy(obj);
 }
@@ -164,12 +164,12 @@ instructions_from_python(py::object instructions)
         throw py::type_error("instructions must be a list or tuple");
     }
     for (py::handle h : instructions) {
-        if (py_isinstance<BraidInstruction>(h)) {
-            out.push_back(h.cast<BraidInstruction>());
-        } else if (py_isinstance<BendInstruction>(h)) {
-            out.push_back(h.cast<BendInstruction>());
-        } else if (py_isinstance<TwistInstruction>(h)) {
-            out.push_back(h.cast<TwistInstruction>());
+        if (py::isinstance<BraidInstruction>(h)) {
+            out.push_back(py::cast<BraidInstruction>(h));
+        } else if (py::isinstance<BendInstruction>(h)) {
+            out.push_back(py::cast<BendInstruction>(h));
+        } else if (py::isinstance<TwistInstruction>(h)) {
+            out.push_back(py::cast<TwistInstruction>(h));
         } else {
             throw py::type_error("instruction entries must be BraidInstruction, BendInstruction, "
                                  "or TwistInstruction");

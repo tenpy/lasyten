@@ -24,7 +24,7 @@ py_leg_labels(py::object seq)
         if (item.is_none()) {
             out.push_back("");
         } else {
-            out.push_back(item.cast<std::string>());
+            out.push_back(py::cast<std::string>(item));
         }
     }
     return out;
@@ -35,14 +35,14 @@ py_check_compatible_legs(py::sequence legs1, py::sequence legs2, bool expect_equ
 {
     bool all_space = true;
     for (auto item : legs1) {
-        if (!lasyten::py_isinstance<Space>(py::reinterpret_borrow<py::object>(item))) {
+        if (!py::isinstance<Space>(py::reinterpret_borrow<py::object>(item))) {
             all_space = false;
             break;
         }
     }
     if (all_space) {
         for (auto item : legs2) {
-            if (!lasyten::py_isinstance<Space>(py::reinterpret_borrow<py::object>(item))) {
+            if (!py::isinstance<Space>(py::reinterpret_borrow<py::object>(item))) {
                 all_space = false;
                 break;
             }
@@ -52,10 +52,10 @@ py_check_compatible_legs(py::sequence legs1, py::sequence legs2, bool expect_equ
         std::vector<Space::Ptr> a;
         std::vector<Space::Ptr> b;
         for (auto item : legs1) {
-            a.push_back(item.cast<Space::Ptr>());
+            a.push_back(py::cast<Space::Ptr>(item));
         }
         for (auto item : legs2) {
-            b.push_back(item.cast<Space::Ptr>());
+            b.push_back(py::cast<Space::Ptr>(item));
         }
         _check_compatible_legs(a, b, expect_equal);
         return;
@@ -63,10 +63,10 @@ py_check_compatible_legs(py::sequence legs1, py::sequence legs2, bool expect_equ
     std::vector<Leg::Ptr> a;
     std::vector<Leg::Ptr> b;
     for (auto item : legs1) {
-        a.push_back(item.cast<Leg::Ptr>());
+        a.push_back(py::cast<Leg::Ptr>(item));
     }
     for (auto item : legs2) {
-        b.push_back(item.cast<Leg::Ptr>());
+        b.push_back(py::cast<Leg::Ptr>(item));
     }
     _check_compatible_legs(a, b, expect_equal);
 }
@@ -106,13 +106,16 @@ C++ overload).
           std::optional<std::map<std::string, std::string>> r1;
           std::optional<std::map<std::string, std::string>> r2;
           if (!relabel1.is_none()) {
-              r1 = relabel1.cast<std::map<std::string, std::string>>();
+              r1 = py::cast<std::map<std::string, std::string>>(relabel1);
           }
           if (!relabel2.is_none()) {
-              r2 = relabel2.cast<std::map<std::string, std::string>>();
+              r2 = py::cast<std::map<std::string, std::string>>(relabel2);
           }
-          return py_from_compose_sym(_compose_SymmetricTensors(
-            tensor1.cast<SymmetricTensorCPtr>(), tensor2.cast<SymmetricTensorCPtr>(), r1, r2));
+          return py_from_compose_sym(
+            _compose_SymmetricTensors(py::cast<SymmetricTensorCPtr>(tensor1),
+                                      py::cast<SymmetricTensorCPtr>(tensor2),
+                                      r1,
+                                      r2));
       },
       nb::arg("tensor1"),
       nb::arg("tensor2"),

@@ -40,6 +40,7 @@ load_sector_from_ptr(T const* ptr, std::size_t n, Sector& out)
     return true;
 }
 
+#if LASYTEN_HAS_PYTHON
 template<typename T>
 bool
 load_sector_from_buffer(py::buffer_info const& info, Sector& out)
@@ -64,6 +65,8 @@ load_sector_from_buffer(py::buffer_info const& info, Sector& out)
     return true;
 }
 
+#endif // LASYTEN_HAS_PYTHON
+
 template<typename T>
 bool
 load_sector_array_from_ptr(T const* ptr,
@@ -87,6 +90,7 @@ load_sector_array_from_ptr(T const* ptr,
     return true;
 }
 
+#if LASYTEN_HAS_PYTHON
 template<typename T>
 bool
 load_sector_array_from_buffer(py::buffer_info const& info, SectorArray& out)
@@ -116,6 +120,7 @@ load_sector_array_from_buffer(py::buffer_info const& info, SectorArray& out)
     }
     return true;
 }
+#endif // LASYTEN_HAS_PYTHON (numpy buffer loaders)
 
 hdf5_io::Hdf5Buffer
 sector_to_hdf5_buffer(Sector const& src)
@@ -198,6 +203,7 @@ sector_array_from_hdf5_buffer(hdf5_io::Hdf5Buffer const& buf)
 
 } // namespace
 
+#if LASYTEN_HAS_PYTHON
 py::array
 sector_to_numpy(Sector const& src)
 {
@@ -280,6 +286,7 @@ sector_array_from_numpy(py::handle src)
     }
     return out;
 }
+#endif // LASYTEN_HAS_PYTHON (numpy conversions)
 
 void
 Sector::save_hdf5(lasyten::hdf5::Saver& saver,

@@ -21,7 +21,7 @@ namespace {
 Space::Ptr
 as_space(py::handle obj)
 {
-    return obj.cast<Space::Ptr>();
+    return py::cast<Space::Ptr>(obj);
 }
 
 /// Symmetry of a :class:`TensorProduct` factor (:class:`Space` or :class:`Leg` /
@@ -29,26 +29,26 @@ as_space(py::handle obj)
 Symmetry::Ptr
 factor_symmetry(py::handle factor)
 {
-    if (py_isinstance<Space>(factor)) {
-        return factor.cast<Space*>()->symmetry;
+    if (py::isinstance<Space>(factor)) {
+        return py::cast<Space*>(factor)->symmetry;
     }
-    if ((py_isinstance<ElementarySpace>(factor) || py_isinstance<LegPipe>(factor))) {
-        return factor.cast<Leg>().symmetry();
+    if ((py::isinstance<ElementarySpace>(factor) || py::isinstance<LegPipe>(factor))) {
+        return py::cast<Leg>(factor).symmetry();
     }
-    return factor.attr("symmetry").cast<Symmetry::Ptr>();
+    return py::cast<Symmetry::Ptr>(factor.attr("symmetry"));
 }
 
 /// Quantum dimension of a :class:`TensorProduct` factor.
 float64
 factor_dim(py::handle factor)
 {
-    if (py_isinstance<Space>(factor)) {
-        return factor.cast<Space*>()->dim;
+    if (py::isinstance<Space>(factor)) {
+        return py::cast<Space*>(factor)->dim;
     }
-    if ((py_isinstance<ElementarySpace>(factor) || py_isinstance<LegPipe>(factor))) {
-        return factor.cast<Leg>().dim();
+    if ((py::isinstance<ElementarySpace>(factor) || py::isinstance<LegPipe>(factor))) {
+        return py::cast<Leg>(factor).dim();
     }
-    return factor.attr("dim").cast<float64>();
+    return py::cast<float64>(factor.attr("dim"));
 }
 
 std::string
@@ -57,7 +57,7 @@ as_leg_label(py::handle obj)
     if (obj.is_none()) {
         return "";
     }
-    return obj.cast<std::string>();
+    return py::cast<std::string>(obj);
 }
 
 LegLabelList
@@ -316,12 +316,12 @@ tensor_product_from_python(py::object obj, Symmetry::Ptr symmetry)
         }
         return std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{}, std::move(symmetry));
     }
-    if (py_isinstance<TensorProduct>(obj)) {
-        return obj.cast<TensorProduct::Ptr>();
+    if (py::isinstance<TensorProduct>(obj)) {
+        return py::cast<TensorProduct::Ptr>(obj);
     }
     std::vector<Leg::Ptr> factors;
     for (auto item : obj) {
-        factors.push_back(item.cast<Leg::Ptr>());
+        factors.push_back(py::cast<Leg::Ptr>(item));
     }
     return std::make_shared<TensorProduct>(std::move(factors), std::move(symmetry));
 }
@@ -330,12 +330,12 @@ std::tuple<TensorProduct::Ptr, TensorProduct::Ptr, TensorBackend::Ptr, Symmetry:
 parse_tensor_init_args(py::object codomain, py::object domain, TensorBackend::Ptr backend)
 {
     Symmetry::Ptr symmetry;
-    if (py_isinstance<TensorProduct>(codomain)) {
-        symmetry = codomain.cast<TensorProduct::Ptr>()->symmetry;
+    if (py::isinstance<TensorProduct>(codomain)) {
+        symmetry = py::cast<TensorProduct::Ptr>(codomain)->symmetry;
     } else if (py::len(codomain) > 0) {
         symmetry = factor_symmetry(codomain[py::int_(0)]);
-    } else if (!domain.is_none() && py_isinstance<TensorProduct>(domain)) {
-        symmetry = domain.cast<TensorProduct::Ptr>()->symmetry;
+    } else if (!domain.is_none() && py::isinstance<TensorProduct>(domain)) {
+        symmetry = py::cast<TensorProduct::Ptr>(domain)->symmetry;
     } else if (!domain.is_none() && py::len(domain) > 0) {
         symmetry = factor_symmetry(domain[py::int_(0)]);
     } else {
@@ -373,7 +373,7 @@ parse_tensor_init_labels(py::object labels,
         return Tensor::_init_parse_labels(std::nullopt, codomain, domain, is_endomorphism);
     }
 
-    py::sequence seq = labels.cast<py::sequence>();
+    py::sequence seq = py::cast<py::sequence>(labels);
     if (py::len(seq) == 0) {
         return Tensor::_init_parse_labels(LegLabelList{}, codomain, domain, is_endomorphism);
     }
@@ -903,7 +903,7 @@ Tensor::to_numpy(std::optional<std::vector<std::variant<int64, std::string>>> le
     if (!numpy_dtype.is_none()) {
         np_dtype = numpy_dtype;
     }
-    return backend->block_backend->to_numpy(block, np_dtype).cast<py::array>();
+    return py::cast<py::array>(backend->block_backend->to_numpy(block, np_dtype));
 }
 
 std::string

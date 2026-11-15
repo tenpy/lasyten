@@ -38,7 +38,7 @@ jobs:
         cache-environment: true
 
     - name: Build and install
-      # build deps (pybind11, scikit-build-core, cmake, ...) come from environment.yml
+      # build deps (scikit-build-core, cmake, ...) come from environment.yml
       # hdf5_io is not on PyPI yet; install the git submodule (needed for lasyten.tools.hdf5_io)
       run: |
         pip install --no-build-isolation -e ./external/hdf5_io

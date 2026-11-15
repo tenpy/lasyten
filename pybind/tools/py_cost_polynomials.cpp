@@ -4,7 +4,7 @@
 #include "../py_lasyten_nanobind.h"
 #include "docstrings/tools/cost_polynomials.h"
 
-namespace py = pybind11;
+namespace py = lasyten::py;
 namespace lasyten {
 
 namespace {
@@ -19,11 +19,11 @@ py::object
 poly_add(BigOPolynomial const& self, py::handle other)
 {
     if (py::isinstance<py::str>(other))
-        return py::cast(self + other.cast<std::string>());
-    if (lasyten::py_isinstance<BigOMonomial>(other))
-        return py::cast(self + other.cast<BigOMonomial>());
-    if (lasyten::py_isinstance<BigOPolynomial>(other))
-        return py::cast(self + other.cast<BigOPolynomial>());
+        return py::cast(self + py::cast<std::string>(other));
+    if (py::isinstance<BigOMonomial>(other))
+        return py::cast(self + py::cast<BigOMonomial>(other));
+    if (py::isinstance<BigOPolynomial>(other))
+        return py::cast(self + py::cast<BigOPolynomial>(other));
     return not_implemented();
 }
 
@@ -31,23 +31,23 @@ py::object
 poly_mul(BigOPolynomial const& self, py::handle other)
 {
     if (py::isinstance<py::str>(other))
-        return py::cast(self * other.cast<std::string>());
-    if (lasyten::py_isinstance<BigOMonomial>(other))
-        return py::cast(self * other.cast<BigOMonomial>());
-    if (lasyten::py_isinstance<BigOPolynomial>(other))
-        return py::cast(self * other.cast<BigOPolynomial>());
+        return py::cast(self * py::cast<std::string>(other));
+    if (py::isinstance<BigOMonomial>(other))
+        return py::cast(self * py::cast<BigOMonomial>(other));
+    if (py::isinstance<BigOPolynomial>(other))
+        return py::cast(self * py::cast<BigOPolynomial>(other));
     return not_implemented();
 }
 
 BigOPolynomial
 as_polynomial(py::handle obj)
 {
-    if (lasyten::py_isinstance<BigOPolynomial>(obj))
-        return obj.cast<BigOPolynomial>();
-    if (lasyten::py_isinstance<BigOMonomial>(obj))
-        return BigOPolynomial{ { obj.cast<BigOMonomial>() } };
+    if (py::isinstance<BigOPolynomial>(obj))
+        return py::cast<BigOPolynomial>(obj);
+    if (py::isinstance<BigOMonomial>(obj))
+        return BigOPolynomial{ { py::cast<BigOMonomial>(obj) } };
     if (py::isinstance<py::str>(obj))
-        return BigOPolynomial::from_str(obj.cast<std::string>());
+        return BigOPolynomial::from_str(py::cast<std::string>(obj));
     throw py::type_error("expected BigOPolynomial, BigOMonomial, or str");
 }
 
@@ -56,7 +56,7 @@ optional_relations(py::object relations)
 {
     if (relations.is_none())
         return std::nullopt;
-    return relations.cast<std::vector<std::pair<BigOMonomial, BigOMonomial>>>();
+    return py::cast<std::vector<std::pair<BigOMonomial, BigOMonomial>>>(relations);
 }
 
 } // namespace
@@ -77,34 +77,34 @@ bind_cost_polynomials(nb::module_& m)
       .def_static(
         "from_str",
         [](py::handle mono) {
-            if (lasyten::py_isinstance<BigOMonomial>(mono))
-                return mono.cast<BigOMonomial>();
-            return BigOMonomial::from_str(py::str(mono).cast<std::string>());
+            if (py::isinstance<BigOMonomial>(mono))
+                return py::cast<BigOMonomial>(mono);
+            return BigOMonomial::from_str(py::cast<std::string>(py::str(mono)));
         },
         nb::arg("mono"),
         "Initialize from a string representation like ``'x^2 y^3'``.")
       .def(
         "__add__",
         [](BigOMonomial const& self, py::handle other) -> py::object {
-            if (!lasyten::py_isinstance<BigOMonomial>(other))
+            if (!py::isinstance<BigOMonomial>(other))
                 return not_implemented();
-            return py::cast(self + other.cast<BigOMonomial>());
+            return py::cast(self + py::cast<BigOMonomial>(other));
         },
         nb::arg("other"))
       .def(
         "__mul__",
         [](BigOMonomial const& self, py::handle other) -> py::object {
-            if (!lasyten::py_isinstance<BigOMonomial>(other))
+            if (!py::isinstance<BigOMonomial>(other))
                 return not_implemented();
-            return py::cast(self * other.cast<BigOMonomial>());
+            return py::cast(self * py::cast<BigOMonomial>(other));
         },
         nb::arg("other"))
       .def(
         "__eq__",
         [](BigOMonomial const& self, py::handle other) -> py::object {
-            if (!lasyten::py_isinstance<BigOMonomial>(other))
+            if (!py::isinstance<BigOMonomial>(other))
                 return not_implemented();
-            return py::cast(self == other.cast<BigOMonomial>());
+            return py::cast(self == py::cast<BigOMonomial>(other));
         },
         nb::arg("other"))
       .def("__hash__", &BigOMonomial::hash)
@@ -125,7 +125,7 @@ bind_cost_polynomials(nb::module_& m)
             std::vector<BigOMonomial> ovec;
             ovec.reserve(others.size());
             for (auto item : others)
-                ovec.push_back(item.cast<BigOMonomial>());
+                ovec.push_back(py::cast<BigOMonomial>(item));
             return self.is_negligible(ovec, optional_relations(relations));
         },
         doc_cpp_ref(R"pydoc(is_negligible)pydoc", "lasyten::BigOMonomial::is_negligible()"));
@@ -138,10 +138,10 @@ bind_cost_polynomials(nb::module_& m)
                if (terms.is_none())
                    return BigOPolynomial{};
                if (py::isinstance<py::set>(terms))
-                   return BigOPolynomial{ terms.cast<std::set<BigOMonomial>>() };
+                   return BigOPolynomial{ py::cast<std::set<BigOMonomial>>(terms) };
                std::set<BigOMonomial> as_set;
                for (auto item : terms)
-                   as_set.insert(item.cast<BigOMonomial>());
+                   as_set.insert(py::cast<BigOMonomial>(item));
                return BigOPolynomial{ std::move(as_set) };
            }),
            nb::arg("terms").none() = nb::none())
@@ -151,10 +151,10 @@ bind_cost_polynomials(nb::module_& m)
         [](py::object terms, py::object relations) {
             std::set<BigOMonomial> as_set;
             if (py::isinstance<py::set>(terms))
-                as_set = terms.cast<std::set<BigOMonomial>>();
+                as_set = py::cast<std::set<BigOMonomial>>(terms);
             else
                 for (auto item : terms)
-                    as_set.insert(item.cast<BigOMonomial>());
+                    as_set.insert(py::cast<BigOMonomial>(item));
             return BigOPolynomial::simplify_terms(as_set, optional_relations(relations));
         },
         nb::arg("terms"),
@@ -163,11 +163,11 @@ bind_cost_polynomials(nb::module_& m)
       .def_static(
         "from_str",
         [](py::handle poly) {
-            if (lasyten::py_isinstance<BigOPolynomial>(poly))
-                return poly.cast<BigOPolynomial>();
-            if (lasyten::py_isinstance<BigOMonomial>(poly))
-                return BigOPolynomial{ { poly.cast<BigOMonomial>() } };
-            return BigOPolynomial::from_str(py::str(poly).cast<std::string>());
+            if (py::isinstance<BigOPolynomial>(poly))
+                return py::cast<BigOPolynomial>(poly);
+            if (py::isinstance<BigOMonomial>(poly))
+                return BigOPolynomial{ { py::cast<BigOMonomial>(poly) } };
+            return BigOPolynomial::from_str(py::cast<std::string>(py::str(poly)));
         },
         nb::arg("poly"),
         "Initialize from a string representation like ``'x^2 y^3 + x^4'``.")
@@ -180,10 +180,10 @@ bind_cost_polynomials(nb::module_& m)
       .def(
         "__eq__",
         [](BigOPolynomial const& self, py::handle other) -> py::object {
-            if (lasyten::py_isinstance<BigOMonomial>(other))
-                return py::cast(self == other.cast<BigOMonomial>());
-            if (lasyten::py_isinstance<BigOPolynomial>(other))
-                return py::cast(self == other.cast<BigOPolynomial>());
+            if (py::isinstance<BigOMonomial>(other))
+                return py::cast(self == py::cast<BigOMonomial>(other));
+            if (py::isinstance<BigOPolynomial>(other))
+                return py::cast(self == py::cast<BigOPolynomial>(other));
             return not_implemented();
         },
         nb::arg("other"))

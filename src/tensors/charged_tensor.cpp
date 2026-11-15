@@ -328,8 +328,8 @@ ChargedTensor::from_two_charge_legs(SymmetricTensor::Ptr invariant_part,
     if (!pipe || !pipe.is_pipe()) {
         throw std::runtime_error("from_two_charge_legs: expected pipe charge leg");
     }
-    auto state = invariant_part->backend->state_tensor_product(state1, state2, pipe)
-                   .cast<BlockBackend::BlockPtr>();
+    auto state = py::cast<BlockBackend::BlockPtr>(
+      invariant_part->backend->state_tensor_product(state1, state2, pipe));
     return from_invariant_part(inv_sym, state);
 }
 
@@ -514,7 +514,7 @@ ChargedTensor::_repr_header_lines(std::string const& indent, bool use_symm_str) 
       std::format("{}* Charge Leg: dim={} sectors={}",
                   indent,
                   std::round(charge_leg.dim() * 1000.) / 1000.,
-                  py::str(py::cast(charge_space->sector_decomposition)).cast<std::string>()));
+                  py::cast<std::string>(py::str(py::cast(charge_space->sector_decomposition)))));
     std::string start = indent + "* Charged State: ";
     auto state_lines = backend->block_backend->_block_repr_lines(
       charged_state, indent + "  ", linewidth - static_cast<int64>(start.size()), 1);

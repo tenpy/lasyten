@@ -27,7 +27,7 @@ py_leg_labels(py::object seq)
         if (item.is_none()) {
             out.push_back("");
         } else {
-            out.push_back(item.cast<std::string>());
+            out.push_back(py::cast<std::string>(item));
         }
     }
     return out;
@@ -48,7 +48,7 @@ py_opt_string(py::object obj)
     if (obj.is_none()) {
         return std::nullopt;
     }
-    return obj.cast<std::string>();
+    return py::cast<std::string>(obj);
 }
 
 py::object
@@ -63,14 +63,14 @@ entropy_numpy(py::object p, py::object n)
     }
     bool inf = false;
     try {
-        inf = std::isinf(n.cast<float64>());
+        inf = std::isinf(py::cast<float64>(n));
     } catch (...) {
         inf = false;
     }
     if (inf) {
         return -np.attr("log")(np.attr("max")(p));
     }
-    float64 n_f = n.cast<float64>();
+    float64 n_f = py::cast<float64>(n);
     return np.attr("log")(np.attr("sum")(p.attr("__pow__")(n))).attr("__truediv__")(1.0 - n_f);
 }
 
@@ -144,19 +144,19 @@ bind_tensors_decompositions(nb::module_& m)
     m.def(
       "entropy",
       [](py::object p, py::object n) {
-          if (lasyten::py_isinstance<DiagonalTensor>(p)) {
+          if (py::isinstance<DiagonalTensor>(p)) {
               float64 n_f = 1.;
               if (n.is(py::none())) {
                   n_f = 1.;
               } else if (py::isinstance<py::float_>(n) || py::isinstance<py::int_>(n)) {
-                  n_f = n.cast<float64>();
+                  n_f = py::cast<float64>(n);
                   if (std::isinf(n_f)) {
                       n_f = std::numeric_limits<float64>::infinity();
                   }
               } else {
-                  n_f = n.cast<float64>();
+                  n_f = py::cast<float64>(n);
               }
-              return py::cast(entropy(p.cast<DiagonalTensorCPtr>(), n_f)).attr("to_numpy")();
+              return py::cast(entropy(py::cast<DiagonalTensorCPtr>(p), n_f)).attr("to_numpy")();
           }
           return entropy_numpy(std::move(p), std::move(n));
       },
@@ -230,13 +230,13 @@ returns a NumPy scalar via ``.to_numpy()``.
          py::object mask_labels) {
           std::optional<int64> chi_max_opt;
           if (!chi_max.is_none()) {
-              chi_max_opt = chi_max.cast<int64>();
+              chi_max_opt = py::cast<int64>(chi_max);
           }
-          int64 chi_min_v = chi_min.is_none() ? 1 : chi_min.cast<int64>();
+          int64 chi_min_v = chi_min.is_none() ? 1 : py::cast<int64>(chi_min);
           float64 degeneracy_tol_v =
-            degeneracy_tol.is_none() ? 0. : degeneracy_tol.cast<float64>();
-          float64 trunc_cut_v = trunc_cut.is_none() ? 0. : trunc_cut.cast<float64>();
-          float64 svd_min_v = svd_min.is_none() ? 0. : svd_min.cast<float64>();
+            degeneracy_tol.is_none() ? 0. : py::cast<float64>(degeneracy_tol);
+          float64 trunc_cut_v = trunc_cut.is_none() ? 0. : py::cast<float64>(trunc_cut);
+          float64 svd_min_v = svd_min.is_none() ? 0. : py::cast<float64>(svd_min);
           return truncate_singular_values(std::move(S),
                                           chi_max_opt,
                                           chi_min_v,
@@ -271,17 +271,17 @@ returns a NumPy scalar via ``.to_numpy()``.
          py::object svd_min) {
           std::optional<float64> normalize_opt;
           if (!normalize_to.is_none()) {
-              normalize_opt = normalize_to.cast<float64>();
+              normalize_opt = py::cast<float64>(normalize_to);
           }
           std::optional<int64> chi_max_opt;
           if (!chi_max.is_none()) {
-              chi_max_opt = chi_max.cast<int64>();
+              chi_max_opt = py::cast<int64>(chi_max);
           }
-          int64 chi_min_v = chi_min.is_none() ? 1 : chi_min.cast<int64>();
+          int64 chi_min_v = chi_min.is_none() ? 1 : py::cast<int64>(chi_min);
           float64 degeneracy_tol_v =
-            degeneracy_tol.is_none() ? 0. : degeneracy_tol.cast<float64>();
-          float64 trunc_cut_v = trunc_cut.is_none() ? 0. : trunc_cut.cast<float64>();
-          float64 svd_min_v = svd_min.is_none() ? 0. : svd_min.cast<float64>();
+            degeneracy_tol.is_none() ? 0. : py::cast<float64>(degeneracy_tol);
+          float64 trunc_cut_v = trunc_cut.is_none() ? 0. : py::cast<float64>(trunc_cut);
+          float64 svd_min_v = svd_min.is_none() ? 0. : py::cast<float64>(svd_min);
           return truncated_svd(std::move(tensor),
                                py_opt_labels(new_labels),
                                new_leg_dual,

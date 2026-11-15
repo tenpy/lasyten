@@ -91,8 +91,8 @@ bind_base_symmetry(nb::module_& m)
         "is_valid_sector",
         [](BaseSymmetry const& self, py::object a) {
             // Accept Sector or ndarray; lists/scalars are not valid sectors.
-            if (lasyten::py_isinstance<Sector>(a)) {
-                return self.is_valid_sector(a.cast<Sector>());
+            if (py::isinstance<Sector>(a)) {
+                return self.is_valid_sector(py::cast<Sector>(a));
             }
             if (!py::isinstance<py::array>(a)) {
                 return false;
@@ -172,8 +172,8 @@ bind_base_symmetry(nb::module_& m)
       .def(
         "are_valid_sectors",
         [](BaseSymmetry const& self, py::object sectors) {
-            if (lasyten::py_isinstance<SectorArray>(sectors)) {
-                return self.are_valid_sectors(sectors.cast<SectorArray>());
+            if (py::isinstance<SectorArray>(sectors)) {
+                return self.are_valid_sectors(py::cast<SectorArray>(sectors));
             }
             if (!py::isinstance<py::array>(sectors)) {
                 return false;
@@ -196,7 +196,7 @@ bind_base_symmetry(nb::module_& m)
                std::vector<Sector> sectors;
                sectors.reserve(args.size());
                for (auto h : args) {
-                   sectors.push_back(h.cast<Sector>());
+                   sectors.push_back(py::cast<Sector>(h));
                }
                return self.multiple_fusion(sectors);
            })
@@ -207,7 +207,7 @@ bind_base_symmetry(nb::module_& m)
             std::vector<SectorArray> sectors;
             sectors.reserve(args.size());
             for (auto h : args) {
-                sectors.push_back(h.cast<SectorArray>());
+                sectors.push_back(py::cast<SectorArray>(h));
             }
             return self.multiple_fusion_broadcast(sectors);
         },
@@ -219,7 +219,7 @@ bind_base_symmetry(nb::module_& m)
             std::vector<SectorArray> sectors;
             sectors.reserve(args.size());
             for (auto h : args) {
-                sectors.push_back(h.cast<SectorArray>());
+                sectors.push_back(py::cast<SectorArray>(h));
             }
             return self._multiple_fusion_broadcast(sectors);
         },

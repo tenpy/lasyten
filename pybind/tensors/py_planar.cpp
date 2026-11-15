@@ -40,9 +40,9 @@ LegRef
 py_as_leg_ref(py::object obj)
 {
     if (py::isinstance<py::str>(obj)) {
-        return obj.cast<std::string>();
+        return py::cast<std::string>(obj);
     }
-    return obj.cast<int64>();
+    return py::cast<int64>(obj);
 }
 
 std::vector<LegRef>
@@ -89,7 +89,7 @@ py_leg_labels(py::object seq)
         if (item.is_none()) {
             out.push_back("");
         } else {
-            out.push_back(item.cast<std::string>());
+            out.push_back(py::cast<std::string>(item));
         }
     }
     return out;
@@ -110,7 +110,7 @@ py_opt_string(py::object obj)
     if (obj.is_none()) {
         return std::nullopt;
     }
-    return obj.cast<std::string>();
+    return py::cast<std::string>(obj);
 }
 
 std::optional<float64>
@@ -119,7 +119,7 @@ py_opt_float(py::object obj)
     if (obj.is_none()) {
         return std::nullopt;
     }
-    return obj.cast<float64>();
+    return py::cast<float64>(obj);
 }
 
 std::optional<int64>
@@ -128,7 +128,7 @@ py_opt_int(py::object obj)
     if (obj.is_none()) {
         return std::nullopt;
     }
-    return obj.cast<int64>();
+    return py::cast<int64>(obj);
 }
 
 std::map<std::string, std::string>
@@ -137,7 +137,7 @@ py_relabel_map(py::object obj)
     if (obj.is_none()) {
         return {};
     }
-    return obj.cast<std::map<std::string, std::string>>();
+    return py::cast<std::map<std::string, std::string>>(obj);
 }
 
 BigOPolynomial
@@ -146,8 +146,8 @@ as_polynomial(py::object obj)
     if (obj.is_none()) {
         return BigOPolynomial::from_str("None");
     }
-    if (lasyten::py_isinstance<BigOPolynomial>(obj)) {
-        return obj.cast<BigOPolynomial>();
+    if (py::isinstance<BigOPolynomial>(obj)) {
+        return py::cast<BigOPolynomial>(obj);
     }
     return BigOPolynomial::from_str(std::string(py::str(obj)));
 }
@@ -172,13 +172,13 @@ parse_dims_dict(py::object dims)
         return std::nullopt;
     }
     std::map<std::string, std::vector<std::string>> out;
-    for (auto item : dims.cast<py::dict>()) {
+    for (auto item : py::to_dict(dims)) {
         std::vector<std::string> labels;
         for (auto lab : py::reinterpret_borrow<py::iterable>(
                py::reinterpret_borrow<py::object>(item.second))) {
-            labels.push_back(py::reinterpret_borrow<py::object>(lab).cast<std::string>());
+            labels.push_back(py::cast<std::string>(py::reinterpret_borrow<py::object>(lab)));
         }
-        out.emplace(item.first.cast<std::string>(), std::move(labels));
+        out.emplace(py::cast<std::string>(item.first), std::move(labels));
     }
     return out;
 }
@@ -190,7 +190,7 @@ parse_definition_py(py::object obj)
         return {};
     }
     if (py::isinstance<py::str>(obj)) {
-        auto s = obj.cast<std::string>();
+        auto s = py::cast<std::string>(obj);
         if (s.empty()) {
             return {};
         }
@@ -202,14 +202,14 @@ parse_definition_py(py::object obj)
         if (seq.size() != 4) {
             throw py::value_error("Each definition entry must be a 4-tuple");
         }
-        auto t1 = seq[0].cast<std::string>();
-        auto l1 = seq[1].cast<std::string>();
+        auto t1 = py::cast<std::string>(seq[0]);
+        auto l1 = py::cast<std::string>(seq[1]);
         std::optional<std::string> t2;
         py::object t2obj = seq[2];
         if (!t2obj.is_none()) {
-            t2 = t2obj.cast<std::string>();
+            t2 = py::cast<std::string>(t2obj);
         }
-        auto l2 = seq[3].cast<std::string>();
+        auto l2 = py::cast<std::string>(seq[3]);
         out.emplace_back(std::move(t1), std::move(l1), std::move(t2), std::move(l2));
     }
     return PlanarDiagram::parse_definition(std::move(out));
@@ -224,17 +224,17 @@ parse_tensors_py(py::object tensors, py::object dims, std::vector<std::string>* 
         if (names) {
             names->clear();
         }
-        for (auto item : tensors.cast<py::dict>()) {
-            auto key = item.first.cast<std::string>();
+        for (auto item : py::to_dict(tensors)) {
+            auto key = py::cast<std::string>(item.first);
             if (names) {
                 names->push_back(key);
             }
-            map.emplace(key, item.second.cast<TensorPlaceholder>());
+            map.emplace(key, py::cast<TensorPlaceholder>(item.second));
         }
         return PlanarDiagram::parse_tensors(std::move(map), dims_opt, nullptr);
     }
     if (py::isinstance<py::str>(tensors)) {
-        return PlanarDiagram::parse_tensors(tensors.cast<std::string>(), dims_opt, names);
+        return PlanarDiagram::parse_tensors(py::cast<std::string>(tensors), dims_opt, names);
     }
     throw py::type_error("Expected dict or str for tensors");
 }
@@ -243,7 +243,7 @@ ContractionTree
 from_nested_containers_py(py::object tree)
 {
     if (!py::isinstance<py::tuple>(tree) && !py::isinstance<py::list>(tree)) {
-        return ContractionTree::from_single_node(tree.cast<std::string>());
+        return ContractionTree::from_single_node(py::cast<std::string>(tree));
     }
     auto seq = py::reinterpret_borrow<py::sequence>(tree);
     if (seq.size() != 2) {
@@ -258,10 +258,10 @@ ContractionTree
 parse_order_py(PlanarDiagram const& self, py::object order)
 {
     if (py::isinstance<py::str>(order)) {
-        return self.parse_order(order.cast<std::string>());
+        return self.parse_order(py::cast<std::string>(order));
     }
-    if (lasyten::py_isinstance<ContractionTree>(order)) {
-        return self.parse_order(order.cast<ContractionTree>());
+    if (py::isinstance<ContractionTree>(order)) {
+        return self.parse_order(py::cast<ContractionTree>(order));
     }
     if (self.tensors.size() == 1) {
         auto name =
@@ -282,15 +282,15 @@ make_planar_diagram(py::object tensors,
     auto tens = parse_tensors_py(tensors, dims, &names);
     auto defn = parse_definition_py(definition);
     if (tens.size() <= 1 || py::isinstance<py::str>(order)) {
-        std::string order_str =
-          py::isinstance<py::str>(order) ? order.cast<std::string>() : std::string("definition");
+        std::string order_str = py::isinstance<py::str>(order) ? py::cast<std::string>(order)
+                                                               : std::string("definition");
         return PlanarDiagram(std::move(tens), std::move(names), std::move(defn), order_str, allow);
     }
-    if (lasyten::py_isinstance<ContractionTree>(order)) {
+    if (py::isinstance<ContractionTree>(order)) {
         return PlanarDiagram(std::move(tens),
                              std::move(names),
                              std::move(defn),
-                             order.cast<ContractionTree>(),
+                             py::cast<ContractionTree>(order),
                              allow);
     }
     auto tree = from_nested_containers_py(order);
@@ -305,7 +305,7 @@ with_order(PlanarDiagram diag, py::object order)
         return PlanarDiagram(std::move(diag.tensors),
                              std::move(diag.tensor_names_),
                              std::move(diag.definition),
-                             order.cast<std::string>(),
+                             py::cast<std::string>(order),
                              diag.allow_multiple_charged_tensors);
     }
     auto tree = parse_order_py(diag, order);
@@ -356,16 +356,17 @@ evaluate_diagram(PlanarDiagram const& self, py::object tensors_obj)
         first = py::reinterpret_borrow<py::object>(item.second);
         break;
     }
-    if (lasyten::py_isinstance<TensorPlaceholder>(first)) {
+    if (py::isinstance<TensorPlaceholder>(first)) {
         std::map<std::string, TensorPlaceholder> map;
         for (auto item : tensors) {
-            map.emplace(item.first.cast<std::string>(), item.second.cast<TensorPlaceholder>());
+            map.emplace(py::cast<std::string>(item.first),
+                        py::cast<TensorPlaceholder>(item.second));
         }
         return py::cast(self.evaluate(std::move(map)));
     }
     std::map<std::string, TensorPtr> map;
     for (auto item : tensors) {
-        map.emplace(item.first.cast<std::string>(), item.second.cast<TensorPtr>());
+        map.emplace(py::cast<std::string>(item.first), py::cast<TensorPtr>(item.second));
     }
     return eval_result_to_py(self.evaluate(std::move(map)));
 }
@@ -379,11 +380,11 @@ py_as_pipe_dualities(py::object obj)
     if (py::isinstance<py::bool_>(obj) ||
         py::isinstance(obj, py::module_::import("numpy").attr("bool_")) ||
         !py::isinstance<py::iterable>(obj) || py::isinstance<py::str>(obj)) {
-        return obj.cast<bool>();
+        return py::to_bool(obj);
     }
     std::vector<bool> out;
     for (auto item : obj) {
-        out.push_back(py::reinterpret_borrow<py::object>(item).cast<bool>());
+        out.push_back(py::to_bool(py::reinterpret_borrow<py::object>(item)));
     }
     return out;
 }
@@ -400,7 +401,7 @@ py_as_pipes(py::object obj)
         if (o.is_none()) {
             out.push_back(nullptr);
         } else {
-            out.push_back(o.cast<Leg::Ptr>());
+            out.push_back(py::cast<Leg::Ptr>(o));
         }
     }
     return out;
@@ -411,7 +412,7 @@ labels_as_strings(py::object labels)
 {
     std::vector<std::string> out;
     for (auto item : labels) {
-        out.push_back(py::reinterpret_borrow<py::object>(item).cast<std::string>());
+        out.push_back(py::cast<std::string>(py::reinterpret_borrow<py::object>(item)));
     }
     return out;
 }
@@ -441,10 +442,10 @@ bind_tensors_planar(nb::module_& m)
         "labels",
         [](TensorPlaceholder& self) -> LegLabels& { return self.labels; },
         [](TensorPlaceholder& self, py::object value) {
-            if (lasyten::py_isinstance<LegLabels>(value)) {
-                self.labels.set(value.cast<LegLabels const&>().as_list());
+            if (py::isinstance<LegLabels>(value)) {
+                self.labels.set(py::cast<LegLabels const&>(value).as_list());
             } else {
-                self.labels.set(value.cast<LegLabelList>());
+                self.labels.set(py::cast<LegLabelList>(value));
             }
             self.num_legs = self.labels.num_legs();
         },
@@ -467,17 +468,17 @@ bind_tensors_planar(nb::module_& m)
               ContractionTreeNode::Ptr left;
               ContractionTreeNode::Ptr right;
               if (!parent.is_none()) {
-                  p = parent.cast<ContractionTreeNode::Ptr>();
+                  p = py::cast<ContractionTreeNode::Ptr>(parent);
               }
               if (!left_child.is_none()) {
-                  left = left_child.cast<ContractionTreeNode::Ptr>();
+                  left = py::cast<ContractionTreeNode::Ptr>(left_child);
               }
               if (!right_child.is_none()) {
-                  right = right_child.cast<ContractionTreeNode::Ptr>();
+                  right = py::cast<ContractionTreeNode::Ptr>(right_child);
               }
               std::optional<std::string> val;
               if (!value.is_none()) {
-                  val = value.cast<std::string>();
+                  val = py::cast<std::string>(value);
               }
               return std::make_shared<ContractionTreeNode>(
                 std::move(p), std::move(left), std::move(right), std::move(val));
@@ -499,7 +500,7 @@ bind_tensors_planar(nb::module_& m)
             if (parent.is_none()) {
                 self.parent.reset();
             } else {
-                self.parent = parent.cast<ContractionTreeNode::Ptr>();
+                self.parent = py::cast<ContractionTreeNode::Ptr>(parent);
             }
         })
       .def_rw("left_child", &ContractionTreeNode::left_child)
@@ -539,7 +540,7 @@ bind_tensors_planar(nb::module_& m)
         [](ContractionTree& self, ContractionTree& other, py::object value) {
             std::optional<std::string> v;
             if (!value.is_none()) {
-                v = value.cast<std::string>();
+                v = py::cast<std::string>(value);
             }
             return self.fuse(other, std::move(v));
         },
@@ -609,7 +610,7 @@ bind_tensors_planar(nb::module_& m)
             auto extra_def = parse_definition_py(extra_definition);
             if (py::isinstance<py::str>(order)) {
                 return self.add_tensor(
-                  std::move(extra), std::move(extra_def), order.cast<std::string>());
+                  std::move(extra), std::move(extra_def), py::cast<std::string>(order));
             }
             auto tmp = self.add_tensor(std::move(extra), std::move(extra_def), "definition");
             return with_order(std::move(tmp), order);
@@ -627,7 +628,8 @@ bind_tensors_planar(nb::module_& m)
            py::object order) {
             auto extra_def = parse_definition_py(extra_definition);
             if (py::isinstance<py::str>(order)) {
-                return self.remove_tensor(name, std::move(extra_def), order.cast<std::string>());
+                return self.remove_tensor(
+                  name, std::move(extra_def), py::cast<std::string>(order));
             }
             auto tmp = self.remove_tensor(name, extra_def, "definition");
             return with_order(std::move(tmp), order);
@@ -724,15 +726,15 @@ bind_tensors_planar(nb::module_& m)
          py::object relabel2) -> py::object {
           auto l1 = py_as_leg_refs(legs1);
           auto l2 = py_as_leg_refs(legs2);
-          if (lasyten::py_isinstance<TensorPlaceholder>(tensor1) ||
-              lasyten::py_isinstance<TensorPlaceholder>(tensor2)) {
-              return py::cast(planar_contraction(tensor1.cast<TensorPlaceholder>(),
-                                                 tensor2.cast<TensorPlaceholder>(),
+          if (py::isinstance<TensorPlaceholder>(tensor1) ||
+              py::isinstance<TensorPlaceholder>(tensor2)) {
+              return py::cast(planar_contraction(py::cast<TensorPlaceholder>(tensor1),
+                                                 py::cast<TensorPlaceholder>(tensor2),
                                                  std::move(l1),
                                                  std::move(l2)));
           }
-          return eval_result_to_py(planar_contraction(tensor1.cast<TensorCPtr>(),
-                                                      tensor2.cast<TensorCPtr>(),
+          return eval_result_to_py(planar_contraction(py::cast<TensorCPtr>(tensor1),
+                                                      py::cast<TensorCPtr>(tensor2),
                                                       std::move(l1),
                                                       std::move(l2),
                                                       py_relabel_map(relabel1),
@@ -778,11 +780,12 @@ bind_tensors_planar(nb::module_& m)
           for (auto item : pairs) {
               ps.push_back(py_as_leg_refs(py::reinterpret_borrow<py::object>(item)));
           }
-          if (lasyten::py_isinstance<TensorPlaceholder>(tensor)) {
+          if (py::isinstance<TensorPlaceholder>(tensor)) {
               return py::cast(
-                planar_partial_trace(tensor.cast<TensorPlaceholder>(), std::move(ps)));
+                planar_partial_trace(py::cast<TensorPlaceholder>(tensor), std::move(ps)));
           }
-          return eval_result_to_py(planar_partial_trace(tensor.cast<TensorCPtr>(), std::move(ps)));
+          return eval_result_to_py(
+            planar_partial_trace(py::cast<TensorCPtr>(tensor), std::move(ps)));
       },
       nb::arg("tensor"),
       nb::arg("pairs"),
@@ -1059,19 +1062,19 @@ bind_tensors_planar(nb::module_& m)
           if (which == "truncated_svd") {
               int64 chi_min = 1;
               if (!kw("chi_min").is_none()) {
-                  chi_min = kw("chi_min").cast<int64>();
+                  chi_min = py::cast<int64>(kw("chi_min"));
               }
               float64 degeneracy_tol = 0.;
               if (!kw("degeneracy_tol").is_none()) {
-                  degeneracy_tol = kw("degeneracy_tol").cast<float64>();
+                  degeneracy_tol = py::cast<float64>(kw("degeneracy_tol"));
               }
               float64 trunc_cut = 0.;
               if (!kw("trunc_cut").is_none()) {
-                  trunc_cut = kw("trunc_cut").cast<float64>();
+                  trunc_cut = py::cast<float64>(kw("trunc_cut"));
               }
               float64 svd_min = 0.;
               if (!kw("svd_min").is_none()) {
-                  svd_min = kw("svd_min").cast<float64>();
+                  svd_min = py::cast<float64>(kw("svd_min"));
               }
               return py::cast(planar_truncated_svd(tensor,
                                                    codomain_cut,

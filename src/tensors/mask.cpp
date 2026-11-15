@@ -418,7 +418,7 @@ Mask::from_random(Space::Ptr large_leg_in,
           DiagonalTensor::from_random_uniform(large_leg, backend, labels, Dtype::Float32, device);
         float64 cutoff = 2. * p_keep - 1.; // diagonal entries are uniform in [-1, 1].
         auto res =
-          from_DiagonalTensor(py::cast(diag).attr("__lt__")(cutoff).cast<DiagonalTensorCPtr>());
+          from_DiagonalTensor(py::cast<DiagonalTensorCPtr>(py::cast(diag).attr("__lt__")(cutoff)));
 
         if (sum_multiplicities(*res->small_leg()) >= min_keep) {
             return res;
@@ -443,14 +443,14 @@ Mask::from_random(Space::Ptr large_leg_in,
             p_keep = 1.;
         }
         res = from_DiagonalTensor(
-          py::cast(diag).attr("__lt__")(2. * p_keep - 1.).cast<DiagonalTensorCPtr>());
+          py::cast<DiagonalTensorCPtr>(py::cast(diag).attr("__lt__")(2. * p_keep - 1.)));
         for (int i = 0; i < 20; ++i) {
             if (sum_multiplicities(*res->small_leg()) >= min_keep) {
                 return res;
             }
             p_keep = 0.5 * (p_keep + 1.); // step halfway towards 100%
             res = from_DiagonalTensor(
-              py::cast(diag).attr("__lt__")(2. * p_keep - 1.).cast<DiagonalTensorCPtr>());
+              py::cast<DiagonalTensorCPtr>(py::cast(diag).attr("__lt__")(2. * p_keep - 1.)));
         }
         throw std::runtime_error("Could not fulfill min_keep");
     }
@@ -881,7 +881,7 @@ Mask::to_numpy(std::optional<std::vector<std::variant<int64, std::string>>> leg_
     auto block = to_dense_block(std::move(leg_order), dt, understood_braiding);
     std::optional<py::object> np_dt =
       numpy_dtype.is_none() ? std::nullopt : std::optional<py::object>{ numpy_dtype };
-    return backend->block_backend->to_numpy(block, np_dt).cast<py::array>();
+    return py::cast<py::array>(backend->block_backend->to_numpy(block, np_dt));
 }
 
 void

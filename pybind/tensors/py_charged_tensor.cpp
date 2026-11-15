@@ -27,9 +27,9 @@ optional_leg_order(py::object obj)
     std::vector<std::variant<int64, std::string>> out;
     for (auto item : to_iterable(obj)) {
         if (py::isinstance<py::str>(item)) {
-            out.emplace_back(item.cast<std::string>());
+            out.emplace_back(py::cast<std::string>(item));
         } else {
-            out.emplace_back(item.cast<int64>());
+            out.emplace_back(py::cast<int64>(item));
         }
     }
     return out;
@@ -44,7 +44,7 @@ bind_tensors_charged_tensor(nb::module_& m)
     cls.doc() = DOC(lasyten, ChargedTensor);
 
     cls.def(nb::new_([](py::object invariant_part, py::object charged_state) {
-                auto inv = invariant_part.cast<SymmetricTensor::Ptr>();
+                auto inv = py::cast<SymmetricTensor::Ptr>(invariant_part);
                 inv->allow_charge_leg_label = true;
                 if (charged_state.is_none()) {
                     throw std::invalid_argument(
@@ -66,7 +66,7 @@ bind_tensors_charged_tensor(nb::module_& m)
           if (obj.is_none()) {
               throw std::invalid_argument("ChargedTensor.charged_state cannot be set to None");
           }
-          self.charged_state = obj.cast<BlockBackend::BlockPtr>();
+          self.charged_state = py::cast<BlockBackend::BlockPtr>(obj);
       });
     cls.def_ro("charge_leg", &ChargedTensor::charge_leg);
 
@@ -181,7 +181,7 @@ bind_tensors_charged_tensor(nb::module_& m)
          TensorBackend::Ptr backend,
          std::optional<std::string> label,
          std::optional<std::string> device) {
-          auto sp = space.cast<Leg::Ptr>();
+          auto sp = py::cast<Leg::Ptr>(space);
           if (!backend) {
               backend = get_backend(sp.symmetry());
           }
@@ -200,7 +200,7 @@ bind_tensors_charged_tensor(nb::module_& m)
     cls.def_static(
       "from_invariant_part",
       [](py::object invariant_part, py::object charged_state) {
-          auto inv = invariant_part.cast<SymmetricTensor::Ptr>();
+          auto inv = py::cast<SymmetricTensor::Ptr>(invariant_part);
           auto cs = py_optional_block(charged_state, inv->backend, inv->dtype, inv->device);
           return py_from_charged_or_scalar(ChargedTensor::from_invariant_part(inv, cs));
       },
@@ -211,7 +211,7 @@ bind_tensors_charged_tensor(nb::module_& m)
     cls.def_static(
       "from_two_charge_legs",
       [](py::object invariant_part, py::object state1, py::object state2) {
-          auto inv = invariant_part.cast<SymmetricTensor::Ptr>();
+          auto inv = py::cast<SymmetricTensor::Ptr>(invariant_part);
           if (state1.is_none() || state2.is_none()) {
               throw std::invalid_argument("from_two_charge_legs requires both state1 and state2");
           }

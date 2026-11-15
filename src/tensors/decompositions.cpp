@@ -35,31 +35,31 @@ namespace {
 bool
 is_Mask(py::object obj)
 {
-    return py_isinstance<Mask>(obj);
+    return py::isinstance<Mask>(obj);
 }
 
 bool
 is_DiagonalTensor(py::object obj)
 {
-    return py_isinstance<DiagonalTensor>(obj);
+    return py::isinstance<DiagonalTensor>(obj);
 }
 
 bool
 is_Identity(py::object obj)
 {
-    return py_isinstance<Identity>(obj);
+    return py::isinstance<Identity>(obj);
 }
 
 bool
 is_SymmetricTensor(py::object obj)
 {
-    return py_isinstance<SymmetricTensor>(obj);
+    return py::isinstance<SymmetricTensor>(obj);
 }
 
 bool
 is_ChargedTensor(py::object obj)
 {
-    return py_isinstance<ChargedTensor>(obj);
+    return py::isinstance<ChargedTensor>(obj);
 }
 
 bool
@@ -69,13 +69,13 @@ py_eq(py::object a, py::object b)
     if (eq.is(py::reinterpret_borrow<py::object>(Py_NotImplemented))) {
         return false;
     }
-    return eq.cast<bool>();
+    return py::to_bool(eq);
 }
 
 [[nodiscard]] Space::Ptr
 as_space_leg(py::object leg)
 {
-    auto space = leg.cast<Space::Ptr>();
+    auto space = py::cast<Space::Ptr>(leg);
     if (auto es = std::dynamic_pointer_cast<ElementarySpace>(space); es && es->is_pipe()) {
         throw std::invalid_argument("DiagonalTensor / Mask is not defined on LegPipes.");
     }
@@ -130,8 +130,9 @@ make_python_mask(TensorBackend::DataPtr data,
 py::object
 make_python_charged_tensor(py::object invariant_part, py::object charged_state)
 {
-    return py::cast(std::make_shared<ChargedTensor>(invariant_part.cast<SymmetricTensor::Ptr>(),
-                                                    charged_state.cast<BlockBackend::BlockPtr>()));
+    return py::cast(
+      std::make_shared<ChargedTensor>(py::cast<SymmetricTensor::Ptr>(invariant_part),
+                                      py::cast<BlockBackend::BlockPtr>(charged_state)));
 }
 
 py::object
@@ -152,7 +153,7 @@ leg_labels_from_py(py::object seq)
         if (item.is_none()) {
             out.push_back("");
         } else {
-            out.push_back(item.cast<std::string>());
+            out.push_back(py::cast<std::string>(item));
         }
     }
     return out;
@@ -170,7 +171,7 @@ py_label_as_string(py::handle obj)
     if (obj.is_none()) {
         return "";
     }
-    return obj.cast<std::string>();
+    return py::cast<std::string>(obj);
 }
 
 template<typename... Args>
@@ -211,10 +212,10 @@ is_inf_number(py::object n)
 {
     try {
         if (py::isinstance<py::float_>(n) || py::isinstance<py::int_>(n)) {
-            return std::isinf(n.cast<float64>());
+            return std::isinf(py::cast<float64>(n));
         }
         if (py::hasattr(n, "__float__")) {
-            return std::isinf(n.cast<float64>());
+            return std::isinf(py::cast<float64>(n));
         }
     } catch (...) {
     }
@@ -224,8 +225,8 @@ is_inf_number(py::object n)
 std::string
 same_device2(py::object t1, py::object t2, std::string const& error_msg = "Incompatible devices.")
 {
-    std::string device = t1.attr("device").cast<std::string>();
-    if (t2.attr("device").cast<std::string>() != device) {
+    std::string device = py::cast<std::string>(t1.attr("device"));
+    if (py::cast<std::string>(t2.attr("device")) != device) {
         throw std::invalid_argument(error_msg);
     }
     return device;
@@ -274,11 +275,11 @@ prepare_square_eigen(py::object tensor, bool new_leg_dual, char const* name)
         throw NotImplemented(std::string(name) + std::string(" for ChargedTensor"));
     }
     tensor = tensor.attr("as_SymmetricTensor")();
-    auto backend = tensor.attr("backend").cast<TensorBackend::Ptr>();
+    auto backend = py::cast<TensorBackend::Ptr>(tensor.attr("backend"));
     bool combined = false;
     if (!backend->can_decompose_tensors()) {
-        int64 n_cod = tensor.attr("num_codomain_legs").cast<int64>();
-        int64 n_legs = tensor.attr("num_legs").cast<int64>();
+        int64 n_cod = py::cast<int64>(tensor.attr("num_codomain_legs"));
+        int64 n_legs = py::cast<int64>(tensor.attr("num_legs"));
         std::vector<LegRef> cod_idcs;
         std::vector<LegRef> dom_idcs;
         for (int64 i = 0; i < n_cod; ++i) {
@@ -288,10 +289,10 @@ prepare_square_eigen(py::object tensor, bool new_leg_dual, char const* name)
             dom_idcs.emplace_back(i);
         }
         tensor = py::cast(
-          combine_legs(tensor.cast<TensorCPtr>(),
+          combine_legs(py::cast<TensorCPtr>(tensor),
                        { std::move(cod_idcs), std::move(dom_idcs) },
                        PipeDualities{ std::vector<bool>{ new_leg_dual, !new_leg_dual } }));
-        backend = tensor.attr("backend").cast<TensorBackend::Ptr>();
+        backend = py::cast<TensorBackend::Ptr>(tensor.attr("backend"));
         combined = true;
     }
     return { std::move(tensor), std::move(backend), combined };
@@ -303,7 +304,7 @@ sort_opt_from_py(py::object sort)
     if (sort.is_none()) {
         return std::nullopt;
     }
-    return sort.cast<std::string>();
+    return py::cast<std::string>(sort);
 }
 
 } // namespace
@@ -360,13 +361,13 @@ move_charge_leg(py::object tensor_part,
                 std::optional<int64> dpos)
 {
     return py::cast(move_leg(
-      tensor_part.cast<TensorCPtr>(), which, cpos, dpos, std::nullopt, BendRight{ false }));
+      py::cast<TensorCPtr>(tensor_part), which, cpos, dpos, std::nullopt, BendRight{ false }));
 }
 
 py::object
 split_one_leg(py::object tensor, int64 idx)
 {
-    return py::cast(split_legs(tensor.cast<TensorCPtr>(), std::vector<LegRef>{ idx }));
+    return py::cast(split_legs(py::cast<TensorCPtr>(tensor), std::vector<LegRef>{ idx }));
 }
 
 /// Labels of the hidden legs of `tensor`, without the ``!`` prefix.
@@ -412,14 +413,14 @@ rehide_factor(py::object factor, std::vector<std::string> const& hidden, int64 n
     if (which.empty()) {
         return factor;
     }
-    return py::cast(HiddenLegTensor::from_tensor(factor.cast<TensorPtr>(), std::move(which)));
+    return py::cast(HiddenLegTensor::from_tensor(py::cast<TensorPtr>(factor), std::move(which)));
 }
 
 py::object
 apply_mask_DiagonalTensor_py(py::object tensor, py::object mask)
 {
     same_device2(tensor, mask);
-    if (!mask.attr("is_projection").cast<bool>()) {
+    if (!py::to_bool(mask.attr("is_projection"))) {
         throw std::invalid_argument("mask must be a projection");
     }
     if (!py_eq(mask.attr("large_leg"), tensor.attr("leg"))) {
@@ -444,8 +445,8 @@ apply_mask_DiagonalTensor_py(py::object tensor, py::object mask)
                                                    *dt,
                                                    std::move(device_s)));
     }
-    auto data = backend->apply_mask_to_DiagonalTensor(tensor.cast<DiagonalTensorCPtr>(),
-                                                      mask.cast<MaskCPtr>());
+    auto data = backend->apply_mask_to_DiagonalTensor(py::cast<DiagonalTensorCPtr>(tensor),
+                                                      py::cast<MaskCPtr>(mask));
     return make_python_diagonal_tensor(
       std::move(data), mask.attr("small_leg"), backend, tensor.attr("labels").attr("as_list")());
 }
@@ -492,26 +493,26 @@ eigh_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object 
     }
     if (is_DiagonalTensor(tensor)) {
         std::string cod_lab =
-          tensor.attr("codomain_labels").attr("__getitem__")(0).cast<std::string>();
+          py::cast<std::string>(tensor.attr("codomain_labels").attr("__getitem__")(0));
         auto leg_sp = as_space_leg(tensor.attr("leg"));
         auto V = py::cast(
           SymmetricTensor::from_eye(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
                                       Leg{ std::dynamic_pointer_cast<ElementarySpace>(leg_sp) } }),
-                                    tensor.attr("backend").cast<TensorBackend::Ptr>(),
+                                    py::cast<TensorBackend::Ptr>(tensor.attr("backend")),
                                     LegLabelList{ cod_lab, a },
-                                    tensor.attr("dtype").cast<Dtype>(),
-                                    tensor.attr("device").cast<std::string>()));
+                                    py::cast<Dtype>(tensor.attr("dtype")),
+                                    py::cast<std::string>(tensor.attr("device"))));
         py::object W = tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true);
         W.attr("labels").attr("set")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
         return { W, V };
     }
     tensor = tensor.attr("as_SymmetricTensor")();
 
-    auto backend = tensor.attr("backend").cast<TensorBackend::Ptr>();
+    auto backend = py::cast<TensorBackend::Ptr>(tensor.attr("backend"));
     // If the backend requires it, combine legs first
     if (!backend->can_decompose_tensors()) {
-        int64 n_cod = tensor.attr("num_codomain_legs").cast<int64>();
-        int64 n_legs = tensor.attr("num_legs").cast<int64>();
+        int64 n_cod = py::cast<int64>(tensor.attr("num_codomain_legs"));
+        int64 n_legs = py::cast<int64>(tensor.attr("num_legs"));
         std::vector<LegRef> cod_idcs;
         std::vector<LegRef> dom_idcs;
         for (int64 i = 0; i < n_cod; ++i) {
@@ -521,19 +522,19 @@ eigh_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object 
             dom_idcs.emplace_back(i);
         }
         tensor = py::cast(
-          combine_legs(tensor.cast<TensorCPtr>(),
+          combine_legs(py::cast<TensorCPtr>(tensor),
                        { std::move(cod_idcs), std::move(dom_idcs) },
                        PipeDualities{ std::vector<bool>{ new_leg_dual, !new_leg_dual } }));
-        backend = tensor.attr("backend").cast<TensorBackend::Ptr>();
+        backend = py::cast<TensorBackend::Ptr>(tensor.attr("backend"));
     }
 
     std::optional<std::string> sort_opt;
     if (!sort.is_none()) {
-        sort_opt = sort.cast<std::string>();
+        sort_opt = py::cast<std::string>(sort);
     }
     // first, compute a decomposition where the new leg is a ket space
     auto [w_data, v_data, new_leg] =
-      backend->eigh(tensor.cast<SymmetricTensorCPtr>(), new_leg_dual, sort_opt);
+      backend->eigh(py::cast<SymmetricTensorCPtr>(tensor), new_leg_dual, sort_opt);
     py::object W = make_python_diagonal_tensor(std::move(w_data),
                                                py::cast(new_leg),
                                                backend,
@@ -547,7 +548,7 @@ eigh_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object 
 
     // undo the combine
     if (!backend->can_decompose_tensors()) {
-        V = py::cast(split_legs(V.cast<TensorCPtr>(), std::vector<LegRef>{ int64{ 0 } }));
+        V = py::cast(split_legs(py::cast<TensorCPtr>(V), std::vector<LegRef>{ int64{ 0 } }));
     }
 
     // if required, flip the leg duality
@@ -592,15 +593,15 @@ eig_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object s
     }
     if (is_DiagonalTensor(tensor)) {
         std::string cod_lab =
-          tensor.attr("codomain_labels").attr("__getitem__")(0).cast<std::string>();
+          py::cast<std::string>(tensor.attr("codomain_labels").attr("__getitem__")(0));
         auto leg_sp = as_space_leg(tensor.attr("leg"));
         auto V = py::cast(
           SymmetricTensor::from_eye(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{
                                       Leg{ std::dynamic_pointer_cast<ElementarySpace>(leg_sp) } }),
-                                    tensor.attr("backend").cast<TensorBackend::Ptr>(),
+                                    py::cast<TensorBackend::Ptr>(tensor.attr("backend")),
                                     LegLabelList{ cod_lab, a },
-                                    tensor.attr("dtype").cast<Dtype>(),
-                                    tensor.attr("device").cast<std::string>()));
+                                    py::cast<Dtype>(tensor.attr("dtype")),
+                                    py::cast<std::string>(tensor.attr("device"))));
         py::object W = tensor.attr("as_DiagonalTensor")(py::arg("guarantee_copy") = true);
         W.attr("labels").attr("set")(py_list(leg_label_to_py(b), leg_label_to_py(c)));
         return { W, V };
@@ -608,7 +609,7 @@ eig_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object s
 
     auto prep = prepare_square_eigen(tensor, new_leg_dual, "eig");
     auto [w_data, v_data, new_leg] = prep.backend->eig(
-      prep.tensor.cast<SymmetricTensorCPtr>(), new_leg_dual, sort_opt_from_py(sort));
+      py::cast<SymmetricTensorCPtr>(prep.tensor), new_leg_dual, sort_opt_from_py(sort));
     py::object W = make_python_diagonal_tensor(std::move(w_data),
                                                py::cast(new_leg),
                                                prep.backend,
@@ -620,7 +621,7 @@ eig_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::object s
       prep.backend,
       nested_labels_codomain_domain(prep.tensor.attr("codomain_labels"), leg_label_to_py(a)));
     if (prep.combined) {
-        V = py::cast(split_legs(V.cast<TensorCPtr>(), std::vector<LegRef>{ int64{ 0 } }));
+        V = py::cast(split_legs(py::cast<TensorCPtr>(V), std::vector<LegRef>{ int64{ 0 } }));
     }
     if (new_leg_dual != new_leg->is_dual) {
         throw NotImplemented("eig flip new_leg duality");
@@ -645,7 +646,7 @@ eigvalsh_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::obj
     }
     auto prep = prepare_square_eigen(tensor, new_leg_dual, "eigvalsh");
     auto [w_data, new_leg] = prep.backend->eigvalsh(
-      prep.tensor.cast<SymmetricTensorCPtr>(), new_leg_dual, sort_opt_from_py(sort));
+      py::cast<SymmetricTensorCPtr>(prep.tensor), new_leg_dual, sort_opt_from_py(sort));
     if (new_leg_dual != new_leg->is_dual) {
         throw NotImplemented("eigvalsh flip new_leg duality");
     }
@@ -672,7 +673,7 @@ eigvals_py(py::object tensor, py::object new_labels, bool new_leg_dual, py::obje
     }
     auto prep = prepare_square_eigen(tensor, new_leg_dual, "eigvals");
     auto [w_data, new_leg] = prep.backend->eigvals(
-      prep.tensor.cast<SymmetricTensorCPtr>(), new_leg_dual, sort_opt_from_py(sort));
+      py::cast<SymmetricTensorCPtr>(prep.tensor), new_leg_dual, sort_opt_from_py(sort));
     if (new_leg_dual != new_leg->is_dual) {
         throw NotImplemented("eigvals flip new_leg duality");
     }
@@ -697,9 +698,9 @@ entropy_py(py::object p, py::object n)
         if (is_inf_number(n)) {
             n_f = std::numeric_limits<float64>::infinity();
         } else {
-            n_f = n.cast<float64>();
+            n_f = py::cast<float64>(n);
         }
-        return py::cast(entropy(p.cast<DiagonalTensorCPtr>(), n_f));
+        return py::cast(entropy(py::cast<DiagonalTensorCPtr>(p), n_f));
     }
     // else: sequence of floats (kept for internal callers; pybind has its own path)
     auto arr = py::array_t<float64, py::array::c_style | py::array::forcecast>::ensure(p);
@@ -729,7 +730,7 @@ entropy_py(py::object p, py::object n)
         float64 mx = *std::max_element(vals.begin(), vals.end());
         return py::float_(-std::log(mx));
     }
-    float64 n_f = n.cast<float64>();
+    float64 n_f = py::cast<float64>(n);
     float64 sum = 0.;
     for (float64 x : vals) {
         sum += std::pow(x, n_f);
@@ -741,7 +742,7 @@ std::tuple<py::object, py::object>
 qr_py(py::object tensor, py::object new_labels, bool new_leg_dual, bool charge_leg_top)
 {
     if (is_ChargedTensor(tensor)) {
-        auto charged = tensor.cast<std::shared_ptr<ChargedTensor const>>();
+        auto charged = py::cast<std::shared_ptr<ChargedTensor const>>(tensor);
         py::object inv_part = py::cast(charged->invariant_part);
         if (!charge_leg_top) {
             inv_part = move_charge_leg(inv_part, charge_leg_label(), 0, std::nullopt);
@@ -759,7 +760,7 @@ qr_py(py::object tensor, py::object new_labels, bool new_leg_dual, bool charge_l
     auto [a, b] = _decomposition_labels(leg_labels_from_py(to_iterable(new_labels)));
     auto hidden = stripped_hidden_labels(tensor);
     auto [tens, new_co_domain, combine_codomain, combine_domain] =
-      _decomposition_prepare(tensor.cast<TensorCPtr>(), new_leg_dual);
+      _decomposition_prepare(py::cast<TensorCPtr>(tensor), new_leg_dual);
     auto backend = tens->backend;
     auto [q_data, r_data] = backend->qr(tens, new_co_domain);
     py::object Q = make_python_symmetric_tensor(
@@ -789,7 +790,7 @@ std::tuple<py::object, py::object>
 lq_py(py::object tensor, py::object new_labels, bool new_leg_dual, bool charge_leg_top)
 {
     if (is_ChargedTensor(tensor)) {
-        auto charged = tensor.cast<std::shared_ptr<ChargedTensor const>>();
+        auto charged = py::cast<std::shared_ptr<ChargedTensor const>>(tensor);
         py::object inv_part = py::cast(charged->invariant_part);
         if (!charge_leg_top) {
             inv_part = move_charge_leg(inv_part, charge_leg_label(), 0, std::nullopt);
@@ -807,7 +808,7 @@ lq_py(py::object tensor, py::object new_labels, bool new_leg_dual, bool charge_l
     auto [a, b] = _decomposition_labels(leg_labels_from_py(to_iterable(new_labels)));
     auto hidden = stripped_hidden_labels(tensor);
     auto [tens, new_co_domain, combine_codomain, combine_domain] =
-      _decomposition_prepare(tensor.cast<TensorCPtr>(), new_leg_dual);
+      _decomposition_prepare(py::cast<TensorCPtr>(tensor), new_leg_dual);
     auto backend = tens->backend;
     auto [l_data, q_data] = backend->lq(tens, new_co_domain);
     py::object L = make_python_symmetric_tensor(
@@ -844,7 +845,7 @@ svd_py(py::object tensor,
     // split legs, if they were previously combined
     // ---
     if (is_ChargedTensor(tensor)) {
-        auto charged = tensor.cast<std::shared_ptr<ChargedTensor const>>();
+        auto charged = py::cast<std::shared_ptr<ChargedTensor const>>(tensor);
         py::object inv_part = py::cast(charged->invariant_part);
         if (!charge_leg_top) {
             inv_part = move_charge_leg(inv_part, charge_leg_label(), 0, std::nullopt);
@@ -867,11 +868,11 @@ svd_py(py::object tensor,
     auto [a, b, c, d] = _svd_new_labels(svd_labs);
     auto hidden = stripped_hidden_labels(tensor);
     auto [tens, new_co_domain, combine_codomain, combine_domain] =
-      _decomposition_prepare(tensor.cast<TensorCPtr>(), new_leg_dual);
+      _decomposition_prepare(py::cast<TensorCPtr>(tensor), new_leg_dual);
     auto backend = tens->backend;
     std::optional<std::string> algo;
     if (!algorithm.is_none()) {
-        algo = algorithm.cast<std::string>();
+        algo = py::cast<std::string>(algorithm);
     }
     auto [u_data, s_data, vh_data] = backend->svd(tens, new_co_domain, algo);
     py::object U = make_python_symmetric_tensor(
@@ -905,7 +906,7 @@ svd_py(py::object tensor,
 std::tuple<py::object, py::object, py::object>
 svd_apply_mask_py(py::object U, py::object S, py::object Vh, py::object mask)
 {
-    if (!mask.attr("is_projection").cast<bool>()) {
+    if (!py::to_bool(mask.attr("is_projection"))) {
         throw std::invalid_argument("mask must be a projection");
     }
     if (!py_eq(mask.attr("domain").attr("__getitem__")(0),
@@ -913,10 +914,12 @@ svd_apply_mask_py(py::object U, py::object S, py::object Vh, py::object mask)
         throw std::invalid_argument("mask domain leg must match the singular-value tensor");
     }
 
-    U = py::cast(_compose_with_Mask(
-      U.cast<TensorCPtr>(), std::dynamic_pointer_cast<Mask>(dagger(mask.cast<TensorCPtr>())), -1));
+    U = py::cast(
+      _compose_with_Mask(py::cast<TensorCPtr>(U),
+                         std::dynamic_pointer_cast<Mask>(dagger(py::cast<TensorCPtr>(mask))),
+                         -1));
     S = apply_mask_DiagonalTensor_py(S, mask);
-    Vh = py::cast(_compose_with_Mask(Vh.cast<TensorCPtr>(), mask.cast<MaskCPtr>(), 0));
+    Vh = py::cast(_compose_with_Mask(py::cast<TensorCPtr>(Vh), py::cast<MaskCPtr>(mask), 0));
     return { U, S, Vh };
 }
 
@@ -930,12 +933,12 @@ truncate_singular_values_py(py::object S,
                             bool minimize_error,
                             py::object mask_labels)
 {
-    if (!S.attr("dtype").attr("is_real").cast<bool>()) {
+    if (!py::to_bool(S.attr("dtype").attr("is_real"))) {
         throw std::invalid_argument("truncate_singular_values requires a real dtype");
     }
-    auto backend = S.attr("backend").cast<TensorBackend::Ptr>();
+    auto backend = py::cast<TensorBackend::Ptr>(S.attr("backend"));
     auto [mask_data, new_leg, err, new_norm] =
-      backend->truncate_singular_values(S.cast<DiagonalTensorCPtr>(),
+      backend->truncate_singular_values(py::cast<DiagonalTensorCPtr>(S),
                                         chi_max,
                                         chi_min,
                                         degeneracy_tol,
@@ -973,13 +976,13 @@ truncated_svd_py(py::object tensor,
     // norm(S[mask]) == S_norm * new_norm
     // ---
     auto [U, S, Vh] = svd_py(tensor, new_labels, new_leg_dual, charge_leg_top, algorithm);
-    py::object S_norm_obj = py::cast(norm(S.cast<TensorCPtr>()));
+    py::object S_norm_obj = py::cast(norm(py::cast<TensorCPtr>(S)));
     // norm() returns a BlockBackend.Scalar (or number); normalize to float64.
     float64 S_norm;
     if (py::hasattr(S_norm_obj, "to_numpy")) {
-        S_norm = S_norm_obj.attr("to_numpy")().cast<float64>();
+        S_norm = py::cast<float64>(S_norm_obj.attr("to_numpy")());
     } else {
-        S_norm = S_norm_obj.cast<float64>();
+        S_norm = py::cast<float64>(S_norm_obj);
     }
     // S / S_norm via Python
     py::object S_normed = S.attr("__truediv__")(S_norm_obj);
@@ -1029,7 +1032,7 @@ BlockBackend::Scalar
 coerce_scalar_decomp(py::object o, TensorCPtr hint)
 {
     try {
-        return o.cast<BlockBackend::Scalar>();
+        return py::cast<BlockBackend::Scalar>(o);
     } catch (py::cast_error const&) {
     }
     return hint->backend->block_backend->as_scalar(o, hint->dtype);
@@ -1040,8 +1043,8 @@ coerce_scalar_decomp(py::object o, TensorCPtr hint)
 DiagonalTensorPtr
 apply_mask_DiagonalTensor(DiagonalTensorCPtr tensor, MaskCPtr mask)
 {
-    return apply_mask_DiagonalTensor_py(py::cast(tensor), py::cast(mask))
-      .cast<DiagonalTensorPtr>();
+    return py::cast<DiagonalTensorPtr>(
+      apply_mask_DiagonalTensor_py(py::cast(tensor), py::cast(mask)));
 }
 
 std::tuple<DiagonalTensorPtr, TensorPtr>
@@ -1052,7 +1055,7 @@ eigh(TensorCPtr tensor,
 {
     py::object sort_py = sort.has_value() ? py::cast(*sort) : py::none();
     auto [W, V] = eigh_py(py::cast(tensor), labels_to_py_opt(new_labels), new_leg_dual, sort_py);
-    return { W.cast<DiagonalTensorPtr>(), V.cast<TensorPtr>() };
+    return { py::cast<DiagonalTensorPtr>(W), py::cast<TensorPtr>(V) };
 }
 
 std::tuple<DiagonalTensorPtr, TensorPtr>
@@ -1060,7 +1063,7 @@ eig(TensorCPtr tensor, LegLabelList new_labels, bool new_leg_dual, std::optional
 {
     py::object sort_py = sort.has_value() ? py::cast(*sort) : py::none();
     auto [W, V] = eig_py(py::cast(tensor), labels_to_py_opt(new_labels), new_leg_dual, sort_py);
-    return { W.cast<DiagonalTensorPtr>(), V.cast<TensorPtr>() };
+    return { py::cast<DiagonalTensorPtr>(W), py::cast<TensorPtr>(V) };
 }
 
 DiagonalTensorPtr
@@ -1070,8 +1073,8 @@ eigvalsh(TensorCPtr tensor,
          std::optional<std::string> sort)
 {
     py::object sort_py = sort.has_value() ? py::cast(*sort) : py::none();
-    return eigvalsh_py(py::cast(tensor), labels_to_py_opt(new_labels), new_leg_dual, sort_py)
-      .cast<DiagonalTensorPtr>();
+    return py::cast<DiagonalTensorPtr>(
+      eigvalsh_py(py::cast(tensor), labels_to_py_opt(new_labels), new_leg_dual, sort_py));
 }
 
 DiagonalTensorPtr
@@ -1081,8 +1084,8 @@ eigvals(TensorCPtr tensor,
         std::optional<std::string> sort)
 {
     py::object sort_py = sort.has_value() ? py::cast(*sort) : py::none();
-    return eigvals_py(py::cast(tensor), labels_to_py_opt(new_labels), new_leg_dual, sort_py)
-      .cast<DiagonalTensorPtr>();
+    return py::cast<DiagonalTensorPtr>(
+      eigvals_py(py::cast(tensor), labels_to_py_opt(new_labels), new_leg_dual, sort_py));
 }
 
 BlockBackend::Scalar
@@ -1122,7 +1125,7 @@ lq(TensorCPtr tensor,
 {
     auto [L, Q] =
       lq_py(py::cast(tensor), labels_to_py_opt(new_labels), new_leg_dual, charge_leg_top);
-    return { L.cast<TensorPtr>(), Q.cast<TensorPtr>() };
+    return { py::cast<TensorPtr>(L), py::cast<TensorPtr>(Q) };
 }
 
 std::tuple<TensorPtr, TensorPtr>
@@ -1133,7 +1136,7 @@ qr(TensorCPtr tensor,
 {
     auto [Q, R] =
       qr_py(py::cast(tensor), labels_to_py_opt(new_labels), new_leg_dual, charge_leg_top);
-    return { Q.cast<TensorPtr>(), R.cast<TensorPtr>() };
+    return { py::cast<TensorPtr>(Q), py::cast<TensorPtr>(R) };
 }
 
 std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr>
@@ -1148,14 +1151,14 @@ svd(TensorCPtr tensor,
                              new_leg_dual,
                              charge_leg_top,
                              algo_to_py(algorithm));
-    return { U.cast<TensorPtr>(), S.cast<DiagonalTensorPtr>(), Vh.cast<TensorPtr>() };
+    return { py::cast<TensorPtr>(U), py::cast<DiagonalTensorPtr>(S), py::cast<TensorPtr>(Vh) };
 }
 
 std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr>
 svd_apply_mask(TensorCPtr U, DiagonalTensorCPtr S, TensorCPtr Vh, MaskCPtr mask)
 {
     auto [u, s, vh] = svd_apply_mask_py(py::cast(U), py::cast(S), py::cast(Vh), py::cast(mask));
-    return { u.cast<TensorPtr>(), s.cast<DiagonalTensorPtr>(), vh.cast<TensorPtr>() };
+    return { py::cast<TensorPtr>(u), py::cast<DiagonalTensorPtr>(s), py::cast<TensorPtr>(vh) };
 }
 
 std::tuple<MaskPtr, float64, float64>
@@ -1176,7 +1179,7 @@ truncate_singular_values(DiagonalTensorCPtr S,
                                                              svd_min,
                                                              minimize_error,
                                                              labels_to_py_opt(mask_labels));
-    return { mask.cast<MaskPtr>(), err, new_norm };
+    return { py::cast<MaskPtr>(mask), err, new_norm };
 }
 
 std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr, float64, float64>
@@ -1203,9 +1206,11 @@ truncated_svd(TensorCPtr tensor,
                                                          degeneracy_tol,
                                                          trunc_cut,
                                                          svd_min);
-    return {
-        U.cast<TensorPtr>(), S.cast<DiagonalTensorPtr>(), Vh.cast<TensorPtr>(), err, renormalize
-    };
+    return { py::cast<TensorPtr>(U),
+             py::cast<DiagonalTensorPtr>(S),
+             py::cast<TensorPtr>(Vh),
+             err,
+             renormalize };
 }
 
 } // namespace lasyten

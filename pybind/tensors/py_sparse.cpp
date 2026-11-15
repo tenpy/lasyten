@@ -22,7 +22,7 @@ optional_labels(py::object labels)
     if (labels.is_none()) {
         return std::nullopt;
     }
-    return labels.cast<LegLabelList>();
+    return py::cast<LegLabelList>(labels);
 }
 
 std::vector<std::string>
@@ -33,7 +33,7 @@ to_leg_labels(py::object maybe_labels)
         if (item.is_none()) {
             out.push_back("");
         } else {
-            out.push_back(item.cast<std::string>());
+            out.push_back(py::cast<std::string>(item));
         }
     }
     return out;
@@ -54,8 +54,8 @@ class PyLinearOperatorAdapter : public LinearOperator
     py::object original;
 
     explicit PyLinearOperatorAdapter(py::object op)
-      : LinearOperator(op.attr("vector_legs").cast<std::vector<Leg::Ptr>>(),
-                       op.attr("dtype").cast<Dtype>(),
+      : LinearOperator(py::cast<std::vector<Leg::Ptr>>(op.attr("vector_legs")),
+                       py::cast<Dtype>(op.attr("dtype")),
                        optional_vector_labels_from_py(op.attr("vector_labels")))
       , original(std::move(op))
     {
@@ -64,14 +64,14 @@ class PyLinearOperatorAdapter : public LinearOperator
     VectorLike::Ptr matvec(VectorLike::CPtr vec) override
     {
         auto res = original.attr("matvec")(py::cast(vec));
-        return res.cast<VectorLike::Ptr>();
+        return py::cast<VectorLike::Ptr>(res);
     }
 
     TensorPtr to_tensor(TensorBackend::Ptr backend = nullptr) override
     {
         py::object arg = backend ? py::cast(backend) : py::none();
         auto res = original.attr("to_tensor")(arg);
-        return res.cast<TensorPtr>();
+        return py::cast<TensorPtr>(res);
     }
 
     LinearOperator::Ptr adjoint() override;
@@ -81,7 +81,7 @@ LinearOperator::Ptr
 wrap_linear_operator(py::object op)
 {
     try {
-        return op.cast<LinearOperator::Ptr>();
+        return py::cast<LinearOperator::Ptr>(op);
     } catch (py::cast_error const&) {
         return std::make_shared<PyLinearOperatorAdapter>(std::move(op));
     }
@@ -197,7 +197,7 @@ bind_tensors_sparse(nb::module_& m)
                std::vector<LinearOperator::Ptr> more;
                more.reserve(more_ops.size());
                for (auto item : more_ops) {
-                   more.push_back(item.cast<LinearOperator::Ptr>());
+                   more.push_back(py::cast<LinearOperator::Ptr>(item));
                }
                return std::make_shared<SumLinearOperator>(std::move(original_operator),
                                                           std::move(more));

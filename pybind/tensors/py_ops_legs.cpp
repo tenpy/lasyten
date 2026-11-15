@@ -22,9 +22,9 @@ LegRef
 py_as_leg_ref(py::object obj)
 {
     if (py::isinstance<py::str>(obj)) {
-        return obj.cast<std::string>();
+        return py::cast<std::string>(obj);
     }
-    return obj.cast<int64>();
+    return py::cast<int64>(obj);
 }
 
 std::vector<LegRef>
@@ -57,11 +57,11 @@ py_is_public_idx(py::handle obj)
     if (py::isinstance<py::int_>(obj)) {
         return true;
     }
-    if (lasyten::py_isinstance<Sector>(obj)) {
+    if (py::isinstance<Sector>(obj)) {
         return false;
     }
     if (py::isinstance<py::array>(obj)) {
-        return obj.cast<py::array>().ndim() == 0;
+        return py::cast<py::array>(obj).ndim() == 0;
     }
     return false;
 }
@@ -71,19 +71,19 @@ py_slice_leg(TensorCPtr tensor, py::object leg, py::object idx_or_sector, py::ob
 {
     LegRef l = py_as_leg_ref(leg);
     if (!multiplicity.is_none() || !py_is_public_idx(idx_or_sector)) {
-        int64 m = multiplicity.is_none() ? 0 : multiplicity.cast<int64>();
-        return slice_leg(std::move(tensor), std::move(l), idx_or_sector.cast<Sector>(), m);
+        int64 m = multiplicity.is_none() ? 0 : py::cast<int64>(multiplicity);
+        return slice_leg(std::move(tensor), std::move(l), py::cast<Sector>(idx_or_sector), m);
     }
-    return slice_leg(std::move(tensor), std::move(l), idx_or_sector.cast<int64>());
+    return slice_leg(std::move(tensor), std::move(l), py::cast<int64>(idx_or_sector));
 }
 
 int64
 py_leg_idx(TensorCPtr const& tensor, py::object key)
 {
     if (py::isinstance<py::str>(key)) {
-        return tensor->labels.index(key.cast<std::string>());
+        return tensor->labels.index(py::cast<std::string>(key));
     }
-    return tensor->labels.index(key.cast<int64>());
+    return tensor->labels.index(py::cast<int64>(key));
 }
 
 std::optional<LevelsSpec>
@@ -103,7 +103,7 @@ py_as_levels(TensorCPtr const& tensor, py::object levels)
             if (val.is_none()) {
                 out[static_cast<std::size_t>(idx)] = std::nullopt;
             } else {
-                out[static_cast<std::size_t>(idx)] = val.cast<int64>();
+                out[static_cast<std::size_t>(idx)] = py::cast<int64>(val);
             }
         }
         return out;
@@ -113,7 +113,7 @@ py_as_levels(TensorCPtr const& tensor, py::object levels)
         if (o.is_none()) {
             out.push_back(std::nullopt);
         } else {
-            out.push_back(o.cast<int64>());
+            out.push_back(py::cast<int64>(o));
         }
     }
     return out;
@@ -127,7 +127,7 @@ py_as_bend_right(TensorCPtr const& tensor, py::object bend_right)
     }
     if (py::isinstance<py::bool_>(bend_right) ||
         py::isinstance(bend_right, py::module_::import("numpy").attr("bool_"))) {
-        return bend_right.cast<bool>();
+        return py::to_bool(bend_right);
     }
     if (py::isinstance<py::dict>(bend_right)) {
         std::vector<std::optional<bool>> out(static_cast<std::size_t>(tensor->num_legs),
@@ -140,7 +140,7 @@ py_as_bend_right(TensorCPtr const& tensor, py::object bend_right)
             if (val.is_none()) {
                 out[static_cast<std::size_t>(idx)] = std::nullopt;
             } else {
-                out[static_cast<std::size_t>(idx)] = val.cast<bool>();
+                out[static_cast<std::size_t>(idx)] = py::to_bool(val);
             }
         }
         return out;
@@ -152,12 +152,12 @@ py_as_bend_right(TensorCPtr const& tensor, py::object bend_right)
             if (o.is_none()) {
                 out.push_back(std::nullopt);
             } else {
-                out.push_back(o.cast<bool>());
+                out.push_back(py::to_bool(o));
             }
         }
         return out;
     }
-    return bend_right.cast<bool>();
+    return py::to_bool(bend_right);
 }
 
 std::optional<PipeDualities>
@@ -169,11 +169,11 @@ py_as_pipe_dualities(py::object obj)
     if (py::isinstance<py::bool_>(obj) ||
         py::isinstance(obj, py::module_::import("numpy").attr("bool_")) ||
         !py::isinstance<py::iterable>(obj) || py::isinstance<py::str>(obj)) {
-        return obj.cast<bool>();
+        return py::to_bool(obj);
     }
     std::vector<bool> out;
     for (auto item : obj) {
-        out.push_back(py::reinterpret_borrow<py::object>(item).cast<bool>());
+        out.push_back(py::to_bool(py::reinterpret_borrow<py::object>(item)));
     }
     return out;
 }
@@ -190,7 +190,7 @@ py_as_pipes(py::object obj)
         if (o.is_none()) {
             out.push_back(nullptr);
         } else {
-            out.push_back(o.cast<Leg::Ptr>());
+            out.push_back(py::cast<Leg::Ptr>(o));
         }
     }
     return out;
@@ -207,10 +207,10 @@ bind_tensors_ops_legs(nb::module_& m)
           std::optional<int64> n_cod;
           std::optional<int64> n_dom;
           if (!num_codomain_legs.is_none()) {
-              n_cod = num_codomain_legs.cast<int64>();
+              n_cod = py::cast<int64>(num_codomain_legs);
           }
           if (!num_domain_legs.is_none()) {
-              n_dom = num_domain_legs.cast<int64>();
+              n_dom = py::cast<int64>(num_domain_legs);
           }
           return bend_legs(std::move(tensor), n_cod, n_dom);
       },
@@ -291,10 +291,10 @@ In Python, ``codomain`` / ``domain`` are ``int``, ``str``, a sequence thereof, o
           std::optional<int64> cpos;
           std::optional<int64> dpos;
           if (!codomain_pos.is_none()) {
-              cpos = codomain_pos.cast<int64>();
+              cpos = py::cast<int64>(codomain_pos);
           }
           if (!domain_pos.is_none()) {
-              dpos = domain_pos.cast<int64>();
+              dpos = py::cast<int64>(domain_pos);
           }
           auto levels_opt = py_as_levels(tensor, levels);
           auto bend_opt = py_as_bend_right(tensor, bend_right);
@@ -342,10 +342,10 @@ In Python, ``which_leg`` is ``int | str``.
           std::optional<int64> cpos;
           std::optional<int64> dpos;
           if (!target_codomain_pos.is_none()) {
-              cpos = target_codomain_pos.cast<int64>();
+              cpos = py::cast<int64>(target_codomain_pos);
           }
           if (!target_domain_pos.is_none()) {
-              dpos = target_domain_pos.cast<int64>();
+              dpos = py::cast<int64>(target_domain_pos);
           }
           return move_hidden_leg(std::move(A),
                                  std::move(B),

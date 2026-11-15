@@ -32,13 +32,13 @@ class_attr(HighFive::Group& h5gr)
 hdf5_io::Hdf5Buffer
 buffer_from_numpy(py::array arr)
 {
-    if (!arr.attr("flags").attr("c_contiguous").cast<bool>())
+    if (!py::to_bool(arr.attr("flags").attr("c_contiguous")))
         arr = py::reinterpret_steal<py::array>(arr.attr("copy")("C").release());
     hdf5_io::Hdf5Buffer buf;
     py::dtype dt = arr.dtype();
     buf.kind = dt.kind();
     buf.itemsize = static_cast<int>(dt.itemsize());
-    if (buf.kind == 'b' || (buf.kind == 'i' && dt.attr("name").cast<std::string>() == "bool")) {
+    if (buf.kind == 'b' || (buf.kind == 'i' && py::cast<std::string>(dt.attr("name")) == "bool")) {
         buf.kind = 'b';
         buf.itemsize = 1;
     }

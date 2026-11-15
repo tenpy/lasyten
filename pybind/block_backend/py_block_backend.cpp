@@ -62,7 +62,7 @@ bool
 try_parse_int_index_sequence(const py::object& key, std::vector<int64>& indices)
 {
     if (is_py_integer_scalar(key)) {
-        indices = { key.cast<int64>() };
+        indices = { py::cast<int64>(key) };
         return true;
     }
     if (!py::isinstance<py::tuple>(key) && !py::isinstance<py::list>(key))
@@ -74,7 +74,7 @@ try_parse_int_index_sequence(const py::object& key, std::vector<int64>& indices)
         const py::handle item = seq[i];
         if (!is_py_integer_scalar(item))
             return false;
-        indices.push_back(item.cast<int64>());
+        indices.push_back(py::cast<int64>(item));
     }
     return true;
 }
@@ -381,9 +381,7 @@ bind_block_backend(nb::module_& m)
     block_cls
       .def_prop_ro(
         "shape",
-        [&](const BlockBackend::Block& self) {
-            return py::cast<py::tuple>(py::cast(self.shape()));
-        },
+        [&](const BlockBackend::Block& self) { return py::to_tuple(py::cast(self.shape())); },
         "The shape of the block.")
       .def_prop_ro("dtype", &BlockBackend::Block::dtype)
       .def_prop_ro("device", &BlockBackend::Block::device)
@@ -590,11 +588,11 @@ bind_block_backend(nb::module_& m)
       .def(
         "__setitem__",
         [](BlockBackend::Block& self, py::object key, py::object value) {
-            if (lasyten::py_isinstance<BlockBackend::Scalar>(value)) {
+            if (py::isinstance<BlockBackend::Scalar>(value)) {
                 std::vector<int64> indices;
                 if (try_parse_int_index_sequence(key, indices) &&
                     is_scalar_element_index(self, key, indices)) {
-                    const auto& scalar = value.cast<BlockBackend::Scalar>();
+                    const auto& scalar = py::cast<BlockBackend::Scalar>(value);
                     if (indices.size() == 1 && self.ndim() == 1 && is_py_integer_scalar(key))
                         self.set_item(indices[0], scalar);
                     else
@@ -603,14 +601,14 @@ bind_block_backend(nb::module_& m)
                 }
             }
             if (auto idcs = BlockBackend::try_py_key_to_block_indices(key)) {
-                if (lasyten::py_isinstance<BlockBackend::Block>(value)) {
+                if (py::isinstance<BlockBackend::Block>(value)) {
                     self.set_item(std::span<const BlockBackend::BlockIndex>(*idcs),
-                                  value.cast<BlockBackend::Block&>());
+                                  py::cast<BlockBackend::Block&>(value));
                     return;
                 }
-                if (lasyten::py_isinstance<BlockBackend::Scalar>(value)) {
+                if (py::isinstance<BlockBackend::Scalar>(value)) {
                     self.set_item(std::span<const BlockBackend::BlockIndex>(*idcs),
-                                  value.cast<BlockBackend::Scalar&>());
+                                  py::cast<BlockBackend::Scalar&>(value));
                     return;
                 }
             }
@@ -671,14 +669,14 @@ bind_block_backend(nb::module_& m)
            [](const BlockBackend& self) { return self.get_backend_name() + std::string("()"); })
       .def("__eq__",
            [](BlockBackend const& self, py::object other) {
-               if (!lasyten::py_isinstance<BlockBackend>(other)) {
+               if (!py::isinstance<BlockBackend>(other)) {
                    return false;
                }
-               return self == other.cast<BlockBackend const&>();
+               return self == py::cast<BlockBackend const&>(other);
            })
       .def(
         "as_scalar",
-        [](BlockBackend& self, py::bool_ value) { return self.as_scalar(value.cast<bool>()); },
+        [](BlockBackend& self, py::bool_ value) { return self.as_scalar(py::to_bool(value)); },
         nb::arg("value"),
         "Convert a Python bool to a scalar block.")
       .def("as_scalar",
@@ -713,7 +711,7 @@ bind_block_backend(nb::module_& m)
             std::vector<BlockBackend::LegCPtr> legs;
             for (py::handle item : legs_obj) {
                 // Legs may be ElementarySpace / LegPipe / AbelianLegPipe; all register as Leg.
-                legs.push_back(item.cast<Leg::Ptr>());
+                legs.push_back(py::cast<Leg::Ptr>(item));
             }
             return self.apply_basis_perm(block, legs, inv);
         },
@@ -965,7 +963,7 @@ bind_block_backend(nb::module_& m)
       .def(
         "get_shape",
         [](BlockBackend& self, const BlockCPtr& a) {
-            return py::cast<py::tuple>(py::cast(self.get_shape(a)));
+            return py::to_tuple(py::cast(self.get_shape(a)));
         },
         nb::arg("a"))
       .def("split_legs",

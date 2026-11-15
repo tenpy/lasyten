@@ -1,15 +1,15 @@
 #pragma once
 
+#include <lasyten/lasyten.h>
 #include <lasyten/tools/hdf5.h>
 
 #include <highfive/highfive.hpp>
-#include <pybind11/pybind11.h>
 #include <string>
 #include <type_traits>
 
 namespace lasyten::hdf5 {
 
-namespace py = pybind11;
+namespace py = lasyten::py;
 
 /// RAII: bind Python Hdf5Saver/Loader for nested duck-typed save/load during migration.
 /// Nestable: restores the previous TLS binding on destruction.

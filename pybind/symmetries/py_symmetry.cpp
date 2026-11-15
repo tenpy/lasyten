@@ -23,11 +23,11 @@ flatten_factors_from_python(py::sequence seq)
 {
     std::vector<SymmetryFactor::Ptr> out;
     for (auto item : seq) {
-        if (lasyten::py_isinstance<Symmetry>(item)) {
-            auto const& sym = item.cast<Symmetry const&>();
+        if (py::isinstance<Symmetry>(item)) {
+            auto const& sym = py::cast<Symmetry const&>(item);
             out.insert(out.end(), sym.factors.begin(), sym.factors.end());
         } else {
-            out.push_back(item.cast<SymmetryFactor::Ptr>());
+            out.push_back(py::cast<SymmetryFactor::Ptr>(item));
         }
     }
     return out;
@@ -75,13 +75,13 @@ bind_symmetry(nb::module_& m)
     cls
       .def(
         "as_Symmetry",
-        [](py::object self) { return self.cast<Symmetry::Ptr>(); },
+        [](py::object self) { return py::cast<Symmetry::Ptr>(self); },
         DOC(lasyten, Symmetry, as_Symmetry))
       .def(
         "is_valid_sector",
         [](Symmetry const& self, py::object a) {
-            if (lasyten::py_isinstance<Sector>(a)) {
-                return self.is_valid_sector(a.cast<Sector>());
+            if (py::isinstance<Sector>(a)) {
+                return self.is_valid_sector(py::cast<Sector>(a));
             }
             if (!py::isinstance<py::array>(a)) {
                 return false;
@@ -97,8 +97,8 @@ bind_symmetry(nb::module_& m)
       .def(
         "are_valid_sectors",
         [](Symmetry const& self, py::object sectors) {
-            if (lasyten::py_isinstance<SectorArray>(sectors)) {
-                return self.are_valid_sectors(sectors.cast<SectorArray>());
+            if (py::isinstance<SectorArray>(sectors)) {
+                return self.are_valid_sectors(py::cast<SectorArray>(sectors));
             }
             if (!py::isinstance<py::array>(sectors)) {
                 return false;
@@ -123,11 +123,11 @@ bind_symmetry(nb::module_& m)
       .def(
         "has_factor",
         [](Symmetry const& self, py::object other) {
-            if (lasyten::py_isinstance<SymmetryFactor>(other)) {
-                return self.has_factor(other.cast<SymmetryFactor const&>());
+            if (py::isinstance<SymmetryFactor>(other)) {
+                return self.has_factor(py::cast<SymmetryFactor const&>(other));
             }
             // type check: any factor isinstance of the given type
-            if (py::isinstance<py::type>(other)) {
+            if (PyType_Check(other.ptr())) {
                 for (auto const& f : self.factors) {
                     if (py::isinstance(py::cast(f), other)) {
                         return true;
@@ -206,11 +206,11 @@ bind_symmetry(nb::module_& m)
         "is_equivalent_to",
         [](Symmetry const& self, py::object other, bool strict_ordering) {
             Symmetry::Ptr other_sym;
-            if (lasyten::py_isinstance<Symmetry>(other)) {
-                other_sym = other.cast<Symmetry::Ptr>();
-            } else if (lasyten::py_isinstance<SymmetryFactor>(other)) {
+            if (py::isinstance<Symmetry>(other)) {
+                other_sym = py::cast<Symmetry::Ptr>(other);
+            } else if (py::isinstance<SymmetryFactor>(other)) {
                 other_sym = std::make_shared<Symmetry>(
-                  std::vector<SymmetryFactor::Ptr>{ other.cast<SymmetryFactor::Ptr>() });
+                  std::vector<SymmetryFactor::Ptr>{ py::cast<SymmetryFactor::Ptr>(other) });
             } else {
                 throw py::type_error("Expected Symmetry or SymmetryFactor");
             }
@@ -223,18 +223,18 @@ bind_symmetry(nb::module_& m)
       .def("__str__", &Symmetry::str)
       .def("__eq__",
            [](Symmetry const& self, py::object other) {
-               if (!lasyten::py_isinstance<Symmetry>(other)) {
+               if (!py::isinstance<Symmetry>(other)) {
                    return false;
                }
-               return self.equals(other.cast<Symmetry const&>());
+               return self.equals(py::cast<Symmetry const&>(other));
            })
       .def("__mul__",
            [](Symmetry const& self, py::object other) -> py::object {
-               if (lasyten::py_isinstance<Symmetry>(other)) {
-                   return py::cast(self.mul(other.cast<Symmetry const&>()));
+               if (py::isinstance<Symmetry>(other)) {
+                   return py::cast(self.mul(py::cast<Symmetry const&>(other)));
                }
-               if (lasyten::py_isinstance<SymmetryFactor>(other)) {
-                   return py::cast(self.mul(other.cast<SymmetryFactor::Ptr>()));
+               if (py::isinstance<SymmetryFactor>(other)) {
+                   return py::cast(self.mul(py::cast<SymmetryFactor::Ptr>(other)));
                }
                return py::reinterpret_borrow<py::object>(py::handle(Py_NotImplemented));
            })

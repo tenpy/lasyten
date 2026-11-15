@@ -2,7 +2,9 @@
 
 #include <lasyten/lasyten.h>
 
+#include <nanobind/make_iterator.h>
 #include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
 #include <nanobind/operators.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/complex.h>
@@ -22,34 +24,30 @@
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
 
-// nanobind casters for the pybind11 object types that still appear in the public C++ API
-// (py::object, py::array, py::dict, ...). Phase 4 removes them from include/lasyten/.
-#include "py_pybind11_bridge.h"
-// nanobind casters for Leg / FusionSymbol: must be visible in *every* binding TU (otherwise
-// nanobind silently falls back to the generic "unbound type" caster and fails at runtime).
+// nanobind casters for Leg / FusionSymbol / numpy adapters live next to the types and in
+// lasyten/detail/python_api.h (liblasyten and the bindings must convert them identically).
 #include "symmetries/casters.hpp"
 
 namespace lasyten {
 
-// ``lasyten::py`` is pybind11 (declared in lasyten.h; needed by the C++ API) and ``lasyten::nb``
-// is nanobind. Binding code registers classes / functions through ``nb::`` and keeps using
-// ``py::object`` etc. only where the C++ API demands it; both interoperate on ``PyObject*``.
+// ``lasyten::nb`` is nanobind; ``lasyten::py`` is the thin compatibility namespace over it
+// (include/lasyten/detail/python_api.h: ``py::object`` is ``nb::object``, ...).
 
 // the _core.cpp file implements the main nanobind python module lasyten._core with all python
 // bindings.
 
 /// Variadic arguments arrive as ``nb::args`` / ``nb::kwargs`` (nanobind's special parameter
-/// types). The remaining binding code works with the pybind11 object API, so reinterpret them.
-inline py::args
+/// types).
+inline nb::args const&
 pyargs(nb::args const& a)
 {
-    return py::reinterpret_borrow<py::args>(py::handle(a.ptr()));
+    return a;
 }
 
-inline py::kwargs
+inline nb::kwargs const&
 pykwargs(nb::kwargs const& k)
 {
-    return py::reinterpret_borrow<py::kwargs>(py::handle(k.ptr()));
+    return k;
 }
 
 /// Constructor binding for a bound class ``T``.

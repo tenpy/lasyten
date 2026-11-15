@@ -79,7 +79,7 @@ SymmetricTensor::test_sanity() const
     bool is_diagonal = dynamic_cast<DiagonalTensor const*>(this) != nullptr;
     if (!is_diagonal && Py_IsInitialized()) {
         try {
-            is_diagonal = py_isinstance<DiagonalTensor>(py::cast(shared_from_this()));
+            is_diagonal = py::isinstance<DiagonalTensor>(py::cast(shared_from_this()));
         } catch (py::error_already_set& e) {
             e.restore();
             PyErr_Clear();
@@ -543,7 +543,7 @@ SymmetricTensor::from_tree_pairs(py::object trees_obj,
                                  std::optional<Dtype> dtype,
                                  std::optional<std::string> device)
 {
-    py::dict trees = trees_obj.cast<py::dict>();
+    py::dict trees = py::to_dict(trees_obj);
     if (py::len(trees) == 0) {
         if (!dtype.has_value()) {
             throw std::invalid_argument("dtype is required if trees is empty");
@@ -567,7 +567,7 @@ SymmetricTensor::from_tree_pairs(py::object trees_obj,
     std::string device_s;
     if (!device.has_value()) {
         auto some_block = backend_tp->block_backend->as_block(
-          py::reinterpret_borrow<py::object>(trees.begin()->second));
+          py::reinterpret_borrow<py::object>((*trees.begin()).second));
         device_s = backend_tp->block_backend->get_device(some_block);
     } else {
         device_s = *device;
@@ -588,9 +588,9 @@ SymmetricTensor::from_tree_pairs(py::object trees_obj,
     // Match Python: convert BlockLikes in-place so callers can use block.to_numpy().
     for (auto item : trees) {
         auto key_obj = py::reinterpret_borrow<py::object>(item.first);
-        auto key_tup = key_obj.cast<py::tuple>();
-        FusionTree X = key_tup[0].cast<FusionTree>();
-        FusionTree Y = key_tup[1].cast<FusionTree>();
+        auto key_tup = py::to_tuple(key_obj);
+        FusionTree X = py::cast<FusionTree>(key_tup[0]);
+        FusionTree Y = py::cast<FusionTree>(key_tup[1]);
         if (X.coupled != Y.coupled) {
             throw std::invalid_argument("fusion-tree pair must share the same coupled sector");
         }

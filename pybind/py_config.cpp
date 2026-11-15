@@ -3,7 +3,7 @@
 #include "py_lasyten_nanobind.h"
 #include "tools/hdf5_bind.h"
 
-namespace py = pybind11;
+namespace py = lasyten::py;
 namespace lasyten {
 
 namespace {

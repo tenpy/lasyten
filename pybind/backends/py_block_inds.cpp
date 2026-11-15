@@ -38,7 +38,7 @@ indices_from_py(py::handle key, std::size_t n_rows)
     try {
         if (!py::isinstance<py::slice>(key) && !py::isinstance<py::tuple>(key) &&
             !py::isinstance<py::list>(key) && !py::isinstance<py::array>(key)) {
-            auto i = key.cast<std::ptrdiff_t>();
+            auto i = py::cast<std::ptrdiff_t>(key);
             if (i < 0) {
                 i += static_cast<std::ptrdiff_t>(n_rows);
             }
@@ -50,7 +50,7 @@ indices_from_py(py::handle key, std::size_t n_rows)
     } catch (py::cast_error const&) {
     }
     if (py::isinstance<py::slice>(key)) {
-        auto sl = key.cast<py::slice>();
+        auto sl = py::cast<py::slice>(key);
         size_t start = 0, stop = 0, step = 0, slicelength = 0;
         if (!sl.compute(n_rows, &start, &stop, &step, &slicelength)) {
             throw py::error_already_set();
@@ -66,7 +66,7 @@ indices_from_py(py::handle key, std::size_t n_rows)
         throw py::type_error("BlockInds indices must be int, slice, or array");
     }
     if (arr.ndim() == 0) {
-        auto i = arr.cast<std::ptrdiff_t>();
+        auto i = py::cast<std::ptrdiff_t>(arr);
         if (i < 0) {
             i += static_cast<std::ptrdiff_t>(n_rows);
         }
@@ -170,16 +170,16 @@ bind_block_inds(nb::module_& m)
       .def("__eq__",
            [](BlockInds const& self, py::object other) -> py::object {
                py::object self_np = block_inds_to_numpy(self);
-               if (lasyten::py_isinstance<BlockInds>(other)) {
-                   other = block_inds_to_numpy(other.cast<BlockInds>());
+               if (py::isinstance<BlockInds>(other)) {
+                   other = block_inds_to_numpy(py::cast<BlockInds>(other));
                }
                return self_np.attr("__eq__")(other);
            })
       .def("__ne__",
            [](BlockInds const& self, py::object other) -> py::object {
                py::object self_np = block_inds_to_numpy(self);
-               if (lasyten::py_isinstance<BlockInds>(other)) {
-                   other = block_inds_to_numpy(other.cast<BlockInds>());
+               if (py::isinstance<BlockInds>(other)) {
+                   other = block_inds_to_numpy(py::cast<BlockInds>(other));
                }
                return self_np.attr("__ne__")(other);
            })
@@ -218,14 +218,14 @@ bind_block_inds(nb::module_& m)
            [](BlockInds const& self, py::object key) -> py::object {
                // ``arr[:, ::-1]`` / ``arr[rows, cols]``
                if (py::isinstance<py::tuple>(key)) {
-                   py::tuple t = key.cast<py::tuple>();
+                   py::tuple t = py::to_tuple(key);
                    if (t.size() != 2) {
                        throw py::type_error("BlockInds 2D indexing expects two indices");
                    }
                    // column-only slice with full rows: arr[:, cols]
                    bool rows_all = py::isinstance<py::slice>(t[0]);
                    if (rows_all) {
-                       auto sl = t[0].cast<py::slice>();
+                       auto sl = py::cast<py::slice>(t[0]);
                        size_t start = 0, stop = 0, step = 0, slicelength = 0;
                        if (!sl.compute(self.nrows(), &start, &stop, &step, &slicelength)) {
                            throw py::error_already_set();
@@ -240,11 +240,11 @@ bind_block_inds(nb::module_& m)
                                if (py::isinstance<py::ellipsis>(t[1])) {
                                    return py::cast(taken);
                                }
-                               return py::cast(taken.take_columns(
-                                 col_indices_from_slice(t[1].cast<py::slice>(), taken.ncols())));
+                               return py::cast(taken.take_columns(col_indices_from_slice(
+                                 py::cast<py::slice>(t[1]), taken.ncols())));
                            }
                            if (py::isinstance<py::int_>(t[1])) {
-                               auto c = t[1].cast<std::ptrdiff_t>();
+                               auto c = py::cast<std::ptrdiff_t>(t[1]);
                                if (c < 0) {
                                    c += static_cast<std::ptrdiff_t>(taken.ncols());
                                }
@@ -262,7 +262,7 @@ bind_block_inds(nb::module_& m)
                        // full row range: column select only
                        if (py::isinstance<py::ellipsis>(t[1]) ||
                            (py::isinstance<py::slice>(t[1]) && [&] {
-                               auto sl = t[1].cast<py::slice>();
+                               auto sl = py::cast<py::slice>(t[1]);
                                size_t start = 0, stop = 0, step = 0, slicelength = 0;
                                sl.compute(self.ncols(), &start, &stop, &step, &slicelength);
                                return start == 0 && stop == self.ncols() && step == 1;
@@ -271,10 +271,10 @@ bind_block_inds(nb::module_& m)
                        }
                        if (py::isinstance<py::slice>(t[1])) {
                            return py::cast(self.take_columns(
-                             col_indices_from_slice(t[1].cast<py::slice>(), self.ncols())));
+                             col_indices_from_slice(py::cast<py::slice>(t[1]), self.ncols())));
                        }
                        if (py::isinstance<py::int_>(t[1])) {
-                           auto c = t[1].cast<std::ptrdiff_t>();
+                           auto c = py::cast<std::ptrdiff_t>(t[1]);
                            if (c < 0) {
                                c += static_cast<std::ptrdiff_t>(self.ncols());
                            }
@@ -288,8 +288,8 @@ bind_block_inds(nb::module_& m)
                    }
                    // scalar element: arr[i, j]
                    if (py::isinstance<py::int_>(t[0]) && py::isinstance<py::int_>(t[1])) {
-                       auto r = t[0].cast<std::ptrdiff_t>();
-                       auto c = t[1].cast<std::ptrdiff_t>();
+                       auto r = py::cast<std::ptrdiff_t>(t[0]);
+                       auto c = py::cast<std::ptrdiff_t>(t[1]);
                        if (r < 0) {
                            r += static_cast<std::ptrdiff_t>(self.nrows());
                        }
@@ -319,7 +319,8 @@ bind_block_inds(nb::module_& m)
                            }
                            return py::cast(taken);
                        }
-                       auto cols = col_indices_from_slice(t[1].cast<py::slice>(), taken.ncols());
+                       auto cols =
+                         col_indices_from_slice(py::cast<py::slice>(t[1]), taken.ncols());
                        // full column range on a single integer row → 1D numpy
                        if (rows.size() == 1 && py::isinstance<py::int_>(t[0]) &&
                            cols.size() == taken.ncols()) {
@@ -336,7 +337,7 @@ bind_block_inds(nb::module_& m)
                    if (py::isinstance<py::int_>(t[1])) {
                        auto rows = indices_from_py(t[0], self.nrows());
                        BlockInds taken = self.take(rows);
-                       auto c = t[1].cast<std::ptrdiff_t>();
+                       auto c = py::cast<std::ptrdiff_t>(t[1]);
                        if (c < 0) {
                            c += static_cast<std::ptrdiff_t>(taken.ncols());
                        }
@@ -375,7 +376,7 @@ bind_block_inds(nb::module_& m)
                if (idx.size() == 1 && !py::isinstance<py::slice>(key) &&
                    !py::isinstance<py::array>(key) && !py::isinstance<py::list>(key)) {
                    try {
-                       (void)key.cast<std::ptrdiff_t>();
+                       (void)py::cast<std::ptrdiff_t>(key);
                        auto row = self.row(idx[0]);
                        py::array_t<int64> arr(static_cast<py::ssize_t>(row.size()));
                        if (!row.empty()) {

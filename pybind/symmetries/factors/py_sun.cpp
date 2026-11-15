@@ -20,10 +20,10 @@ std::string
 path_from_file_or_str(py::handle obj)
 {
     if (py::isinstance<py::str>(obj)) {
-        return obj.cast<std::string>();
+        return py::cast<std::string>(obj);
     }
     // Open h5py.File (or anything with a .filename attribute).
-    return py::str(obj.attr("filename")).cast<std::string>();
+    return py::cast<std::string>(py::str(obj.attr("filename")));
 }
 
 py::dict
@@ -183,9 +183,9 @@ bind_sun(nb::module_& m)
             if (py::hasattr(group, "id")) {
                 py::object idobj = group.attr("id");
                 if (py::hasattr(idobj, "id")) {
-                    hid = idobj.attr("id").cast<hid_t>();
+                    hid = py::cast<hid_t>(idobj.attr("id"));
                 } else {
-                    hid = idobj.cast<hid_t>();
+                    hid = py::cast<hid_t>(idobj);
                 }
             } else {
                 throw py::type_error("has_data_in_group expects an h5py Group/Dataset");

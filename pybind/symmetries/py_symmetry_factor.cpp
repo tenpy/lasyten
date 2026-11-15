@@ -46,8 +46,8 @@ bind_symmetry_factor(nb::module_& m)
       .def(
         "is_valid_sector",
         [](SymmetryFactor const& self, py::object a) {
-            if (lasyten::py_isinstance<Sector>(a)) {
-                return self.is_valid_sector(a.cast<Sector>());
+            if (py::isinstance<Sector>(a)) {
+                return self.is_valid_sector(py::cast<Sector>(a));
             }
             if (!py::isinstance<py::array>(a)) {
                 return false;
@@ -63,8 +63,8 @@ bind_symmetry_factor(nb::module_& m)
       .def(
         "are_valid_sectors",
         [](SymmetryFactor const& self, py::object sectors) {
-            if (lasyten::py_isinstance<SectorArray>(sectors)) {
-                return self.are_valid_sectors(sectors.cast<SectorArray>());
+            if (py::isinstance<SectorArray>(sectors)) {
+                return self.are_valid_sectors(py::cast<SectorArray>(sectors));
             }
             if (!py::isinstance<py::array>(sectors)) {
                 return false;
@@ -85,10 +85,10 @@ bind_symmetry_factor(nb::module_& m)
       .def(
         "is_equivalent_to",
         [](SymmetryFactor& self, py::object other) {
-            if (lasyten::py_isinstance<Symmetry>(other)) {
-                return other.attr("is_equivalent_to")(py::cast(self)).cast<bool>();
+            if (py::isinstance<Symmetry>(other)) {
+                return py::to_bool(other.attr("is_equivalent_to")(py::cast(self)));
             }
-            return self._is_equivalent_factor(other.cast<SymmetryFactor const&>());
+            return self._is_equivalent_factor(py::cast<SymmetryFactor const&>(other));
         },
         nb::arg("other"))
       .def("_is_equivalent_factor",
@@ -100,20 +100,20 @@ bind_symmetry_factor(nb::module_& m)
         [](py::object self) {
             // Use the Python-held shared_ptr; shared_from_this fails with smart_holder
             // trampolines.
-            auto ptr = self.cast<SymmetryFactor::Ptr>();
+            auto ptr = py::cast<SymmetryFactor::Ptr>(self);
             return std::make_shared<Symmetry>(std::vector<SymmetryFactor::Ptr>{ ptr });
         },
         DOC(lasyten, SymmetryFactor, as_Symmetry))
       .def("__str__", &SymmetryFactor::str)
       .def("__mul__",
            [](py::object self, py::object other) -> py::object {
-               auto self_ptr = self.cast<SymmetryFactor::Ptr>();
-               if (lasyten::py_isinstance<SymmetryFactor>(other)) {
+               auto self_ptr = py::cast<SymmetryFactor::Ptr>(self);
+               if (py::isinstance<SymmetryFactor>(other)) {
                    return py::cast(std::make_shared<Symmetry>(std::vector<SymmetryFactor::Ptr>{
-                     self_ptr, other.cast<SymmetryFactor::Ptr>() }));
+                     self_ptr, py::cast<SymmetryFactor::Ptr>(other) }));
                }
-               if (lasyten::py_isinstance<Symmetry>(other)) {
-                   auto const& sym = other.cast<Symmetry const&>();
+               if (py::isinstance<Symmetry>(other)) {
+                   auto const& sym = py::cast<Symmetry const&>(other);
                    std::vector<SymmetryFactor::Ptr> factors;
                    factors.reserve(1 + sym.factors.size());
                    factors.push_back(self_ptr);
@@ -124,10 +124,10 @@ bind_symmetry_factor(nb::module_& m)
            })
       .def("__eq__",
            [](SymmetryFactor const& self, py::object other) {
-               if (!lasyten::py_isinstance<SymmetryFactor>(other)) {
+               if (!py::isinstance<SymmetryFactor>(other)) {
                    return false;
                }
-               return self.equals(other.cast<SymmetryFactor const&>());
+               return self.equals(py::cast<SymmetryFactor const&>(other));
            })
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5_const<SymmetryFactor>(),

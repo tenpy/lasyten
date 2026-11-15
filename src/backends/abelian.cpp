@@ -331,8 +331,8 @@ to_block_inds(py::object obj)
 py::slice
 slice_pair(py::object pair)
 {
-    return py::slice(pair.attr("__getitem__")(0).cast<py::ssize_t>(),
-                     pair.attr("__getitem__")(1).cast<py::ssize_t>(),
+    return py::slice(py::cast<py::ssize_t>(pair.attr("__getitem__")(0)),
+                     py::cast<py::ssize_t>(pair.attr("__getitem__")(1)),
                      1);
 }
 
@@ -385,7 +385,7 @@ make_data(Dtype dtype,
 std::vector<int64>
 mults_of(py::object leg)
 {
-    return leg.attr("multiplicities").cast<std::vector<int64>>();
+    return py::cast<std::vector<int64>>(leg.attr("multiplicities"));
 }
 
 std::vector<int64>
@@ -397,7 +397,7 @@ mults_of(Leg::Ptr const& leg)
 int64
 nsec(py::object leg)
 {
-    return leg.attr("num_sectors").cast<int64>();
+    return py::cast<int64>(leg.attr("num_sectors"));
 }
 
 int64
@@ -410,7 +410,7 @@ bool
 sector_sorted(py::object leg)
 {
     py::object so = leg.attr("sector_order");
-    return (!so.is_none()) && so.cast<std::string>() == "sorted";
+    return (!so.is_none()) && py::cast<std::string>(so) == "sorted";
 }
 
 py::object
@@ -424,7 +424,7 @@ take_rows_obj(py::object arr, py::object perm)
 std::vector<BlockBackend::BlockPtr>
 permute_blocks(std::vector<BlockBackend::BlockPtr> const& blocks, py::array const& perm)
 {
-    auto p = perm.cast<py::array_t<int64>>();
+    auto p = py::cast<py::array_t<int64>>(perm);
     auto buf = p.unchecked<1>();
     std::vector<BlockBackend::BlockPtr> out;
     out.reserve(static_cast<std::size_t>(buf.shape(0)));
@@ -575,7 +575,7 @@ AbelianBackend::test_tensor_sanity(TensorCPtr a, bool is_diagonal)
     py::object raw = py::cast(a).attr("data");
     AbelianBackendData::Ptr data;
     try {
-        data = unwrap(raw.cast<DataPtr>());
+        data = unwrap(py::cast<DataPtr>(raw));
     } catch (...) {
         return;
     }
@@ -634,7 +634,7 @@ AbelianBackend::test_mask_sanity(MaskCPtr a)
     py::object raw = py::cast(a).attr("data");
     AbelianBackendData::Ptr data;
     try {
-        data = unwrap(raw.cast<DataPtr>());
+        data = unwrap(py::cast<DataPtr>(raw));
     } catch (...) {
         return;
     }
@@ -1148,7 +1148,7 @@ AbelianBackend::diagonal_transpose(DiagonalTensorCPtr tens)
     // --- hints from Python AbelianBackend.diagonal_transpose ---
     // OPTIMIZE copy needed?
     // ---
-    auto leg = py::cast(tens->leg()).cast<Space::Ptr>();
+    auto leg = py::cast<Space::Ptr>(py::cast(tens->leg()));
     return { leg->dual_space(), copy_data(tens) };
 }
 
@@ -1344,8 +1344,8 @@ AbelianBackend::combine_legs(TensorCPtr tensor,
             py::object row_slices = block_slices.attr("__getitem__")(row);
             for (py::ssize_t ax = 0; ax < num_result_legs; ++ax) {
                 py::object be = row_slices.attr("__getitem__")(ax);
-                slc_list.append(py::slice(be.attr("__getitem__")(0).cast<py::ssize_t>(),
-                                          be.attr("__getitem__")(1).cast<py::ssize_t>(),
+                slc_list.append(py::slice(py::cast<py::ssize_t>(be.attr("__getitem__")(0)),
+                                          py::cast<py::ssize_t>(be.attr("__getitem__")(1)),
                                           1));
             }
             auto combined = block_backend->combine_legs(
@@ -1780,7 +1780,7 @@ AbelianBackend::diagonal_from_sector_block_func(SectorBlockFactoryFn func,
 {
     py::object leg = py::cast(co_domain->factors[0]);
     auto block_inds = BlockInds::arange_diag(static_cast<std::size_t>(nsec(leg)));
-    auto sectors = leg.attr("sector_decomposition").cast<SectorArray>();
+    auto sectors = py::cast<SectorArray>(leg.attr("sector_decomposition"));
     auto mults = mults_of(leg);
     std::vector<BlockBackend::BlockPtr> blocks;
     for (std::size_t i = 0; i < mults.size(); ++i) {
@@ -1802,7 +1802,7 @@ AbelianBackend::diagonal_tensor_to_block(DiagonalTensorCPtr a)
     auto a_data = data_from_tensor(a);
     auto leg = py::cast(a->leg());
     auto res =
-      block_backend->zeros({ static_cast<int64>(leg.attr("dim").cast<float64>()) }, a->dtype);
+      block_backend->zeros({ static_cast<int64>(py::cast<float64>(leg.attr("dim"))) }, a->dtype);
     auto const& bi = a_data->block_inds;
     for (std::size_t i = 0; i < a_data->blocks.size(); ++i) {
         auto slc =
@@ -1823,7 +1823,7 @@ AbelianBackend::diagonal_to_mask(DiagonalTensorCPtr tens)
     std::vector<Sector> sectors_vec;
     std::vector<int64> multiplicities;
     py::list basis_perm_ranks;
-    auto defining = large_leg.attr("defining_sectors").cast<SectorArray>();
+    auto defining = py::cast<SectorArray>(large_leg.attr("defining_sectors"));
     auto const& bi = tens_data->block_inds;
     for (std::size_t n = 0; n < tens_data->blocks.size(); ++n) {
         auto const& diag_block = tens_data->blocks[n];
@@ -1838,16 +1838,17 @@ AbelianBackend::diagonal_to_mask(DiagonalTensorCPtr tens)
             py::array mask = block_backend->to_numpy(diag_block, py_bool_dtype());
             // fallback: to_numpy with bool dtype
             try {
-                mask = block_backend->to_numpy(diag_block, dtype::to_numpy_dtype(Dtype::Bool))
-                         .cast<py::array>();
+                mask = py::cast<py::array>(
+                  block_backend->to_numpy(diag_block, dtype::to_numpy_dtype(Dtype::Bool)));
             } catch (...) {
-                mask = block_backend->to_numpy(diag_block).cast<py::array>();
+                mask = py::cast<py::array>(block_backend->to_numpy(diag_block));
             }
             auto slc = slice_pair(large_leg.attr("slices").attr("__getitem__")(bii));
             basis_perm_ranks.append(basis_perm.attr("__getitem__")(slc).attr("__getitem__")(mask));
         }
     }
-    SectorArray sectors = py::cast(tens->symmetry).attr("empty_sector_array").cast<SectorArray>();
+    SectorArray sectors =
+      py::cast<SectorArray>(py::cast(tens->symmetry).attr("empty_sector_array"));
     std::optional<std::vector<int64>> basis_perm_opt = std::nullopt;
     BlockInds block_inds;
     if (blocks.empty()) {
@@ -1870,10 +1871,10 @@ AbelianBackend::diagonal_to_mask(DiagonalTensorCPtr tens)
     }
     auto data = make_data(Dtype::Bool, tens_data->device, std::move(blocks), block_inds, true);
     auto small_leg =
-      std::make_shared<ElementarySpace>(py::cast(tens->symmetry).cast<Symmetry::Ptr>(),
+      std::make_shared<ElementarySpace>(py::cast<Symmetry::Ptr>(py::cast(tens->symmetry)),
                                         std::move(sectors),
                                         multiplicities,
-                                        large_leg.attr("is_dual").cast<bool>(),
+                                        py::to_bool(large_leg.attr("is_dual")),
                                         basis_perm_opt);
     return { wrap(data), small_leg };
 }
@@ -1892,7 +1893,7 @@ AbelianBackend::eigh(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<std
     // ---
     require_matrix_form(a, "eigh");
     auto a_data = data_from_tensor(a);
-    auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
+    auto domain = py::cast<TensorProduct::Ptr>(py::cast(a->domain));
     auto new_leg = domain->as_ElementarySpace(new_leg_dual);
     auto v_wrapped = eye_data(domain, a->dtype, a_data->device);
     auto v_data = unwrap(v_wrapped);
@@ -1914,7 +1915,7 @@ AbelianBackend::eig(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<std:
 {
     require_matrix_form(a, "eig");
     auto a_data = data_from_tensor(a);
-    auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
+    auto domain = py::cast<TensorProduct::Ptr>(py::cast(a->domain));
     auto new_leg = domain->as_ElementarySpace(new_leg_dual);
     Dtype cdtype = dtype::to_complex(a->dtype);
     auto v_wrapped = eye_data(domain, cdtype, a_data->device);
@@ -1936,7 +1937,7 @@ AbelianBackend::eigvalsh(SymmetricTensorCPtr a, bool new_leg_dual, std::optional
 {
     require_matrix_form(a, "eigvalsh");
     auto a_data = data_from_tensor(a);
-    auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
+    auto domain = py::cast<TensorProduct::Ptr>(py::cast(a->domain));
     auto new_leg = domain->as_ElementarySpace(new_leg_dual);
     std::vector<BlockBackend::BlockPtr> w_blocks;
     std::optional<std::string> sort_opt = sort;
@@ -1953,7 +1954,7 @@ AbelianBackend::eigvals(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<
 {
     require_matrix_form(a, "eigvals");
     auto a_data = data_from_tensor(a);
-    auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
+    auto domain = py::cast<TensorProduct::Ptr>(py::cast(a->domain));
     auto new_leg = domain->as_ElementarySpace(new_leg_dual);
     Dtype cdtype = dtype::to_complex(a->dtype);
     std::vector<BlockBackend::BlockPtr> w_blocks;
@@ -2083,7 +2084,7 @@ AbelianBackend::from_grid(std::vector<std::vector<py::object>> grid,
             py::object op = grid[i][j];
             if (op.is_none())
                 continue;
-            auto op_t = op.cast<TensorCPtr>();
+            auto op_t = py::cast<TensorCPtr>(op);
             auto op_data = data_from_tensor(op_t);
             auto const& op_bi = op_data->block_inds;
             for (std::size_t bi_row = 0; bi_row < op_data->blocks.size(); ++bi_row) {
@@ -2093,14 +2094,14 @@ AbelianBackend::from_grid(std::vector<std::vector<py::object>> grid,
                     .attr("sector_decomposition")
                     .attr("__getitem__")(op_bi(static_cast<py::ssize_t>(bi_row), 0));
                 int64 left_ind =
-                  new_cod0.attr("sector_decomposition_where")(left_sector).cast<int64>();
+                  py::cast<int64>(new_cod0.attr("sector_decomposition_where")(left_sector));
                 int64 right_bi = op_bi(static_cast<py::ssize_t>(bi_row), n_cod);
                 auto right_sector = py::cast(op_t->domain)
                                       .attr("__getitem__")(-1)
                                       .attr("sector_decomposition")
                                       .attr("__getitem__")(right_bi);
                 int64 right_ind =
-                  new_dom_last.attr("sector_decomposition_where")(right_sector).cast<int64>();
+                  py::cast<int64>(new_dom_last.attr("sector_decomposition_where")(right_sector));
 
                 py::list new_bi_list;
                 new_bi_list.append(left_ind);
@@ -2112,7 +2113,8 @@ AbelianBackend::from_grid(std::vector<std::vector<py::object>> grid,
                 std::vector<int64> new_bi_row;
                 new_bi_row.reserve(static_cast<std::size_t>(py::len(new_bi_list)));
                 for (auto item : new_bi_list)
-                    new_bi_row.push_back(py::reinterpret_borrow<py::object>(item).cast<int64>());
+                    new_bi_row.push_back(
+                      py::cast<int64>(py::reinterpret_borrow<py::object>(item)));
                 BlockInds new_bi = BlockInds::from_row(new_bi_row);
 
                 std::size_t block_idx;
@@ -2229,18 +2231,18 @@ AbelianBackend::from_tree_pairs(
         std::vector<std::uint8_t> dual_c;
         for (int64 n = 0; n < codomain->num_factors; ++n) {
             py::object f = py::cast(codomain->factors[static_cast<std::size_t>(n)]);
-            auto secs = f.attr("sector_decomposition").cast<SectorArray>();
+            auto secs = py::cast<SectorArray>(f.attr("sector_decomposition"));
             unc_c.push_back(secs[static_cast<std::size_t>(bi(r, n))]);
-            dual_c.push_back(static_cast<std::uint8_t>(f.attr("is_dual").cast<bool>()));
+            dual_c.push_back(static_cast<std::uint8_t>(py::to_bool(f.attr("is_dual"))));
         }
         SectorArray unc_d = SectorArray::empty(domain->symmetry->sector_ind_len);
         std::vector<std::uint8_t> dual_d;
         for (int64 n = 0; n < domain->num_factors; ++n) {
             py::object f = py::cast(domain->factors[static_cast<std::size_t>(n)]);
-            auto secs = f.attr("sector_decomposition").cast<SectorArray>();
+            auto secs = py::cast<SectorArray>(f.attr("sector_decomposition"));
             unc_d.push_back(
               secs[static_cast<std::size_t>(bi(r, static_cast<py::ssize_t>(bi.ncols()) - 1 - n))]);
-            dual_d.push_back(static_cast<std::uint8_t>(f.attr("is_dual").cast<bool>()));
+            dual_d.push_back(static_cast<std::uint8_t>(py::to_bool(f.attr("is_dual"))));
         }
         FusionTree X = FusionTree::from_abelian_symmetry(codomain->symmetry, unc_c, dual_c);
         FusionTree Y = FusionTree::from_abelian_symmetry(domain->symmetry, unc_d, dual_d);
@@ -2343,7 +2345,7 @@ AbelianBackend::inner(SymmetricTensorCPtr a, SymmetricTensorCPtr b, bool do_dagg
     auto b_blocks = b_data->blocks;
     std::vector<int64> nsecs;
     for (auto const& leg : py::cast(a->legs()))
-        nsecs.push_back(leg.attr("num_sectors").cast<int64>());
+        nsecs.push_back(py::cast<int64>(leg.attr("num_sectors")));
     auto strides_vec = make_stride(nsecs, /*cstyle=*/false);
     auto a_keys = a_data->block_inds.pack(strides_vec);
     std::vector<int64> b_keys;
@@ -2417,15 +2419,13 @@ AbelianBackend::inv_part_to_dense_block_single_sector(SymmetricTensorCPtr tensor
         return b_get(data->blocks[0],
                      py::make_tuple(py::slice(std::nullopt, std::nullopt, std::nullopt), 0));
     }
-    auto sector = py::cast(tensor->domain)
-                    .attr("__getitem__")(0)
-                    .attr("sector_decomposition")
-                    .attr("__getitem__")(0)
-                    .cast<Sector>();
-    int64 dim = py::cast(tensor->codomain)
-                  .attr("__getitem__")(0)
-                  .attr("sector_multiplicity")(py::cast(sector))
-                  .cast<int64>();
+    auto sector = py::cast<Sector>(py::cast(tensor->domain)
+                                     .attr("__getitem__")(0)
+                                     .attr("sector_decomposition")
+                                     .attr("__getitem__")(0));
+    int64 dim = py::cast<int64>(py::cast(tensor->codomain)
+                                  .attr("__getitem__")(0)
+                                  .attr("sector_multiplicity")(py::cast(sector)));
     return block_backend->zeros({ dim }, data->dtype);
 }
 
@@ -2515,14 +2515,14 @@ AbelianBackend::lq(SymmetricTensorCPtr tensor, TensorProduct::Ptr new_co_domain)
           int64 k = static_cast<int64>(ki);
           int64 n = n_enum++;
           py::object sector = py::cast(codom_secs[static_cast<std::size_t>(j)]);
-          if (cod0.attr("sector_order").cast<std::string>() != "sorted")
-              j = cod0.attr("sector_decomposition_where")(sector).cast<int64>();
-          if (dom0.attr("sector_order").cast<std::string>() != "sorted") {
-              k = dom0.attr("sector_decomposition_where")(sector).cast<int64>();
+          if (py::cast<std::string>(cod0.attr("sector_order")) != "sorted")
+              j = py::cast<int64>(cod0.attr("sector_decomposition_where")(sector));
+          if (py::cast<std::string>(dom0.attr("sector_order")) != "sorted") {
+              k = py::cast<int64>(dom0.attr("sector_decomposition_where")(sector));
               i = static_cast<int64>(a_block_inds.searchsorted_column(1, k));
           }
-          if (new_leg.attr("sector_order").cast<std::string>() != "sorted")
-              n = new_leg.attr("sector_decomposition_where")(sector).cast<int64>();
+          if (py::cast<std::string>(new_leg.attr("sector_order")) != "sorted")
+              n = py::cast<int64>(new_leg.attr("sector_decomposition_where")(sector));
 
           if (i < static_cast<int64>(a_block_inds.nrows()) &&
               a_block_inds(static_cast<std::size_t>(i), 0) == j) {
@@ -2544,8 +2544,8 @@ AbelianBackend::lq(SymmetricTensorCPtr tensor, TensorProduct::Ptr new_co_domain)
       });
     BlockInds l_bi = l_blocks.empty() ? zeros_i64(0, 2) : block_inds_from_py_rows(l_block_inds);
     BlockInds q_bi = q_blocks.empty() ? zeros_i64(0, 2) : block_inds_from_py_rows(q_block_inds);
-    bool l_sorted = new_leg.attr("sector_order").cast<std::string>() == "sorted";
-    bool q_sorted = dom0.attr("sector_order").cast<std::string>() == "sorted";
+    bool l_sorted = py::cast<std::string>(new_leg.attr("sector_order")) == "sorted";
+    bool q_sorted = py::cast<std::string>(dom0.attr("sector_order")) == "sorted";
     return { wrap(make_data(tensor->dtype, a_data->device, std::move(l_blocks), l_bi, l_sorted)),
              wrap(make_data(tensor->dtype, a_data->device, std::move(q_blocks), q_bi, q_sorted)) };
 }
@@ -2573,7 +2573,7 @@ AbelianBackend::mask_binary_operand(MaskCPtr mask1, MaskCPtr mask2, BlockBinaryF
     std::size_t i1 = 0, i2 = 0;
     int64 b1_i1 = mask1_bi.nrows() == 0 ? -1 : mask1_bi(0, 1);
     int64 b2_i2 = mask2_bi.nrows() == 0 ? -1 : mask2_bi(0, 1);
-    auto defining = large_leg.attr("defining_sectors").cast<SectorArray>();
+    auto defining = py::cast<SectorArray>(large_leg.attr("defining_sectors"));
     auto slices = large_leg.attr("slices");
     auto mults = mults_of(large_leg);
     for (std::size_t sector_idx = 0; sector_idx < defining.size(); ++sector_idx) {
@@ -2602,12 +2602,13 @@ AbelianBackend::mask_binary_operand(MaskCPtr mask1, MaskCPtr mask2, BlockBinaryF
         sectors_vec.push_back(defining[sector_idx]);
         multiplicities.push_back(mult);
         if (!basis_perm.is_none()) {
-            py::array mask = block_backend->to_numpy(new_block).cast<py::array>();
+            py::array mask = py::cast<py::array>(block_backend->to_numpy(new_block));
             auto slc = slice_pair(slices.attr("__getitem__")(static_cast<int64>(sector_idx)));
             basis_perm_ranks.append(basis_perm.attr("__getitem__")(slc).attr("__getitem__")(mask));
         }
     }
-    SectorArray sectors = py::cast(mask1->symmetry).attr("empty_sector_array").cast<SectorArray>();
+    SectorArray sectors =
+      py::cast<SectorArray>(py::cast(mask1->symmetry).attr("empty_sector_array"));
     std::optional<std::vector<int64>> basis_perm_opt = std::nullopt;
     BlockInds block_inds;
     if (blocks.empty()) {
@@ -2628,10 +2629,10 @@ AbelianBackend::mask_binary_operand(MaskCPtr mask1, MaskCPtr mask2, BlockBinaryF
     }
     auto data = make_data(Dtype::Bool, mask1->device, std::move(blocks), block_inds, true);
     auto small_leg =
-      std::make_shared<ElementarySpace>(py::cast(mask1->symmetry).cast<Symmetry::Ptr>(),
+      std::make_shared<ElementarySpace>(py::cast<Symmetry::Ptr>(py::cast(mask1->symmetry)),
                                         std::move(sectors),
                                         multiplicities,
-                                        large_leg.attr("is_dual").cast<bool>(),
+                                        py::to_bool(large_leg.attr("is_dual")),
                                         basis_perm_opt);
     return { wrap(data), small_leg };
 }
@@ -2740,7 +2741,7 @@ AbelianBackend::_mask_contract(TensorCPtr tensor, MaskCPtr mask, int64 leg_idx, 
       make_data(tensor->dtype, tensor->device, std::move(res_blocks), res_block_inds, false);
     TensorProduct::Ptr codomain, domain;
     if (in_domain) {
-        codomain = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
+        codomain = py::cast<TensorProduct::Ptr>(py::cast(tensor->codomain));
         auto spaces = tensor->domain->factors;
         spaces[static_cast<std::size_t>(co_domain_idx)] =
           large_leg ? Leg{ mask->small_leg() } : Leg{ mask->large_leg() };
@@ -2765,7 +2766,7 @@ AbelianBackend::mask_from_block(BlockBackend::BlockPtr a, Space::Ptr large_leg)
     std::vector<Sector> sectors_vec;
     std::vector<int64> multiplicities;
     py::list basis_perm_ranks;
-    auto defining = large_leg_obj.attr("defining_sectors").cast<SectorArray>();
+    auto defining = py::cast<SectorArray>(large_leg_obj.attr("defining_sectors"));
     auto slices = large_leg_obj.attr("slices");
     for (std::size_t bi_large = 0; bi_large < defining.size(); ++bi_large) {
         auto slc = slice_pair(slices.attr("__getitem__")(static_cast<int64>(bi_large)));
@@ -2778,13 +2779,13 @@ AbelianBackend::mask_from_block(BlockBackend::BlockPtr a, Space::Ptr large_leg)
         sectors_vec.push_back(defining[bi_large]);
         multiplicities.push_back(mult);
         if (!basis_perm.is_none()) {
-            py::array mask = block_backend->to_numpy(block).cast<py::array>();
+            py::array mask = py::cast<py::array>(block_backend->to_numpy(block));
             basis_perm_ranks.append(
               large_leg_obj.attr("basis_perm").attr("__getitem__")(slc).attr("__getitem__")(mask));
         }
     }
     SectorArray sectors =
-      large_leg_obj.attr("symmetry").attr("empty_sector_array").cast<SectorArray>();
+      py::cast<SectorArray>(large_leg_obj.attr("symmetry").attr("empty_sector_array"));
     std::optional<std::vector<int64>> basis_perm_opt = std::nullopt;
     BlockInds block_inds;
     if (blocks.empty()) {
@@ -2810,7 +2811,7 @@ AbelianBackend::mask_from_block(BlockBackend::BlockPtr a, Space::Ptr large_leg)
     auto small_leg = std::make_shared<ElementarySpace>(large_leg->symmetry,
                                                        std::move(sectors),
                                                        multiplicities,
-                                                       large_leg_obj.attr("is_dual").cast<bool>(),
+                                                       py::to_bool(large_leg_obj.attr("is_dual")),
                                                        basis_perm_opt);
     return { wrap(data), small_leg };
 }
@@ -2820,8 +2821,8 @@ AbelianBackend::mask_to_block(MaskCPtr a)
 {
     auto a_data = data_from_tensor(a);
     auto large_leg = py::cast(a->large_leg());
-    auto res = block_backend->zeros({ static_cast<int64>(large_leg.attr("dim").cast<float64>()) },
-                                    Dtype::Bool);
+    auto res = block_backend->zeros(
+      { static_cast<int64>(py::cast<float64>(large_leg.attr("dim"))) }, Dtype::Bool);
     bool is_projection = a->is_projection;
     auto const& bi = a_data->block_inds;
     for (std::size_t i = 0; i < a_data->blocks.size(); ++i) {
@@ -2854,8 +2855,8 @@ AbelianBackend::mask_transpose(MaskCPtr tens)
     auto data = data_from_tensor(tens);
     auto block_inds = data->block_inds.reverse_columns();
     auto out = make_data(tens->dtype, data->device, data->blocks, block_inds, false);
-    auto cod = py::cast(tens->codomain).attr("__getitem__")(0).attr("dual").cast<Space::Ptr>();
-    auto dom = py::cast(tens->domain).attr("__getitem__")(0).attr("dual").cast<Space::Ptr>();
+    auto cod = py::cast<Space::Ptr>(py::cast(tens->codomain).attr("__getitem__")(0).attr("dual"));
+    auto dom = py::cast<Space::Ptr>(py::cast(tens->domain).attr("__getitem__")(0).attr("dual"));
     return { cod, dom, wrap(out) };
 }
 
@@ -2876,7 +2877,7 @@ AbelianBackend::mask_unary_operand(MaskCPtr mask, BlockUnaryFn func)
     py::list basis_perm_ranks;
     std::size_t i = 0;
     int64 b_i = mask_bi.nrows() == 0 ? -1 : mask_bi(0, 1);
-    auto defining = large_leg.attr("defining_sectors").cast<SectorArray>();
+    auto defining = py::cast<SectorArray>(large_leg.attr("defining_sectors"));
     auto slices = large_leg.attr("slices");
     auto mults = mults_of(large_leg);
     for (std::size_t sector_idx = 0; sector_idx < defining.size(); ++sector_idx) {
@@ -2897,13 +2898,14 @@ AbelianBackend::mask_unary_operand(MaskCPtr mask, BlockUnaryFn func)
         sectors_vec.push_back(defining[sector_idx]);
         multiplicities.push_back(mult);
         if (!basis_perm.is_none()) {
-            py::array mask_np = block_backend->to_numpy(new_block).cast<py::array>();
+            py::array mask_np = py::cast<py::array>(block_backend->to_numpy(new_block));
             auto slc = slice_pair(slices.attr("__getitem__")(static_cast<int64>(sector_idx)));
             basis_perm_ranks.append(
               large_leg.attr("basis_perm").attr("__getitem__")(slc).attr("__getitem__")(mask_np));
         }
     }
-    SectorArray sectors = py::cast(mask->symmetry).attr("empty_sector_array").cast<SectorArray>();
+    SectorArray sectors =
+      py::cast<SectorArray>(py::cast(mask->symmetry).attr("empty_sector_array"));
     std::optional<std::vector<int64>> basis_perm_opt = std::nullopt;
     BlockInds block_inds;
     if (blocks.empty()) {
@@ -2924,10 +2926,10 @@ AbelianBackend::mask_unary_operand(MaskCPtr mask, BlockUnaryFn func)
     }
     auto data = make_data(Dtype::Bool, mask_data->device, std::move(blocks), block_inds, true);
     auto small_leg =
-      std::make_shared<ElementarySpace>(py::cast(mask->symmetry).cast<Symmetry::Ptr>(),
+      std::make_shared<ElementarySpace>(py::cast<Symmetry::Ptr>(py::cast(mask->symmetry)),
                                         std::move(sectors),
                                         multiplicities,
-                                        large_leg.attr("is_dual").cast<bool>(),
+                                        py::to_bool(large_leg.attr("is_dual")),
                                         basis_perm_opt);
     return { wrap(data), small_leg };
 }
@@ -2937,8 +2939,8 @@ AbelianBackend::mul(BlockBackend::Scalar a, TensorCPtr b)
 {
     auto b_data = data_from_tensor(b);
     if (is_zero_scalar(a))
-        return zero_data(py::cast(b->codomain).cast<TensorProduct::Ptr>(),
-                         py::cast(b->domain).cast<TensorProduct::Ptr>(),
+        return zero_data(py::cast<TensorProduct::Ptr>(py::cast(b->codomain)),
+                         py::cast<TensorProduct::Ptr>(py::cast(b->domain)),
                          b->dtype,
                          b_data->device);
     std::vector<BlockBackend::BlockPtr> blocks;
@@ -3079,7 +3081,7 @@ AbelianBackend::partial_compose(SymmetricTensorCPtr a,
     for (std::size_t i = 0; i < perm_a.size(); ++i) {
         if (static_cast<int64>(i) < a_n_legs - num_contr_legs)
             mod_codomain_legs.push_back(
-              py::cast(a).attr("_as_codomain_leg")(perm_a[i]).cast<Leg::Ptr>());
+              py::cast<Leg::Ptr>(py::cast(a).attr("_as_codomain_leg")(perm_a[i])));
     }
     auto mod_codomain = std::make_shared<TensorProduct>(mod_codomain_legs, a->symmetry);
 
@@ -3087,17 +3089,17 @@ AbelianBackend::partial_compose(SymmetricTensorCPtr a,
     for (std::size_t i = 0; i < perm_b.size(); ++i) {
         if (static_cast<int64>(i) >= num_contr_legs)
             mod_domain_legs.push_back(
-              py::cast(b).attr("_as_domain_leg")(perm_b[i]).cast<Leg::Ptr>());
+              py::cast<Leg::Ptr>(py::cast(b).attr("_as_domain_leg")(perm_b[i])));
     }
     std::reverse(mod_domain_legs.begin(), mod_domain_legs.end());
-    auto mod_domain = std::make_shared<TensorProduct>(mod_domain_legs,
-                                                      py::cast(a->symmetry).cast<Symmetry::Ptr>());
+    auto mod_domain = std::make_shared<TensorProduct>(
+      mod_domain_legs, py::cast<Symmetry::Ptr>(py::cast(a->symmetry)));
 
     std::vector<Leg::Ptr> contr_spaces;
     for (std::size_t i = 0; i < perm_b.size(); ++i) {
         if (static_cast<int64>(i) < num_contr_legs)
             contr_spaces.push_back(
-              py::cast(b).attr("get_leg_co_domain")(perm_b[i]).cast<Leg::Ptr>());
+              py::cast<Leg::Ptr>(py::cast(b).attr("get_leg_co_domain")(perm_b[i])));
     }
 
     auto res_data =
@@ -3168,15 +3170,15 @@ AbelianBackend::partial_trace(SymmetricTensorCPtr tensor,
         } else {
             auto leg1 = py::cast(tensor).attr("get_leg_co_domain")(idcs1[n]);
             auto leg2 = py::cast(tensor).attr("get_leg_co_domain")(idcs2[n]);
-            auto secs1 = leg1.attr("sector_decomposition").cast<SectorArray>();
-            auto secs2 = leg2.attr("sector_decomposition").cast<SectorArray>();
+            auto secs1 = py::cast<SectorArray>(leg1.attr("sector_decomposition"));
+            auto secs2 = py::cast<SectorArray>(leg2.attr("sector_decomposition"));
             SectorArray s1 = SectorArray::empty(secs1.sector_ind_len());
             SectorArray s2 = SectorArray::empty(secs2.sector_ind_len());
             for (std::size_t r = 0; r < bi1.nrows(); ++r) {
                 s1.push_back(secs1[static_cast<std::size_t>(bi1(r, n))]);
                 s2.push_back(secs2[static_cast<std::size_t>(bi2(r, n))]);
             }
-            auto dual_s2 = py::cast(tensor->symmetry).cast<Symmetry::Ptr>()->dual_sectors(s2);
+            auto dual_s2 = py::cast<Symmetry::Ptr>(py::cast(tensor->symmetry))->dual_sectors(s2);
             for (std::size_t r = 0; r < s1.size(); ++r)
                 on_diagonal[r] = on_diagonal[r] && (s1[r] == dual_s2[r]);
         }
@@ -3273,14 +3275,14 @@ AbelianBackend::qr(SymmetricTensorCPtr a, TensorProduct::Ptr new_co_domain)
           int64 k = static_cast<int64>(ki);
           int64 n = n_enum++;
           py::object sector = py::cast(codom_secs[static_cast<std::size_t>(j)]);
-          if (cod0.attr("sector_order").cast<std::string>() != "sorted")
-              j = cod0.attr("sector_decomposition_where")(sector).cast<int64>();
-          if (dom0.attr("sector_order").cast<std::string>() != "sorted") {
-              k = dom0.attr("sector_decomposition_where")(sector).cast<int64>();
+          if (py::cast<std::string>(cod0.attr("sector_order")) != "sorted")
+              j = py::cast<int64>(cod0.attr("sector_decomposition_where")(sector));
+          if (py::cast<std::string>(dom0.attr("sector_order")) != "sorted") {
+              k = py::cast<int64>(dom0.attr("sector_decomposition_where")(sector));
               i = static_cast<int64>(a_block_inds.searchsorted_column(1, k));
           }
-          if (new_leg.attr("sector_order").cast<std::string>() != "sorted")
-              n = new_leg.attr("sector_decomposition_where")(sector).cast<int64>();
+          if (py::cast<std::string>(new_leg.attr("sector_order")) != "sorted")
+              n = py::cast<int64>(new_leg.attr("sector_decomposition_where")(sector));
 
           if (i < static_cast<int64>(a_block_inds.nrows()) &&
               a_block_inds(static_cast<std::size_t>(i), 0) == j) {
@@ -3302,8 +3304,8 @@ AbelianBackend::qr(SymmetricTensorCPtr a, TensorProduct::Ptr new_co_domain)
       });
     BlockInds q_bi = q_blocks.empty() ? zeros_i64(0, 2) : block_inds_from_py_rows(q_block_inds);
     BlockInds r_bi = r_blocks.empty() ? zeros_i64(0, 2) : block_inds_from_py_rows(r_block_inds);
-    bool q_sorted = new_leg.attr("sector_order").cast<std::string>() == "sorted";
-    bool r_sorted = dom0.attr("sector_order").cast<std::string>() == "sorted";
+    bool q_sorted = py::cast<std::string>(new_leg.attr("sector_order")) == "sorted";
+    bool r_sorted = py::cast<std::string>(dom0.attr("sector_order")) == "sorted";
     return { wrap(make_data(a->dtype, a_data->device, std::move(q_blocks), q_bi, q_sorted)),
              wrap(make_data(a->dtype, a_data->device, std::move(r_blocks), r_bi, r_sorted)) };
 }
@@ -3427,7 +3429,7 @@ AbelianBackend::split_legs(TensorCPtr a,
     py::array_t<int64> map_slices_shape = zeros_i64_array(
       { static_cast<py::ssize_t>(old_blocks.size()), static_cast<py::ssize_t>(n_split) });
     for (py::ssize_t j = 0; j < n_split; ++j) {
-        auto pipe = pipes[j].cast<AbelianLegPipe::Ptr>();
+        auto pipe = py::cast<AbelianLegPipe::Ptr>(pipes[j]);
         auto block_inds_j =
           old_block_inds.column(static_cast<std::size_t>(leg_idcs[static_cast<std::size_t>(j)]));
         std::vector<int64> beg_col(block_inds_j.size());
@@ -3494,7 +3496,7 @@ AbelianBackend::split_legs(TensorCPtr a,
     for (int64 i_leg = 0; i_leg < a_num_legs; ++i_leg) {
         if (is_split[static_cast<std::size_t>(i_leg)]) {
             bool in_domain = i_leg >= num_codomain;
-            auto pipe = pipes[jp].cast<AbelianLegPipe::Ptr>();
+            auto pipe = py::cast<AbelianLegPipe::Ptr>(pipes[jp]);
             int64 k = i_leg + shift;
             int64 k2 = k + pipe->num_legs;
             if (pipe->combine_cstyle == in_domain) {
@@ -3577,12 +3579,12 @@ AbelianBackend::split_legs(TensorCPtr a,
         py::object beg_row = old_block_beg.attr("__getitem__")(i);
         py::object shp_row = old_block_shapes.attr("__getitem__")(i);
         for (int64 ax = 0; ax < a_num_legs; ++ax) {
-            int64 b = beg_row.attr("__getitem__")(ax).cast<int64>();
-            int64 s = shp_row.attr("__getitem__")(ax).cast<int64>();
+            int64 b = py::cast<int64>(beg_row.attr("__getitem__")(ax));
+            int64 s = py::cast<int64>(shp_row.attr("__getitem__")(ax));
             slc_list.append(py::slice(b, b + s, 1));
         }
         auto new_block = b_get(old_block, py::tuple(slc_list));
-        auto shape_i = new_block_shapes.attr("__getitem__")(i).cast<std::vector<int64>>();
+        auto shape_i = py::cast<std::vector<int64>>(new_block_shapes.attr("__getitem__")(i));
         new_blocks.push_back(block_backend->reshape(new_block, shape_i));
     }
     for (auto& blk : new_blocks)
@@ -3655,14 +3657,14 @@ AbelianBackend::svd(SymmetricTensorCPtr a,
           int64 k = static_cast<int64>(ki);
           int64 n = n_enum++;
           py::object sector = py::cast(codom_secs[static_cast<std::size_t>(j)]);
-          if (cod0.attr("sector_order").cast<std::string>() != "sorted")
-              j = cod0.attr("sector_decomposition_where")(sector).cast<int64>();
-          if (dom0.attr("sector_order").cast<std::string>() != "sorted") {
-              k = dom0.attr("sector_decomposition_where")(sector).cast<int64>();
+          if (py::cast<std::string>(cod0.attr("sector_order")) != "sorted")
+              j = py::cast<int64>(cod0.attr("sector_decomposition_where")(sector));
+          if (py::cast<std::string>(dom0.attr("sector_order")) != "sorted") {
+              k = py::cast<int64>(dom0.attr("sector_decomposition_where")(sector));
               i = static_cast<int64>(a_block_inds.searchsorted_column(1, k));
           }
-          if (new_leg.attr("sector_order").cast<std::string>() != "sorted")
-              n = new_leg.attr("sector_decomposition_where")(sector).cast<int64>();
+          if (py::cast<std::string>(new_leg.attr("sector_order")) != "sorted")
+              n = py::cast<int64>(new_leg.attr("sector_decomposition_where")(sector));
 
           if (i < static_cast<int64>(a_block_inds.nrows()) &&
               a_block_inds(static_cast<std::size_t>(i), 0) == j) {
@@ -3700,7 +3702,7 @@ AbelianBackend::svd(SymmetricTensorCPtr a,
             std::vector<std::vector<int64>> rows;
             rows.reserve(static_cast<std::size_t>(py::len(s_block_inds_list)));
             for (auto item : s_block_inds_list) {
-                int64 v = py::reinterpret_borrow<py::object>(item).cast<int64>();
+                int64 v = py::cast<int64>(py::reinterpret_borrow<py::object>(item));
                 rows.push_back({ v, v });
             }
             s_bi = BlockInds::from_rows(rows);
@@ -3713,9 +3715,9 @@ AbelianBackend::svd(SymmetricTensorCPtr a,
         u_bi = block_inds_from_py_rows(u_block_inds);
         vh_bi = block_inds_from_py_rows(vh_block_inds);
     }
-    bool u_sorted = new_leg.attr("sector_order").cast<std::string>() == "sorted";
+    bool u_sorted = py::cast<std::string>(new_leg.attr("sector_order")) == "sorted";
     bool s_sorted = u_sorted;
-    bool vh_sorted = dom0.attr("sector_order").cast<std::string>() == "sorted";
+    bool vh_sorted = py::cast<std::string>(dom0.attr("sector_order")) == "sorted";
     Dtype a_dtype = a->dtype;
     return { wrap(make_data(a_dtype, a_data->device, std::move(u_blocks), u_bi, u_sorted)),
              wrap(make_data(
@@ -3783,12 +3785,12 @@ AbelianBackend::truncate_singular_values(DiagonalTensorCPtr S,
                                          std::optional<float64> svd_min,
                                          bool minimize_error)
 {
-    py::array S_np = block_backend->to_numpy(diagonal_tensor_to_block(S)).cast<py::array>();
+    py::array S_np = py::cast<py::array>(block_backend->to_numpy(diagonal_tensor_to_block(S)));
     auto [keep, err, new_norm] = _truncate_singular_values_selection(
       S_np, py::none(), chi_max, chi_min, degeneracy_tol, trunc_cut, svd_min, minimize_error);
     auto keep_block = block_backend->as_block(keep, Dtype::Bool);
     auto [mask_data, small_leg] =
-      mask_from_block(keep_block, py::cast(S->leg()).cast<Space::Ptr>());
+      mask_from_block(keep_block, py::cast<Space::Ptr>(py::cast(S->leg())));
     return { mask_data, small_leg, err, new_norm };
 }
 

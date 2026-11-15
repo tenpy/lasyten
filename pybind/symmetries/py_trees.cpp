@@ -67,15 +67,15 @@ sector_array_from_python(py::handle obj, Symmetry const& symmetry)
     if (obj.is_none()) {
         return symmetry.empty_sector_array;
     }
-    if (lasyten::py_isinstance<SectorArray>(obj)) {
-        return obj.cast<SectorArray>();
+    if (py::isinstance<SectorArray>(obj)) {
+        return py::cast<SectorArray>(obj);
     }
-    if (lasyten::py_isinstance<Sector>(obj)) {
-        return SectorArray::from_sector(obj.cast<Sector>());
+    if (py::isinstance<Sector>(obj)) {
+        return SectorArray::from_sector(py::cast<Sector>(obj));
     }
     // empty list / sequence → empty SectorArray with correct sector_ind_len
     if (py::isinstance<py::sequence>(obj) && !py::isinstance<py::str>(obj)) {
-        auto seq = obj.cast<py::sequence>();
+        auto seq = py::cast<py::sequence>(obj);
         if (seq.size() == 0) {
             return symmetry.empty_sector_array;
         }
@@ -86,14 +86,14 @@ sector_array_from_python(py::handle obj, Symmetry const& symmetry)
 Symmetry::Ptr
 symmetry_from_python(py::object symmetry_obj)
 {
-    if (lasyten::py_isinstance<Symmetry>(symmetry_obj)) {
-        return symmetry_obj.cast<Symmetry::Ptr>();
+    if (py::isinstance<Symmetry>(symmetry_obj)) {
+        return py::cast<Symmetry::Ptr>(symmetry_obj);
     }
-    if (lasyten::py_isinstance<SymmetryFactor>(symmetry_obj)) {
-        auto ptr = symmetry_obj.cast<SymmetryFactor::Ptr>();
+    if (py::isinstance<SymmetryFactor>(symmetry_obj)) {
+        auto ptr = py::cast<SymmetryFactor::Ptr>(symmetry_obj);
         return std::make_shared<Symmetry>(std::vector<SymmetryFactor::Ptr>{ ptr });
     }
-    return symmetry_obj.attr("as_Symmetry")().cast<Symmetry::Ptr>();
+    return py::cast<Symmetry::Ptr>(symmetry_obj.attr("as_Symmetry")());
 }
 
 BlockBackend*
@@ -102,10 +102,10 @@ block_backend_from_python(py::object backend)
     if (backend.is_none()) {
         return nullptr;
     }
-    if (lasyten::py_isinstance<BlockBackend>(backend)) {
-        return backend.cast<BlockBackend*>();
+    if (py::isinstance<BlockBackend>(backend)) {
+        return py::cast<BlockBackend*>(backend);
     }
-    return backend.attr("block_backend").cast<BlockBackend*>();
+    return py::cast<BlockBackend*>(backend.attr("block_backend"));
 }
 
 /// Match historical Python: real topological coeffs as float, not complex(x+0j).
@@ -188,10 +188,10 @@ bind_trees(nb::module_& m)
       .def_prop_rw(
         "are_dual",
         [](py::object self_obj) {
-            auto& self = self_obj.cast<FusionTree&>();
+            auto& self = py::cast<FusionTree&>(self_obj);
             return py::array(py::dtype::of<bool>(),
-                             { self.are_dual.size() },
-                             { sizeof(std::uint8_t) },
+                             { static_cast<py::ssize_t>(self.are_dual.size()) },
+                             { static_cast<py::ssize_t>(sizeof(std::uint8_t)) },
                              self.are_dual.data(),
                              self_obj);
         },
@@ -201,10 +201,10 @@ bind_trees(nb::module_& m)
       .def_prop_rw(
         "multiplicities",
         [](py::object self_obj) {
-            auto& self = self_obj.cast<FusionTree&>();
+            auto& self = py::cast<FusionTree&>(self_obj);
             return py::array(py::dtype::of<int64>(),
-                             { self.multiplicities.size() },
-                             { sizeof(int64) },
+                             { static_cast<py::ssize_t>(self.multiplicities.size()) },
+                             { static_cast<py::ssize_t>(sizeof(int64)) },
                              self.multiplicities.data(),
                              self_obj);
         },
@@ -314,7 +314,7 @@ bind_trees(nb::module_& m)
           FusionTree const& self, py::object backend, py::object dtype, bool understood_braiding) {
             std::optional<Dtype> dt;
             if (!dtype.is_none()) {
-                dt = dtype.cast<Dtype>();
+                dt = py::cast<Dtype>(dtype);
             }
             return self.to_dense_block(
               block_backend_from_python(backend), dt, understood_braiding);
@@ -387,10 +387,10 @@ bind_trees(nb::module_& m)
       .def_prop_rw(
         "are_dual",
         [](py::object self_obj) {
-            auto& self = self_obj.cast<fusion_trees&>();
+            auto& self = py::cast<fusion_trees&>(self_obj);
             return py::array(py::dtype::of<bool>(),
-                             { self.are_dual.size() },
-                             { sizeof(std::uint8_t) },
+                             { static_cast<py::ssize_t>(self.are_dual.size()) },
+                             { static_cast<py::ssize_t>(sizeof(std::uint8_t)) },
                              self.are_dual.data(),
                              self_obj);
         },

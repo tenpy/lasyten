@@ -116,7 +116,7 @@ ArrayApiBlockBackend::Block::Block(py::object arr, ArrayApiBlockBackend* backend
         throw std::invalid_argument("ArrayApiBlockBackend::Block requires a non-null backend");
     // Cache device string without calling as_device() (avoids recursion via ones probes).
     if (py::hasattr(arr_, "device"))
-        device_ = py::str(arr_.attr("device")).cast<std::string>();
+        device_ = py::cast<std::string>(py::str(arr_.attr("device")));
     else
         device_ = backend_->default_device;
 }
@@ -130,14 +130,14 @@ ArrayApiBlockBackend::Block::get_backend() const
 std::vector<int64>
 ArrayApiBlockBackend::Block::shape() const
 {
-    py::tuple shape = arr_.attr("shape").cast<py::tuple>();
+    py::tuple shape = py::to_tuple(arr_.attr("shape"));
     std::vector<int64> out;
     out.reserve(static_cast<size_t>(shape.size()));
     for (auto item : shape) {
         if (item.is_none())
             throw std::runtime_error(
               "Inconsistent block. Unknown dimensions with None in shape not allowed.");
-        out.push_back(item.cast<int64>());
+        out.push_back(py::cast<int64>(item));
     }
     return out;
 }
@@ -214,24 +214,24 @@ void
 ArrayApiBlockBackend::Block::set_item(py::object key, py::object value)
 {
     if (auto idcs = BlockBackend::try_py_key_to_block_indices(key)) {
-        if (py_isinstance<BlockBackend::Block>(value)) {
-            set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Block&>());
+        if (py::isinstance<BlockBackend::Block>(value)) {
+            set_item(std::span<const BlockIndex>(*idcs), py::cast<BlockBackend::Block&>(value));
             return;
         }
-        if (py_isinstance<BlockBackend::Scalar>(value)) {
-            set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Scalar&>());
+        if (py::isinstance<BlockBackend::Scalar>(value)) {
+            set_item(std::span<const BlockIndex>(*idcs), py::cast<BlockBackend::Scalar&>(value));
             return;
         }
         arr_.attr("__setitem__")(BlockBackend::block_indices_to_py(*idcs), value);
         return;
     }
-    if (py_isinstance<ArrayApiBlockBackend::Block>(value)) {
-        auto* block = value.cast<ArrayApiBlockBackend::Block*>();
+    if (py::isinstance<ArrayApiBlockBackend::Block>(value)) {
+        auto* block = py::cast<ArrayApiBlockBackend::Block*>(value);
         arr_.attr("__setitem__")(key, block->obj());
         return;
     }
-    if (py_isinstance<BlockBackend::Block>(value)) {
-        auto* block = value.cast<BlockBackend::Block*>();
+    if (py::isinstance<BlockBackend::Block>(value)) {
+        auto* block = py::cast<BlockBackend::Block*>(value);
         arr_.attr("__setitem__")(key, backend_->api().attr("asarray")(block->to_numpy()));
         return;
     }
@@ -258,16 +258,16 @@ ArrayApiBlockBackend::Block::_item_as_complex128() const
 {
     py::object val = arr_.attr("item")();
     try {
-        return val.cast<complex128>();
+        return py::cast<complex128>(val);
     } catch (py::cast_error const&) {
-        return static_cast<complex128>(val.cast<float64>());
+        return static_cast<complex128>(py::cast<float64>(val));
     }
 }
 
 int64
 ArrayApiBlockBackend::Block::_item_as_int64() const
 {
-    return arr_.attr("item")().cast<int64>();
+    return py::cast<int64>(arr_.attr("item")());
 }
 
 namespace {
@@ -444,7 +444,7 @@ ArrayApiBlockBackend::as_scalar(complex128 value, Dtype dt)
 BlockBackend::Scalar
 ArrayApiBlockBackend::as_scalar(py::object value, Dtype dt)
 {
-    if (py_isinstance<BlockBackend::Scalar>(value)) {
+    if (py::isinstance<BlockBackend::Scalar>(value)) {
         auto scalar = py::cast<BlockBackend::Scalar>(value);
         if (scalar.dtype() == dt)
             return scalar;
@@ -573,8 +573,8 @@ ArrayApiBlockBackend::as_block(py::object a,
     if (!device && !py::hasattr(a, "device"))
         device = default_device;
 
-    if (py_isinstance<ArrayApiBlockBackend::Block>(a)) {
-        auto* block = a.cast<ArrayApiBlockBackend::Block*>();
+    if (py::isinstance<ArrayApiBlockBackend::Block>(a)) {
+        auto* block = py::cast<ArrayApiBlockBackend::Block*>(a);
         BlockPtr out = block->shared_from_this();
         if (dtype_opt && get_dtype(out) != *dtype_opt)
             out = to_dtype(out, *dtype_opt);
@@ -605,7 +605,7 @@ ArrayApiBlockBackend::as_device(std::optional<std::string> device)
                                          py::arg("dtype") = dtype_to_api(Dtype::Float64),
                                          py::arg("device") = py::cast(dev));
     if (py::hasattr(probe, "device"))
-        return py::str(probe.attr("device")).cast<std::string>();
+        return py::cast<std::string>(py::str(probe.attr("device")));
     return dev;
 }
 
@@ -614,7 +614,7 @@ ArrayApiBlockBackend::abs_argmax(const BlockCPtr& block)
 {
     py::object flat_idx = api_.attr("argmax")(api_.attr("abs")(obj(block)));
     // May be 0-d array; convert to Python int.
-    int64 idx = py::int_(flat_idx).cast<int64>();
+    int64 idx = py::cast<int64>(py::int_(flat_idx));
     auto shape = get_shape(block);
     std::vector<int64> idcs;
     idcs.reserve(shape.size());
@@ -631,7 +631,7 @@ ArrayApiBlockBackend::argmin(const BlockCPtr& block)
 {
     py::object flat_idx = api_.attr("argmin")(obj(block));
     // May be 0-d array; convert to Python int.
-    int64 idx = py::int_(flat_idx).cast<int64>();
+    int64 idx = py::cast<int64>(py::int_(flat_idx));
     auto shape = get_shape(block);
     std::vector<int64> idcs;
     idcs.reserve(shape.size());
@@ -857,8 +857,8 @@ ArrayApiBlockBackend::item(const BlockCPtr& a)
         return as_scalar(arr.attr("item")(), get_dtype(a));
     // 0-d Array API arrays: convert via Python float/complex.
     if (is_real(a))
-        return as_scalar(py::float_(arr).cast<float64>());
-    return as_scalar(py::module_::import("builtins").attr("complex")(arr).cast<complex128>());
+        return as_scalar(py::cast<float64>(py::float_(arr)));
+    return as_scalar(py::cast<complex128>(py::module_::import("builtins").attr("complex")(arr)));
 }
 
 BlockPtr
@@ -995,7 +995,7 @@ ArrayApiBlockBackend::_block_repr_lines(const BlockCPtr& a,
                                         int64 /*max_width*/,
                                         int64 max_lines)
 {
-    std::string s = py::str(obj(a)).cast<std::string>();
+    std::string s = py::cast<std::string>(py::str(obj(a)));
     std::vector<std::string> lines;
     std::size_t start = 0;
     while (start <= s.size()) {

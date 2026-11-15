@@ -31,9 +31,9 @@ optional_leg_order(py::object obj)
     std::vector<std::variant<int64, std::string>> out;
     for (auto item : to_iterable(obj)) {
         if (py::isinstance<py::str>(item)) {
-            out.emplace_back(item.cast<std::string>());
+            out.emplace_back(py::cast<std::string>(item));
         } else {
-            out.emplace_back(item.cast<int64>());
+            out.emplace_back(py::cast<int64>(item));
         }
     }
     return out;
@@ -86,9 +86,9 @@ bind_tensors_symmetric_tensor(nb::module_& m)
       },
       [](SymmetricTensor& self, py::object obj) {
           if (std::dynamic_pointer_cast<NoSymmetryBackend>(self.backend)) {
-              self.data = NoSymmetryBackend::wrap(obj.cast<BlockBackend::BlockPtr>());
+              self.data = NoSymmetryBackend::wrap(py::cast<BlockBackend::BlockPtr>(obj));
           } else {
-              self.data = obj.cast<TensorBackend::DataPtr>();
+              self.data = py::cast<TensorBackend::DataPtr>(obj);
           }
       });
 

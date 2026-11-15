@@ -1508,7 +1508,7 @@ EigenBlockBackend::Block::Block(const py::array& arr)
             dtype_ = Dtype::Complex128;
         else
             throw std::invalid_argument("EigenBlockBackend::Block: invalid numpy dtype: " +
-                                        py::str(arr.dtype()).cast<std::string>());
+                                        py::cast<std::string>(py::str(arr.dtype())));
     }
     shape_.resize(static_cast<size_t>(arr.ndim()));
     for (py::ssize_t i = 0; i < arr.ndim(); ++i)
@@ -1614,7 +1614,7 @@ bound_shared(const py::object& obj)
 py::object
 key_blocks_to_numpy(py::object key)
 {
-    if (py_isinstance<BlockBackend::Block>(key))
+    if (py::isinstance<BlockBackend::Block>(key))
         return (*bound_ptr<BlockBackend::Block>(key)).to_numpy();
     if (py::isinstance<py::tuple>(key)) {
         py::tuple t = py::reinterpret_borrow<py::tuple>(key);
@@ -1682,11 +1682,11 @@ void
 EigenBlockBackend::Block::set_item(py::object key, py::object value)
 {
     if (auto idcs = BlockBackend::try_py_key_to_block_indices(key)) {
-        if (py_isinstance<BlockBackend::Block>(value)) {
+        if (py::isinstance<BlockBackend::Block>(value)) {
             set_item(std::span<const BlockIndex>(*idcs), (*bound_ptr<BlockBackend::Block>(value)));
             return;
         }
-        if (py_isinstance<BlockBackend::Scalar>(value)) {
+        if (py::isinstance<BlockBackend::Scalar>(value)) {
             set_item(std::span<const BlockIndex>(*idcs),
                      (*bound_ptr<BlockBackend::Scalar>(value)));
             return;
@@ -1698,9 +1698,9 @@ EigenBlockBackend::Block::set_item(py::object key, py::object value)
     // Escape hatch: assign into a numpy copy, then copy back.
     py::array arr = to_numpy();
     py::object np_value = value;
-    if (py_isinstance<BlockBackend::Block>(value))
+    if (py::isinstance<BlockBackend::Block>(value))
         np_value = (*bound_ptr<BlockBackend::Block>(value)).to_numpy();
-    else if (py_isinstance<BlockBackend::Scalar>(value))
+    else if (py::isinstance<BlockBackend::Scalar>(value))
         np_value = (*bound_ptr<BlockBackend::Scalar>(value)).to_numpy();
     arr.attr("__setitem__")(key_blocks_to_numpy(key), np_value);
     Blk updated(arr);
@@ -2039,7 +2039,7 @@ EigenBlockBackend::as_scalar(complex128 value, Dtype dtype)
 BlockBackend::Scalar
 EigenBlockBackend::as_scalar(py::object value, Dtype dtype)
 {
-    if (py_isinstance<BlockBackend::Scalar>(value)) {
+    if (py::isinstance<BlockBackend::Scalar>(value)) {
         auto scalar = *bound_ptr<BlockBackend::Scalar>(value);
         if (scalar.dtype() == dtype)
             return scalar;
@@ -2097,13 +2097,13 @@ EigenBlockBackend::as_block(py::object a,
 {
     (void)as_device(device);
     BPtr block;
-    if (py_isinstance<Blk>(a)) {
+    if (py::isinstance<Blk>(a)) {
         block = bound_shared<Blk>(a);
         if (dtype_opt && *dtype_opt != block->dtype())
             block = cast_copy(*block, *dtype_opt);
         return block;
     }
-    if (py_isinstance<BlockBackend::Block>(a)) {
+    if (py::isinstance<BlockBackend::Block>(a)) {
         // foreign backend block: convert via numpy
         block = std::make_shared<Blk>((*bound_ptr<BlockBackend::Block>(a)).to_numpy());
     } else {
