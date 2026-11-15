@@ -543,14 +543,25 @@ message(STATUS
 # so IDEs/LSPs get parameter hints for the compiled extension. Optional: if
 # the stub generation fails (e.g. _core cannot be imported at build time), warn and skip
 # rather than fail the build.
+#
+# Do **not** run ``python -m nanobind.stubgen -m _core`` with ``PYTHONPATH=build``:
+# when ``LASYTEN_STABLE_ABI`` is on, a leftover ``_core.cpython-*.so`` shadows
+# ``_core.abi3.so`` and stubgen emits ``typing.Any`` for ``py::array``. Use
+# ``scripts/generate_core_pyi.py`` which loads ``$<TARGET_FILE:_core>`` explicitly.
 set(LASYTEN_CORE_PYI "${CMAKE_CURRENT_SOURCE_DIR}/lasyten/_core.pyi")
+set(LASYTEN_GENERATE_CORE_PYI
+  "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_core_pyi.py")
+set(LASYTEN_STUBGEN_PATTERNS
+  "${CMAKE_CURRENT_SOURCE_DIR}/scripts/stubgen_patterns.txt")
 
 add_custom_command(
   OUTPUT ${LASYTEN_CORE_PYI}
-  COMMAND sh -c "PYTHONPATH=$<TARGET_FILE_DIR:_core> ${Python_EXECUTABLE} -m nanobind.stubgen \
-      -m _core -o ${LASYTEN_CORE_PYI} \
-      || echo 'WARNING: nanobind.stubgen failed; lasyten/_core.pyi not (re)generated'"
-  DEPENDS _core
+  COMMAND ${CMAKE_COMMAND} -E env LASYTEN_STUBGEN_SOFT=1
+          ${Python_EXECUTABLE} ${LASYTEN_GENERATE_CORE_PYI}
+          --so $<TARGET_FILE:_core>
+          -o ${LASYTEN_CORE_PYI}
+          -p ${LASYTEN_STUBGEN_PATTERNS}
+  DEPENDS _core ${LASYTEN_GENERATE_CORE_PYI} ${LASYTEN_STUBGEN_PATTERNS}
   COMMENT "Generating lasyten/_core.pyi via nanobind.stubgen"
   VERBATIM
 )

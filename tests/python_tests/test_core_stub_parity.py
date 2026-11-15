@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -53,3 +54,44 @@ def test_core_stub_parity():
 
     errors = compare(live, stub)
     assert not errors, 'stub parity errors:\n' + '\n'.join(f'  - {e}' for e in errors[:40])
+
+
+@pytest.mark.skipif(not _is_compiled_core(), reason='compiled lasyten._core not available')
+def test_core_pyi_array_typing():
+    """``py::array`` must appear as ``numpy.ndarray`` in live signatures / IDE stubs.
+
+    Regression for the Stable-ABI stubgen footgun: ``PYTHONPATH=build`` +
+    ``-m _core`` preferred a stale ``_core.cpython-*.so`` over ``_core.abi3.so``,
+    so stubgen typed arrays as ``typing.Any``. Do not re-exec the extension here
+    (nanobind forbids double registration); inspect the already-imported module.
+    """
+    try:
+        import lasyten._core as live
+    except ImportError as exc:
+        pytest.skip(f'compiled lasyten._core not importable: {exc}')
+
+    origin = getattr(live, '__file__', '') or ''
+    if origin.endswith('.py'):
+        pytest.skip('lasyten._core is a pure-Python stub')
+
+    block_to_numpy = live.EigenBlockBackend.BlockCls.to_numpy
+    sigs = [s[0] for s in block_to_numpy.__nb_signature__ if s[0]]
+    assert any('numpy.ndarray' in s for s in sigs), (
+        f'EigenBlockBackend.Block.to_numpy signatures lack numpy.ndarray: {sigs!r} '
+        '(stale _core.cpython-*.so often shows typing.Any instead)'
+    )
+    assert not any('typing.Any' in s for s in sigs), sigs
+
+    bb_from = live.BlockBackend.block_from_numpy.__nb_signature__[0][0]
+    assert 'numpy.ndarray' in bb_from, bb_from
+
+    pyi = _REPO / 'lasyten' / '_core.pyi'
+    if pyi.is_file():
+        text = pyi.read_text(encoding='utf-8')
+        assert re.search(r'def to_numpy\(self\)\s*->\s*numpy\.ndarray', text)
+        assert 'def block_from_numpy(self, a: numpy.ndarray' in text
+        any_hits = len(re.findall(r'\bAny\b', text))
+        assert any_hits < 50, (
+            f'too many Any annotations in {pyi} ({any_hits}); regenerate with '
+            'scripts/generate_core_pyi.py --so <fresh _core>'
+        )

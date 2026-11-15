@@ -272,7 +272,9 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
   Restore a `Tensor` trampoline (leftover #3) or rewrite those tests.
 - nanobind's `bool` caster only accepts `True` / `False`, **not `numpy.bool_`** (pybind11 did).
   Python callers must use `bool(x)`; inside liblasyten `py::to_bool(obj)` is used for results of numpy calls.
-- `py::array` is still used in the binding signatures (stub parity / typing shows `typing.Any`).
+- `py::array` is still used in many binding signatures (IDE `.pyi` types it as
+  `numpy.ndarray` once stubgen loads the correct `_core`; true `py::object`
+  boundaries remain `object` / `Any` until leftover #10).
 - pybind11 is no longer a build requirement (neither ON nor OFF).
 
 ## Open points / leftover todos
@@ -311,7 +313,16 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
 6. **Eigen numerical parity** — SVD/QR/eigh vs SciPy `gesdd`/`gesvd`; document defaults and tolerances for TeNPy.
 7. **GPU strategy** — Torch-only vs future CUDA Eigen; `nb::ndarray` device tags vs factory strings.
 8. **Implicit conversions / caster ergonomics** — Sector / BlockInds / Leg may need explicit Python helpers.
-9. **Stubgen / typing** — nanobind stub generation vs `scripts/check_core_stub_parity.py`.
+9. **Stubgen / typing** — **done.** Two pipelines:
+    - **Sphinx bag-of-names stub:** `scripts/generate_core_stubs.py` (parses `nb::`
+      bindings) checked by `scripts/check_core_stub_parity.py` /
+      `test_core_stub_parity` against the live extension (prefers `_core.abi3.so`).
+    - **IDE `.pyi`:** `scripts/generate_core_pyi.py` + optional
+      `scripts/stubgen_patterns.txt`, wired from CMake with
+      `--so $<TARGET_FILE:_core>` (do **not** use `PYTHONPATH=build` + `-m _core`:
+      a leftover `_core.cpython-*.so` shadows abi3 and types `py::array` as
+      `typing.Any`). Regression: `test_core_pyi_array_typing`. Remaining
+      `object`/`Any` on true `py::object` APIs is leftover #10 (`nb::ndarray`).
 10. **Dual-framework zero-copy edge cases / `nb::ndarray` everywhere** — done for `EigenBlockBackend` only (copying import, zero-copy writable export; unsupported dtypes raise `TypeError`). Open: other binding signatures still use `py::array`, read-only DLPack exports, non-CPU devices, JAX/TF return paths, `to_numpy()` of the other backends.
 11. **TeNPy `MPOTransferMatrix`** — still `NotImplementedError` on the TeNPy side. lasyten
     trampolines for `LinearOperator` (`matvec` / `to_tensor` / `adjoint`, `nb::dynamic_attr`)

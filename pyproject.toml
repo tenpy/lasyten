@@ -54,8 +54,8 @@ docbuild = [
     "clang",
     "pybind11-mkdoc",
 ]
-# generates lasyten/_core.pyi at build time (``python -m nanobind.stubgen``) for IDE type hints
-# (optional; the build warns if generation fails)
+# generates lasyten/_core.pyi at build time via scripts/generate_core_pyi.py
+# (nanobind.stubgen + stubgen_patterns.txt; soft-fail if generation fails)
 stubs = ["nanobind"]
 # bundles
 dev = ["lasyten[io, test, lint, docbuild, stubs]"]

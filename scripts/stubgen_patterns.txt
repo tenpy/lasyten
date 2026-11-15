@@ -1,0 +1,27 @@
+# nanobind stubgen pattern file for lasyten._core
+# See https://nanobind.readthedocs.io/en/latest/typing.html#pattern-files
+#
+# Queries match fully qualified stub names (e.g. ``lasyten._core.Dtype.to_numpy_dtype``).
+# Keep this focused on signatures that stay ``object`` / ``Any`` even with a correct
+# ``py::array`` caster (``py::object`` boundaries, HDF5 duck typing, …). Full
+# ``nb::ndarray`` migration of remaining APIs is leftover #10.
+
+# Dtype <-> NumPy dtype bridge (bound with py::object / py::dtype adapters).
+lasyten\._core\.Dtype\.to_numpy_dtype:
+    \from typing import Any
+    \from numpy import dtype as _np_dtype
+    def to_numpy_dtype(self) -> _np_dtype[Any]:
+        \doc
+
+lasyten\._core\.Dtype\.from_numpy_dtype:
+    \from typing import Any
+    \from numpy import dtype as _np_dtype
+    @staticmethod
+    def from_numpy_dtype(dtype: _np_dtype[Any] | type | str) -> Dtype:
+        \doc
+
+# Scalar.to_numpy returns a 0-d / Python scalar via py::object.
+lasyten\._core\.BlockBackend\.Scalar\.to_numpy:
+    \from typing import Any
+    def to_numpy(self) -> Any:
+        \doc
