@@ -328,14 +328,14 @@ bind_no_symmetry_backend(nb::module_& m)
     cls.def(
       "from_grid",
       [](NoSymmetryBackend& self,
-         std::vector<std::vector<py::object>> grid,
+         py::object grid,
          TensorProduct::Ptr new_codomain,
          TensorProduct::Ptr new_domain,
          std::vector<std::vector<int64>> left_mult_slices,
          std::vector<std::vector<int64>> right_mult_slices,
          Dtype dtype,
          std::string device) {
-          return py_block(self.from_grid(std::move(grid),
+          return py_block(self.from_grid(tensor_grid_from_python(std::move(grid)),
                                          new_codomain,
                                          new_domain,
                                          std::move(left_mult_slices),

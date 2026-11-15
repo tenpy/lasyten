@@ -347,11 +347,13 @@ class Tensor
     [[nodiscard]] std::vector<Leg::Ptr> get_leg_co_domain(
       std::vector<std::variant<int64, std::string>> const& which_legs) const;
 
+#if LASYTEN_HAS_PYTHON
     /// Convert to a numpy array.
     [[nodiscard]] py::array to_numpy(
       std::optional<std::vector<std::variant<int64, std::string>>> leg_order = std::nullopt,
       py::object numpy_dtype = py::none(),
       bool understood_braiding = false);
+#endif // LASYTEN_HAS_PYTHON
 
     [[nodiscard]] virtual std::string __repr__() const;
     [[nodiscard]] virtual std::string __str__() const;
@@ -376,6 +378,7 @@ class Tensor
     [[nodiscard]] bool compatible_with(VectorLike::CPtr other) const override;
 };
 
+#if LASYTEN_HAS_PYTHON
 /// Convert a `TensorProduct`, a sequence of legs, or ``None`` (empty product).
 /// Used by pybind and remaining py-object factory overloads.
 TensorProduct::Ptr tensor_product_from_python(py::object obj, Symmetry::Ptr symmetry = nullptr);
@@ -396,5 +399,6 @@ Tensor::InitParsed parse_tensor_init(py::object codomain,
                                      TensorBackend::Ptr backend,
                                      py::object labels,
                                      bool is_endomorphism = false);
+#endif // LASYTEN_HAS_PYTHON
 
 } // namespace lasyten

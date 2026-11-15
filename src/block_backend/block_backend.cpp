@@ -785,6 +785,76 @@ torch_device_for_hdf5_load(std::string const& device, std::optional<std::string>
 }
 
 BlockPtr
+BlockBackend::convert_block(BlockCPtr const& block,
+                            std::optional<Dtype> dtype,
+                            std::optional<std::string> device)
+{
+    if (!block) {
+        throw std::invalid_argument("BlockBackend::convert_block: null block");
+    }
+    if (block->get_backend() == this) {
+        BlockPtr out = std::const_pointer_cast<Block>(block);
+        if (dtype && *dtype != block->dtype()) {
+            out = to_dtype(out, *dtype);
+        }
+        if (device) {
+            auto const dev = as_device(device);
+            if (get_device(out) != dev) {
+                out = copy_block(out, dev);
+            }
+        }
+        return out;
+    }
+#if LASYTEN_HAS_PYTHON
+    return as_block(py::cast(block), dtype, device);
+#else
+    throw NotImplemented("BlockBackend::convert_block between different block backends needs "
+                         "Python (LASYTEN_WITH_PYTHON=ON)");
+#endif
+}
+
+std::vector<float64>
+BlockBackend::block_to_float64_vector(BlockCPtr const& block)
+{
+    auto const shp = get_shape(block);
+    if (shp.size() != 1) {
+        throw std::invalid_argument("block_to_float64_vector: expected a 1D block");
+    }
+    std::vector<float64> out(static_cast<std::size_t>(shp[0]));
+    for (int64 i = 0; i < shp[0]; ++i) {
+        out[static_cast<std::size_t>(i)] = get_block_element(block, { i }).as_complex128().real();
+    }
+    return out;
+}
+
+std::vector<bool>
+BlockBackend::block_to_bool_vector(BlockCPtr const& block)
+{
+    auto const shp = get_shape(block);
+    if (shp.size() != 1) {
+        throw std::invalid_argument("block_to_bool_vector: expected a 1D block");
+    }
+    std::vector<bool> out(static_cast<std::size_t>(shp[0]));
+    for (int64 i = 0; i < shp[0]; ++i) {
+        out[static_cast<std::size_t>(i)] = get_block_element(block, { i }).as_bool();
+    }
+    return out;
+}
+
+BlockPtr
+BlockBackend::block_from_bool_vector(std::vector<bool> const& values,
+                                     std::optional<std::string> device)
+{
+    auto block = zeros({ static_cast<int64>(values.size()) }, Dtype::Bool, as_device(device));
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (values[i]) {
+            block->set_item(static_cast<int64>(i), as_scalar(true));
+        }
+    }
+    return block;
+}
+
+BlockPtr
 BlockBackend::apply_axis_permutations(const BlockCPtr& block,
                                       const std::vector<std::vector<int64>>& perms)
 {

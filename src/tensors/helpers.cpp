@@ -324,6 +324,7 @@ _compose_SymmetricTensors(SymmetricTensorCPtr tensor1,
       std::move(data), tensor1->codomain, tensor2->domain, backend, tensor1->symmetry, labels);
 }
 
+#if LASYTEN_HAS_PYTHON // Abelian <-> FusionTree conversions: those backends need Python
 FusionTreeData::Ptr
 _convert_abelian_to_FT(TensorCPtr tensor,
                        FusionTreeBackend::Ptr backend,
@@ -372,7 +373,7 @@ _convert_abelian_to_FT(TensorCPtr tensor,
             std::iota(all_axes.begin(), all_axes.end(), int64{ 0 });
             auto tree_block =
               old_bb->combine_legs(ab_block, std::vector<std::vector<int64>>{ all_axes }, false);
-            tree_block = backend->block_backend->as_block(py::cast(tree_block), dtype, device);
+            tree_block = backend->block_backend->convert_block(tree_block, dtype, device);
             assign_block_slice(res->blocks[0],
                                { int64{ 0 }, AxisSlice{ i2, i2 + tree_block_width, {} } },
                                tree_block);
@@ -401,7 +402,7 @@ _convert_abelian_to_FT(TensorCPtr tensor,
             std::iota(all_axes.begin(), all_axes.end(), int64{ 0 });
             auto tree_block =
               old_bb->combine_legs(ab_block, std::vector<std::vector<int64>>{ all_axes }, true);
-            tree_block = backend->block_backend->as_block(py::cast(tree_block), dtype, device);
+            tree_block = backend->block_backend->convert_block(tree_block, dtype, device);
             assign_block_slice(res->blocks[0],
                                { AxisSlice{ i1, i1 + tree_block_height, {} }, int64{ 0 } },
                                tree_block);
@@ -465,7 +466,7 @@ _convert_abelian_to_FT(TensorCPtr tensor,
                 auto ab_block = ab_data->blocks[static_cast<std::size_t>(*ab_i)];
                 // cstyle combine in the codomain, Fstyle in the domain
                 auto tree_block = old_bb->combine_legs(ab_block, combine, cstyles);
-                tree_block = backend->block_backend->as_block(py::cast(tree_block), dtype, device);
+                tree_block = backend->block_backend->convert_block(tree_block, dtype, device);
                 assign_block_slice(res->blocks[static_cast<std::size_t>(*ft_bi)],
                                    { AxisSlice{ i1, i1 + tree_block_height, {} },
                                      AxisSlice{ i2, i2 + tree_block_width, {} } },
@@ -537,7 +538,7 @@ _convert_FT_to_abelian(TensorCPtr tensor,
                               { int64{ 0 }, AxisSlice{ i2, i2 + tree_block_width, {} } });
             auto ab_block = old_bb->split_legs(tree_block, { 0 }, { b_mults }, false);
             // convert to new block_backend
-            ab_block = backend->block_backend->as_block(py::cast(ab_block), dtype, device);
+            ab_block = backend->block_backend->convert_block(ab_block, dtype, device);
             res_blocks.push_back(ab_block);
             res_block_inds.emplace_back(dom_sector_idcs.rbegin(), dom_sector_idcs.rend());
             i2_per_coupled[static_cast<std::size_t>(*ft_bi)] += tree_block_width;
@@ -564,7 +565,7 @@ _convert_FT_to_abelian(TensorCPtr tensor,
                               { AxisSlice{ i1, i1 + tree_block_height, {} }, int64{ 0 } });
             auto ab_block = old_bb->split_legs(tree_block, { 0 }, { a_mults }, true);
             // convert to new block_backend
-            ab_block = backend->block_backend->as_block(py::cast(ab_block), dtype, device);
+            ab_block = backend->block_backend->convert_block(ab_block, dtype, device);
             res_blocks.push_back(ab_block);
             res_block_inds.push_back(cod_sector_idcs);
             i1_per_coupled[static_cast<std::size_t>(*ft_bi)] += tree_block_height;
@@ -602,7 +603,7 @@ _convert_FT_to_abelian(TensorCPtr tensor,
                 auto ab_block = old_bb->split_legs(
                   tree_block, { 0, 1 }, { a_mults, b_mults }, std::vector<bool>{ true, false });
                 // convert to new block_backend
-                ab_block = backend->block_backend->as_block(py::cast(ab_block), dtype, device);
+                ab_block = backend->block_backend->convert_block(ab_block, dtype, device);
                 res_blocks.push_back(ab_block);
                 std::vector<int64> row = cod_sector_idcs;
                 row.insert(row.end(), dom_sector_idcs.rbegin(), dom_sector_idcs.rend());
@@ -622,6 +623,7 @@ _convert_FT_to_abelian(TensorCPtr tensor,
     return std::make_shared<AbelianBackendData>(
       dtype, std::move(device), std::move(res_blocks), std::move(block_inds));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::tuple<SymmetricTensorPtr, TensorProduct::Ptr, bool, bool>
 _decomposition_prepare(TensorCPtr tensor, bool new_leg_dual)

@@ -2052,7 +2052,7 @@ AbelianBackend::from_dense_block_trivial_sector(BlockBackend::BlockPtr block, Sp
 }
 
 TensorBackend::DataPtr
-AbelianBackend::from_grid(std::vector<std::vector<py::object>> grid,
+AbelianBackend::from_grid(std::vector<std::vector<TensorCPtr>> grid,
                           TensorProduct::Ptr new_codomain,
                           TensorProduct::Ptr new_domain,
                           std::vector<std::vector<int64>> left_mult_slices,
@@ -2081,10 +2081,9 @@ AbelianBackend::from_grid(std::vector<std::vector<py::object>> grid,
 
     for (std::size_t i = 0; i < grid.size(); ++i) {
         for (std::size_t j = 0; j < grid[i].size(); ++j) {
-            py::object op = grid[i][j];
-            if (op.is_none())
+            TensorCPtr op_t = grid[i][j];
+            if (!op_t)
                 continue;
-            auto op_t = py::cast<TensorCPtr>(op);
             auto op_data = data_from_tensor(op_t);
             auto const& op_bi = op_data->block_inds;
             for (std::size_t bi_row = 0; bi_row < op_data->blocks.size(); ++bi_row) {

@@ -1,9 +1,9 @@
 #include <lasyten/tools/hdf5_export.h>
 
+#include <lasyten/backends/no_symmetry.h>
 #if LASYTEN_HAS_PYTHON
 #include <lasyten/backends/abelian.h>
 #include <lasyten/backends/fusion_tree_backend.h>
-#include <lasyten/backends/no_symmetry.h>
 #endif
 #include <lasyten/block_backend/eigen.h>
 #if LASYTEN_WITH_NUMPY_BACKEND
@@ -470,7 +470,8 @@ load_symmetry(lasyten::hdf5::Loader& loader, std::string const& path)
     });
 }
 
-#if LASYTEN_HAS_PYTHON // Space / Leg / TensorBackend / Tensor (de)serialization
+// Space / Leg / TensorBackend / Tensor (de)serialization. The Abelian / FusionTree backends
+// (and their data) are only known with LASYTEN_WITH_PYTHON=ON; NoSymmetryBackend always is.
 namespace {
 
 char const*
@@ -586,10 +587,12 @@ namespace {
 char const*
 tensor_backend_class_name(TensorBackend const& backend)
 {
+#if LASYTEN_HAS_PYTHON
     if (dynamic_cast<AbelianBackend const*>(&backend))
         return "AbelianBackend";
     if (dynamic_cast<FusionTreeBackend const*>(&backend))
         return "FusionTreeBackend";
+#endif
     if (dynamic_cast<NoSymmetryBackend const*>(&backend))
         return "NoSymmetryBackend";
     throw std::runtime_error(std::string("hdf5_export: unknown TensorBackend type ") +
@@ -599,10 +602,12 @@ tensor_backend_class_name(TensorBackend const& backend)
 char const*
 tensor_backend_data_class_name(TensorBackend::Data const& data)
 {
+#if LASYTEN_HAS_PYTHON
     if (dynamic_cast<AbelianBackendData const*>(&data))
         return "AbelianBackendData";
     if (dynamic_cast<FusionTreeData const*>(&data))
         return "FusionTreeData";
+#endif
     if (dynamic_cast<NoSymmetryBackend::BlockData const*>(&data))
         return "NoSymmetryBackend.BlockData";
     throw std::runtime_error(std::string("hdf5_export: unknown TensorBackend::Data type ") +
@@ -637,6 +642,7 @@ load_tensor_backend(lasyten::hdf5::Loader& loader, std::string const& path)
       loader, path, [&](HighFive::Group& g, std::string const& sub) -> TensorBackend::Ptr {
           auto const cls = class_attr(g);
           auto block_backend = load_block_backend(loader, sub + "block_backend");
+#if LASYTEN_HAS_PYTHON
           if (cls == "AbelianBackend") {
               auto obj = std::make_shared<AbelianBackend>(std::move(block_backend));
               loader.memorize_load(g.getId(), std::static_pointer_cast<void>(obj));
@@ -647,6 +653,7 @@ load_tensor_backend(lasyten::hdf5::Loader& loader, std::string const& path)
               loader.memorize_load(g.getId(), std::static_pointer_cast<void>(obj));
               return obj;
           }
+#endif
           if (cls == "NoSymmetryBackend") {
               auto obj = std::make_shared<NoSymmetryBackend>(std::move(block_backend));
               loader.memorize_load(g.getId(), std::static_pointer_cast<void>(obj));
@@ -673,6 +680,7 @@ save_tensor_backend_data(lasyten::hdf5::Saver& saver,
       cls,
       data.get(),
       [&](lasyten::hdf5::Saver& s, HighFive::Group& g, std::string const& sub) {
+#if LASYTEN_HAS_PYTHON
           if (auto abd = std::dynamic_pointer_cast<AbelianBackendData const>(data)) {
               abd->save_hdf5(s, g, sub);
               return;
@@ -681,6 +689,10 @@ save_tensor_backend_data(lasyten::hdf5::Saver& saver,
               ftd->save_hdf5(s, g, sub);
               return;
           }
+#endif
+          (void)s;
+          (void)g;
+          (void)sub;
           throw std::runtime_error("hdf5_export: TensorBackend::Data without save_hdf5");
       });
 }
@@ -691,13 +703,15 @@ load_tensor_backend_data(lasyten::hdf5::Loader& loader, std::string const& path)
     return load_instance<TensorBackend::Data>(
       loader, path, [&](HighFive::Group& g, std::string const& sub) -> TensorBackend::DataPtr {
           auto const cls = class_attr(g);
+#if LASYTEN_HAS_PYTHON
           if (cls == "AbelianBackendData")
               return AbelianBackendData::from_hdf5(loader, g, sub);
           if (cls == "FusionTreeData")
               return FusionTreeData::from_hdf5(loader, g, sub);
+#endif
+          (void)sub;
           throw std::runtime_error("hdf5_export: unknown TensorBackend::Data class " + cls);
       });
 }
-#endif // LASYTEN_HAS_PYTHON
 
 } // namespace lasyten::hdf5_export

@@ -77,6 +77,7 @@ SymmetricTensor::test_sanity() const
           "SymmetricTensor::test_sanity: device mismatch");
     // Prefer C++ RTTI so _core.DiagonalTensor is recognized before monkey-patch.
     bool is_diagonal = dynamic_cast<DiagonalTensor const*>(this) != nullptr;
+#if LASYTEN_HAS_PYTHON
     if (!is_diagonal && Py_IsInitialized()) {
         try {
             is_diagonal = py::isinstance<DiagonalTensor>(py::cast(shared_from_this()));
@@ -85,6 +86,7 @@ SymmetricTensor::test_sanity() const
             PyErr_Clear();
         }
     }
+#endif
     backend->test_tensor_sanity(shared_from_this(), is_diagonal);
     verify_dtype();
     // HiddenLegTensor validates `!` itself; ChargedTensor invariant parts set
@@ -284,7 +286,7 @@ SymmetricTensor::from_dense_block(BlockBackend::BlockPtr block,
           "that means (read the docstring of from_dense_block). Then you can disable "
           "this error by setting ``understood_braiding=True``.");
     }
-    auto block_ptr = backend_tp->block_backend->as_block(py::cast(block), dtype, device);
+    auto block_ptr = backend_tp->block_backend->convert_block(block, dtype, device);
     if (static_cast<int64>(backend_tp->block_backend->get_shape(block_ptr).size()) !=
         codomain_tp->num_factors + domain_tp->num_factors) {
         throw std::invalid_argument(
@@ -341,8 +343,7 @@ SymmetricTensor::from_dense_block_trivial_sector(BlockBackend::BlockPtr vector,
         for (std::size_t j = 0; j < order.size(); ++j) {
             inv[static_cast<std::size_t>(order[j])] = static_cast<int64>(j);
         }
-        vec = backend->block_backend->apply_leg_permutations(
-          vec, { py::array_t<int64>(static_cast<py::ssize_t>(inv.size()), inv.data()) });
+        vec = backend->block_backend->apply_axis_permutations(vec, { std::move(inv) });
     }
     auto data = backend->from_dense_block_trivial_sector(vec, space_as_space);
     auto codomain =
@@ -534,6 +535,7 @@ SymmetricTensor::from_sector_projection(TensorProduct::Ptr co_domain,
     return res;
 }
 
+#if LASYTEN_HAS_PYTHON
 SymmetricTensor::Ptr
 SymmetricTensor::from_tree_pairs(py::object trees_obj,
                                  TensorProduct::Ptr codomain,
@@ -626,6 +628,7 @@ SymmetricTensor::from_tree_pairs(py::object trees_obj,
       symmetry,
       _init_parse_labels(std::move(labels), codomain_tp, domain_tp));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 Tensor::Ptr
 SymmetricTensor::as_dtype(Dtype new_dtype)
@@ -758,12 +761,13 @@ SymmetricTensor::to_backend(TensorBackend::Ptr new_backend,
     TensorBackend::DataPtr new_data;
     if (std::dynamic_pointer_cast<NoSymmetryBackend>(new_backend)) {
         auto old_block = backend->to_dense_block(shared_from_this());
-        auto new_block = new_backend->block_backend->as_block(py::cast(old_block), dt, device_s);
+        auto new_block = new_backend->block_backend->convert_block(old_block, dt, device_s);
         new_data = NoSymmetryBackend::wrap(new_block);
     } else if (std::dynamic_pointer_cast<NoSymmetryBackend>(backend)) {
         auto old_block = NoSymmetryBackend::unwrap(data);
-        auto new_block = new_backend->block_backend->as_block(py::cast(old_block), dt, device_s);
+        auto new_block = new_backend->block_backend->convert_block(old_block, dt, device_s);
         new_data = new_backend->from_dense_block(new_block, codomain, domain, 0.);
+#if LASYTEN_HAS_PYTHON // Abelian / FusionTree backends are only built with Python
     } else if (std::dynamic_pointer_cast<AbelianBackend>(new_backend)) {
         if (std::dynamic_pointer_cast<AbelianBackend>(backend)) {
             new_data = backend->to_block_backend(data, new_backend->block_backend, dt, device_s);
@@ -809,6 +813,7 @@ SymmetricTensor::to_backend(TensorBackend::Ptr new_backend,
         } else {
             throw std::runtime_error("Unexpected backend combination");
         }
+#endif // LASYTEN_HAS_PYTHON
     } else {
         const auto& obj = *new_backend;
         throw std::invalid_argument(std::format("Unexpected backend type {}", typeid(obj).name()));
@@ -894,8 +899,7 @@ SymmetricTensor::to_dense_block_trivial_sector() const
         std::ranges::sort(order, [&](int64 a, int64 b) {
             return segment[static_cast<std::size_t>(a)] < segment[static_cast<std::size_t>(b)];
         });
-        block = backend->block_backend->apply_leg_permutations(
-          block, { py::array_t<int64>(static_cast<py::ssize_t>(order.size()), order.data()) });
+        block = backend->block_backend->apply_axis_permutations(block, { std::move(order) });
     }
     return block;
 }
@@ -948,11 +952,13 @@ SymmetricTensor::from_hdf5(lasyten::hdf5::Loader& loader,
     if (is_torch_block_backend(backend->block_backend.get())) {
         obj->device =
           torch_device_for_hdf5_load(obj->device, backend->block_backend->default_device);
+#if LASYTEN_HAS_PYTHON
         if (auto* abd = dynamic_cast<AbelianBackendData*>(data.get())) {
             abd->device = obj->device;
         } else if (auto* ftd = dynamic_cast<FusionTreeData*>(data.get())) {
             ftd->device = obj->device;
         }
+#endif
     }
     obj->shape = std::move(shape);
     loader.memorize_load(h5gr.getId(), std::static_pointer_cast<void>(obj));

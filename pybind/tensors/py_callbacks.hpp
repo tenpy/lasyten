@@ -5,12 +5,29 @@
 #include <lasyten/block_backend/dtypes.h>
 #include <lasyten/lasyten.h>
 #include <lasyten/symmetries/sector.h>
+#include <lasyten/tensors/tensor.h>
 
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace lasyten {
+
+/// ``list[list[Tensor | None]]`` -> `TensorBackend::from_grid` grid (``None`` becomes nullptr).
+inline std::vector<std::vector<TensorCPtr>>
+tensor_grid_from_python(py::object grid)
+{
+    std::vector<std::vector<TensorCPtr>> out;
+    for (auto row_h : py::reinterpret_borrow<py::iterable>(grid)) {
+        std::vector<TensorCPtr> row;
+        for (auto item : py::reinterpret_borrow<py::iterable>(row_h)) {
+            py::object obj = py::reinterpret_borrow<py::object>(item);
+            row.push_back(obj.is_none() ? nullptr : py::cast<TensorPtr>(obj));
+        }
+        out.push_back(std::move(row));
+    }
+    return out;
+}
 
 inline py::dict
 copy_kwargs(py::object obj)

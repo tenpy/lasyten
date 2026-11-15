@@ -23,6 +23,26 @@ namespace lasyten {
 
 namespace {
 
+/// ``blockmask`` argument of ``take_slice``: any 1D array-like of bool.
+std::vector<bool>
+blockmask_from_python(py::object blockmask)
+{
+    py::array const arr = py::array::ensure(blockmask);
+    if (!arr) {
+        throw py::type_error("blockmask must be a 1D array of bool");
+    }
+    auto casted = py::array_t<bool, py::array::c_style | py::array::forcecast>::ensure(arr);
+    if (!casted || casted.ndim() != 1) {
+        throw py::type_error("blockmask must be a 1D array of bool");
+    }
+    auto const view = casted.unchecked<1>();
+    std::vector<bool> out(static_cast<std::size_t>(view.shape(0)));
+    for (py::ssize_t i = 0; i < view.shape(0); ++i) {
+        out[static_cast<std::size_t>(i)] = view(i);
+    }
+    return out;
+}
+
 Symmetry::Ptr
 symmetry_from_python(py::object symmetry_obj)
 {
@@ -715,7 +735,7 @@ bind_elementary_space(nb::module_& m)
       .def(
         "take_slice",
         [](ElementarySpace& self, py::object blockmask) {
-            return self.take_slice(py::array::ensure(blockmask));
+            return self.take_slice(blockmask_from_python(blockmask));
         },
         nb::arg("blockmask"),
         DOC(lasyten, ElementarySpace, take_slice))
@@ -828,7 +848,7 @@ bind_direct_sum_space(nb::module_& m)
       .def(
         "take_slice",
         [](DirectSumSpace& self, py::object blockmask) {
-            return self.take_slice(py::array::ensure(blockmask));
+            return self.take_slice(blockmask_from_python(blockmask));
         },
         nb::arg("blockmask"),
         DOC(lasyten, ElementarySpace, take_slice))
@@ -1317,7 +1337,7 @@ bind_abelian_leg_pipe(nb::module_& m)
       .def(
         "take_slice",
         [](AbelianLegPipe& self, py::object blockmask) {
-            return self.take_slice(py::array::ensure(blockmask));
+            return self.take_slice(blockmask_from_python(blockmask));
         },
         nb::arg("blockmask"),
         doc_cpp_ref(DOC(lasyten, AbelianLegPipe), "lasyten::AbelianLegPipe::take_slice()"))

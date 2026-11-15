@@ -61,16 +61,10 @@ set(LASYTEN_PYTHON_FREE_SOURCES
   symmetries/sector_numpy.cpp
   block_backend/block_backend_legs.cpp
   tools/hdf5_export.cpp
-)
-
-set(LASYTEN_PYTHON_API_SOURCES
-  backends/backend_factory.cpp
+  # Python-free C++ stack (NoSymmetry tensors on Eigen); Python-only parts are under
+  # #if LASYTEN_HAS_PYTHON
   backends/tensor_backend.cpp
   backends/no_symmetry.cpp
-  backends/block_inds_numpy.cpp
-  backends/abelian.cpp
-  backends/fusion_tree_backend.cpp
-  backends/fusion_tree_mapping.cpp
   symmetries/spaces.cpp
   tensors/tensor.cpp
   tensors/symmetric_tensor.cpp
@@ -80,6 +74,14 @@ set(LASYTEN_PYTHON_API_SOURCES
   tensors/helpers.cpp
   tensors/constructors.cpp
   tensors/decompositions.cpp
+  backends/backend_factory.cpp
+)
+
+set(LASYTEN_PYTHON_API_SOURCES
+  backends/block_inds_numpy.cpp
+  backends/abelian.cpp
+  backends/fusion_tree_backend.cpp
+  backends/fusion_tree_mapping.cpp
   tensors/krylov_based.cpp
 )
 

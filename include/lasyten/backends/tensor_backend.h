@@ -411,7 +411,7 @@ class TensorBackend : public std::enable_shared_from_this<TensorBackend>
     /// ``new_domain[-1].sector_decomposition[sector_idx]`` of the leg ``new_domain[-1]``.
     /// @param dtype The new dtype of the block.
     /// @param device The device for the block.
-    virtual DataPtr from_grid(std::vector<std::vector<py::object>> grid,
+    virtual DataPtr from_grid(std::vector<std::vector<TensorCPtr>> grid,
                               TensorProduct::Ptr new_codomain,
                               TensorProduct::Ptr new_domain,
                               std::vector<std::vector<int64>> left_mult_slices,
@@ -802,6 +802,19 @@ class TensorBackend : public std::enable_shared_from_this<TensorBackend>
     /// @returns mask : 1D numpy array of bool A boolean mask, indicating that ``S[mask]``
     /// should be kept; err : float The truncation error ``norm(S_discard) == norm(S - S_keep)``.
     /// new_norm The norm ``norm(S_keep)`` of the approximation.
+    std::tuple<std::vector<bool>, float64, float64> _truncate_singular_values_selection(
+      std::vector<float64> const& S,
+      std::optional<std::vector<float64>> const& qdims,
+      std::optional<int64> chi_max,
+      int64 chi_min,
+      float64 degeneracy_tol,
+      float64 trunc_cut,
+      std::optional<float64> svd_min,
+      bool minimize_error = true);
+
+#if LASYTEN_HAS_PYTHON
+    /// Same with numpy arrays (``qdims=None`` means all qdims are one); used by the bindings and
+    /// the Python-dependent backends.
     std::tuple<py::array, float64, float64> _truncate_singular_values_selection(
       py::array S,
       py::object qdims,
@@ -811,6 +824,7 @@ class TensorBackend : public std::enable_shared_from_this<TensorBackend>
       float64 trunc_cut,
       std::optional<float64> svd_min,
       bool minimize_error = true);
+#endif // LASYTEN_HAS_PYTHON
 
     /// Data for a zero tensor.
     ///
@@ -842,10 +856,12 @@ class TensorBackend : public std::enable_shared_from_this<TensorBackend>
                            std::string subpath);
 
     /// Reconstruct a concrete backend. Bound as a Python classmethod so `cls` is the saved type.
+#if LASYTEN_HAS_PYTHON
     static Ptr from_hdf5(py::object cls,
                          lasyten::hdf5::Loader& loader,
                          HighFive::Group& h5gr,
                          std::string subpath);
+#endif // LASYTEN_HAS_PYTHON
 };
 
 /// The conventional order of legs: ``[*codomain.factors, *reversed(domain.factors)]``.
@@ -854,15 +870,19 @@ std::vector<Leg::Ptr> conventional_leg_order(TensorProduct::Ptr codomain,
                                              TensorProduct::Ptr domain);
 
 /// Overload accepting a tensor-like object with ``.codomain`` / ``.domain`` attributes.
+#if LASYTEN_HAS_PYTHON
 std::vector<Leg::Ptr> conventional_leg_order(py::object tensor_or_codomain,
                                              py::object domain = py::none());
+#endif // LASYTEN_HAS_PYTHON
 
 std::vector<Leg::Ptr> conventional_leg_order(TensorCPtr tensor);
 
 /// If the given objects have the same backend, return it. Raise otherwise.
 /// If the given object have the same backend, return it. Raise otherwise.
+#if LASYTEN_HAS_PYTHON
 TensorBackend::Ptr get_same_backend(const std::vector<py::object>& objs,
                                     std::string error_msg = "Incompatible backends.");
+#endif // LASYTEN_HAS_PYTHON
 
 TensorBackend::Ptr get_same_backend(const std::vector<TensorCPtr>& objs,
                                     std::string error_msg = "Incompatible backends.");

@@ -12,6 +12,34 @@ namespace lasyten {
 NotImplemented::NotImplemented(std::string name)
   : std::logic_error(std::format("Not implemented: {}", name)) {};
 
+std::string
+format_like_list(std::vector<std::string> const& items)
+{
+    std::string result = "[";
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) {
+            result += ", ";
+        }
+        result += items[i];
+    }
+    result += "]";
+    return result;
+}
+
+std::string
+format_like_list(std::vector<int64> const& items)
+{
+    std::string result = "[";
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) {
+            result += ", ";
+        }
+        result += std::to_string(items[i]);
+    }
+    result += "]";
+    return result;
+}
+
 #if LASYTEN_HAS_PYTHON
 /// Format elements of an iterable as if it were a plain list.
 std::string

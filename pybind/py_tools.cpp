@@ -21,7 +21,7 @@ bind_tools(nb::module_& m)
     });
 
     m.def("format_like_list",
-          &lasyten::format_like_list,
+          static_cast<std::string (*)(py::iterable)>(&lasyten::format_like_list),
           doc_cpp_ref(R"pydoc(format_like_list)pydoc", "lasyten::format_like_list"),
           nb::arg("it"));
 

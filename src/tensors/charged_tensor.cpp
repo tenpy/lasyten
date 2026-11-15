@@ -23,6 +23,25 @@
 
 namespace lasyten {
 
+namespace {
+
+/// ``str(charge_space.sector_decomposition)`` for the repr header.
+std::string
+sector_decomposition_str(Space const& space)
+{
+#if LASYTEN_HAS_PYTHON
+    return py::cast<std::string>(py::str(py::cast(space.sector_decomposition)));
+#else
+    std::vector<std::string> sectors;
+    for (auto const& a : space.sector_decomposition) {
+        sectors.push_back(space.symmetry->sector_str(a));
+    }
+    return format_like_list(sectors);
+#endif
+}
+
+} // namespace
+
 ChargedTensor::ChargedTensor(SymmetricTensor::Ptr inv, BlockBackend::BlockPtr charged_state_in)
   : Tensor(
       inv->codomain,
@@ -68,8 +87,8 @@ ChargedTensor::ChargedTensor(SymmetricTensor::Ptr inv, BlockBackend::BlockPtr ch
         throw SymmetryError(std::format("charged_state can not be specified for symmetry {}",
                                         invariant_part->symmetry->repr()));
     }
-    charged_state = invariant_part->backend->block_backend->as_block(
-      py::cast(charged_state), invariant_part->dtype, invariant_part->device);
+    charged_state = invariant_part->backend->block_backend->convert_block(
+      charged_state, invariant_part->dtype, invariant_part->device);
     invariant_part->allow_charge_leg_label = true;
     reject_reserved_markers_in_labels(labels.as_list(), "ChargedTensor");
 
@@ -214,7 +233,7 @@ ChargedTensor::from_dense_block(BlockBackend::BlockPtr block,
         throw SymmetryError(std::format(
           "Dense block representation is not supported for symmetry {}", symmetry->repr()));
     }
-    auto block_ptr = backend_tp->block_backend->as_block(py::cast(block), dtype, device);
+    auto block_ptr = backend_tp->block_backend->convert_block(block, dtype, device);
     if (!charge.has_value()) {
         throw NotImplemented("ChargedTensor::from_dense_block with charge=None");
     }
@@ -232,8 +251,7 @@ ChargedTensor::from_dense_block(BlockBackend::BlockPtr block,
                                         std::nullopt,
                                         tol,
                                         understood_braiding);
-    auto cs = backend_tp->block_backend->as_block(
-      py::cast(std::vector<int64>{ 1 }), inv_part->dtype, inv_part->device);
+    auto cs = backend_tp->block_backend->ones_block({ 1 }, inv_part->dtype, inv_part->device);
     return std::make_shared<ChargedTensor>(inv_part, cs);
 }
 
@@ -266,8 +284,8 @@ ChargedTensor::from_dense_block_single_sector(BlockBackend::BlockPtr vector,
     LegLabelList inv_labels{ label.value_or(""), std::string(_CHARGE_LEG_LABEL) };
     auto inv_part = std::make_shared<SymmetricTensor>(
       data, codomain, inv_domain, backend, space.symmetry(), std::move(inv_labels));
-    auto charged_state =
-      backend->block_backend->as_block(py::cast(std::vector<int64>{ 1 }), inv_part->dtype, device);
+    auto charged_state = backend->block_backend->ones_block(
+      { 1 }, inv_part->dtype, backend->block_backend->as_device(device));
     return std::make_shared<ChargedTensor>(inv_part, charged_state);
 }
 
@@ -289,7 +307,7 @@ ChargedTensor::from_invariant_part(SymmetricTensor::Ptr inv, BlockBackend::Block
         auto inv_block =
           inv->to_dense_block(std::nullopt, std::nullopt, /*understood_braiding=*/true);
         auto state =
-          inv->backend->block_backend->as_block(py::cast(charged_state), inv->dtype, inv->device);
+          inv->backend->block_backend->convert_block(charged_state, inv->dtype, inv->device);
         return inv->backend->block_backend->inner(inv_block, state, /*do_dagger=*/false);
     }
     inv->allow_charge_leg_label = true;
@@ -328,9 +346,15 @@ ChargedTensor::from_two_charge_legs(SymmetricTensor::Ptr invariant_part,
     if (!pipe || !pipe.is_pipe()) {
         throw std::runtime_error("from_two_charge_legs: expected pipe charge leg");
     }
+#if LASYTEN_HAS_PYTHON
     auto state = py::cast<BlockBackend::BlockPtr>(
       invariant_part->backend->state_tensor_product(state1, state2, pipe));
     return from_invariant_part(inv_sym, state);
+#else
+    // TensorBackend::state_tensor_product is not defined without Python (it is
+    // NotImplemented in all backends anyway).
+    throw NotImplemented("from_two_charge_legs needs LASYTEN_WITH_PYTHON=ON");
+#endif
 }
 
 ChargedTensor::Ptr
@@ -438,7 +462,7 @@ ChargedTensor::copy(bool deep,
     inv->allow_charge_leg_label = true;
     BlockBackend::BlockPtr cs = charged_state;
     if ((device_opt.has_value() && !deep) || (dtype_opt.has_value() && *dtype_opt != dtype)) {
-        cs = backend->block_backend->as_block(py::cast(cs), dtype_opt, device_opt);
+        cs = backend->block_backend->convert_block(cs, dtype_opt, device_opt);
     }
     if (deep) {
         cs = backend->block_backend->copy_block(cs, device_opt);
@@ -483,7 +507,7 @@ ChargedTensor::_get_item(std::vector<int64> const& idx)
         throw NotImplemented("ChargedTensor::_get_item for large charged_state");
     }
     auto bb = backend->block_backend;
-    auto acc = bb->as_scalar(dtype::zero_scalar(dtype), dtype);
+    auto acc = bb->as_scalar(complex128{ 0.0 }, dtype);
     int64 n_charge = charged_state->shape()[0];
     for (int64 n = 0; n < n_charge; ++n) {
         auto a = charged_state->get_item(n);
@@ -500,8 +524,7 @@ ChargedTensor::move_to_device(std::string device_in)
 {
     invariant_part->move_to_device(device_in);
     device = invariant_part->device;
-    charged_state =
-      backend->block_backend->as_block(py::cast(charged_state), std::nullopt, device);
+    charged_state = backend->block_backend->convert_block(charged_state, std::nullopt, device);
 }
 
 std::vector<std::string>
@@ -510,11 +533,10 @@ ChargedTensor::_repr_header_lines(std::string const& indent, bool use_symm_str) 
     auto linewidth = get_config().print_linewidth;
     auto lines = Tensor::_repr_header_lines(indent, use_symm_str);
     Space::Ptr charge_space = as_space(charge_leg);
-    lines.push_back(
-      std::format("{}* Charge Leg: dim={} sectors={}",
-                  indent,
-                  std::round(charge_leg.dim() * 1000.) / 1000.,
-                  py::cast<std::string>(py::str(py::cast(charge_space->sector_decomposition)))));
+    lines.push_back(std::format("{}* Charge Leg: dim={} sectors={}",
+                                indent,
+                                std::round(charge_leg.dim() * 1000.) / 1000.,
+                                sector_decomposition_str(*charge_space)));
     std::string start = indent + "* Charged State: ";
     auto state_lines = backend->block_backend->_block_repr_lines(
       charged_state, indent + "  ", linewidth - static_cast<int64>(start.size()), 1);
@@ -538,7 +560,7 @@ ChargedTensor::to_backend(TensorBackend::Ptr new_backend,
     assert(inv);
     BlockBackend::BlockPtr cs;
     if (charged_state) {
-        cs = new_backend->block_backend->as_block(py::cast(charged_state), dtype_opt, device_s);
+        cs = new_backend->block_backend->convert_block(charged_state, dtype_opt, device_s);
     }
     return std::make_shared<ChargedTensor>(inv, cs);
 }

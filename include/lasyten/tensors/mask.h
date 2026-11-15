@@ -178,11 +178,13 @@ class Mask : public Tensor
     /// of `large_leg` with these indices are kept by the projection.
     /// @param large_leg, backend, labels Same as for `__init__`.
     /// @param device The device of the tensor. If omitted, use the default device of the backend.
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] static Ptr from_indices(py::object indices,
                                           Space::Ptr large_leg,
                                           TensorBackend::Ptr backend = nullptr,
                                           std::optional<LegLabelList> labels = std::nullopt,
                                           std::optional<std::string> device = std::nullopt);
+#endif // LASYTEN_HAS_PYTHON
 
     /// Create a random projection Mask.
     ///
@@ -205,8 +207,12 @@ class Mask : public Tensor
                                          float64 p_keep = 0.5,
                                          int64 min_keep = 0,
                                          std::optional<LegLabelList> labels = std::nullopt,
-                                         std::optional<std::string> device = std::nullopt,
-                                         py::object np_random = py::none());
+                                         std::optional<std::string> device = std::nullopt
+#if LASYTEN_HAS_PYTHON
+                                         ,
+                                         py::object np_random = py::none()
+#endif
+    );
 
     /// The zero projection Mask, that discards all states and keeps none.
     ///
@@ -336,11 +342,13 @@ class Mask : public Tensor
       std::optional<Dtype> dtype = std::nullopt,
       bool understood_braiding = false) override;
 
+#if LASYTEN_HAS_PYTHON
     /// Convert to a numpy array
     [[nodiscard]] py::array to_numpy(
       std::optional<std::vector<std::variant<int64, std::string>>> leg_order = std::nullopt,
       py::object numpy_dtype = py::none(),
       bool understood_braiding = false);
+#endif // LASYTEN_HAS_PYTHON
 
     // --- Mask-specific API ---
 
@@ -348,7 +356,9 @@ class Mask : public Tensor
 
     [[nodiscard]] BlockBackend::BlockPtr as_block_mask();
 
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] py::array as_numpy_mask();
+#endif // LASYTEN_HAS_PYTHON
 
     /// If the mask keeps all basis elements
     [[nodiscard]] bool all() const;

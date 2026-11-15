@@ -13,7 +13,7 @@ enable_testing()
 # the full tensor stack, which still needs Python.
 if(NOT LASYTEN_WITH_PYTHON)
   message(STATUS
-    "LASYTEN_WITH_PYTHON=OFF: building only the Python-free ctests (Eigen block backend, symmetric blocks); "
+    "LASYTEN_WITH_PYTHON=OFF: building only the Python-free ctests (Eigen block backend, symmetric blocks, tensors); "
     "skipping the other tests / examples that need the Python-dependent liblasyten sources.")
   add_executable(EigenNoPythonTests test_eigen_block_backend_main.cpp test_eigen_block_backend.cpp)
   set_source_files_properties(test_eigen_block_backend_main.cpp test_eigen_block_backend.cpp
@@ -30,6 +30,15 @@ if(NOT LASYTEN_WITH_PYTHON)
   target_include_directories(SymmetricBlocksNoPythonTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(SymmetricBlocksNoPythonTests PUBLIC lasyten)
   add_test(NAME test_symmetric_blocks_no_python COMMAND SymmetricBlocksNoPythonTests)
+
+  # NoSymmetry tensors on EigenBlockBackend: SymmetricTensor, tdot / compose, svd / qr / lq,
+  # checked against dense references. Python-free, no libpython.
+  add_executable(TensorNoPythonTests test_tensor_no_python.cpp)
+  set_source_files_properties(test_tensor_no_python.cpp PROPERTIES SKIP_LINTING ON)
+  target_compile_definitions(TensorNoPythonTests PRIVATE LASYTEN_TEST_STANDALONE_MAIN)
+  target_include_directories(TensorNoPythonTests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+  target_link_libraries(TensorNoPythonTests PUBLIC lasyten)
+  add_test(NAME test_tensor_no_python COMMAND TensorNoPythonTests)
   return()
 endif()
 
@@ -41,6 +50,7 @@ set (TestsToRun
   test_lru_cache.cpp
   test_eigen_block_backend.cpp
   test_symmetric_blocks_no_python.cpp
+  test_tensor_no_python.cpp
 )
 
 create_test_sourcelist(Tests CommonCppTests.cpp ${TestsToRun})

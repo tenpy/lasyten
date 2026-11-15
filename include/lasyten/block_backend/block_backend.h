@@ -328,6 +328,22 @@ class BlockBackend
     virtual BlockPtr apply_leg_permutations(const BlockCPtr& block,
                                             const std::vector<py::array_t<int64>>& perms) = 0;
 #endif // LASYTEN_HAS_PYTHON
+    /// Python-free ``as_block`` for an existing block: cast to `dtype` and/or move to `device`
+    /// (no-op, i.e. the same block is returned, if nothing changes).
+    ///
+    /// Blocks of *this* backend are handled natively. Blocks of a different backend are converted
+    /// through numpy and thus need ``LASYTEN_WITH_PYTHON=ON``.
+    [[nodiscard]] BlockPtr convert_block(BlockCPtr const& block,
+                                         std::optional<Dtype> dtype = std::nullopt,
+                                         std::optional<std::string> device = std::nullopt);
+    /// Entries of a 1D block as ``float64`` (real part for complex dtypes); element access only.
+    [[nodiscard]] std::vector<float64> block_to_float64_vector(BlockCPtr const& block);
+    /// Entries of a 1D bool block; element access only.
+    [[nodiscard]] std::vector<bool> block_to_bool_vector(BlockCPtr const& block);
+    /// Python-free 1D bool block holding `values` (built with ``zeros`` + element assignment).
+    [[nodiscard]] BlockPtr block_from_bool_vector(
+      std::vector<bool> const& values,
+      std::optional<std::string> device = std::nullopt);
     /// Convert objects to blocks.
     ///
     /// Should support blocks, numpy arrays, nested python containers. May support more.

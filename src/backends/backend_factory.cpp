@@ -1,6 +1,8 @@
-#include <lasyten/backends/abelian.h>
 #include <lasyten/backends/backend_factory.h>
+#if LASYTEN_HAS_PYTHON
+#include <lasyten/backends/abelian.h>
 #include <lasyten/backends/fusion_tree_backend.h>
+#endif
 #include <lasyten/backends/no_symmetry.h>
 #include <lasyten/block_backend/eigen.h>
 #if LASYTEN_WITH_NUMPY_BACKEND
@@ -121,11 +123,16 @@ make_tensor_backend(std::string const& tensor_backend,
     if (tensor_backend == "no_symmetry") {
         return std::make_shared<NoSymmetryBackend>(std::move(block_backend_instance));
     }
-    if (tensor_backend == "abelian") {
-        return std::make_shared<AbelianBackend>(std::move(block_backend_instance));
-    }
-    if (tensor_backend == "fusion_tree") {
+    if (tensor_backend == "abelian" || tensor_backend == "fusion_tree") {
+#if LASYTEN_HAS_PYTHON
+        if (tensor_backend == "abelian") {
+            return std::make_shared<AbelianBackend>(std::move(block_backend_instance));
+        }
         return std::make_shared<FusionTreeBackend>(std::move(block_backend_instance));
+#else
+        throw NotImplemented("tensor backend \"" + tensor_backend +
+                             "\" (compiled out: LASYTEN_WITH_PYTHON=OFF); only \"no_symmetry\"");
+#endif
     }
     throw std::invalid_argument("Unknown tensor_backend: " + tensor_backend);
 }

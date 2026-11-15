@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cxxabi.h>
 #include <format>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
@@ -13,12 +15,14 @@
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
+#include <typeinfo>
 #include <vector>
 
 namespace lasyten {
 
 namespace {
 
+#if LASYTEN_HAS_PYTHON
 std::vector<float64>
 f64_array_to_vector(py::array arr)
 {
@@ -42,10 +46,12 @@ bool_vector_to_array(std::vector<bool> const& v)
     }
     return arr;
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::string
 backend_type_name(TensorBackend const& self)
 {
+#if LASYTEN_HAS_PYTHON
     try {
         py::object py_self = py::cast(const_cast<TensorBackend*>(&self));
         return py::cast<std::string>(py::str(py::type::of(py_self).attr("__name__")));
@@ -54,6 +60,17 @@ backend_type_name(TensorBackend const& self)
     } catch (py::error_already_set const&) {
         return "TensorBackend";
     }
+#else
+    // Python-free: the (unqualified) C++ class name.
+    int status = 0;
+    char* demangled = abi::__cxa_demangle(typeid(self).name(), nullptr, nullptr, &status);
+    std::string name = (status == 0 && demangled) ? demangled : typeid(self).name();
+    std::free(demangled);
+    if (auto const pos = name.rfind("::"); pos != std::string::npos) {
+        name = name.substr(pos + 2);
+    }
+    return name;
+#endif
 }
 
 bool
@@ -82,11 +99,15 @@ TensorBackend::__repr__() const
 {
     std::ostringstream oss;
     oss << backend_type_name(*this) << '(';
+#if LASYTEN_HAS_PYTHON
     try {
         oss << py::cast<std::string>(py::repr(py::cast(block_backend)));
     } catch (...) {
         oss << "BlockBackend";
     }
+#else
+    oss << (block_backend ? block_backend->get_backend_name() : std::string("BlockBackend"));
+#endif
     oss << ')';
     return oss.str();
 }
@@ -184,27 +205,28 @@ TensorBackend::make_pipe(std::vector<Leg::Ptr> legs, bool is_dual, Leg::Ptr pipe
     return std::make_shared<LegPipe>(std::move(legs), is_dual, /*combine_cstyle=*/!is_dual);
 }
 
-std::tuple<py::array, float64, float64>
-TensorBackend::_truncate_singular_values_selection(py::array S,
-                                                   py::object qdims,
-                                                   std::optional<int64> chi_max,
-                                                   int64 chi_min,
-                                                   float64 degeneracy_tol,
-                                                   float64 trunc_cut,
-                                                   std::optional<float64> svd_min,
-                                                   bool minimize_error)
+std::tuple<std::vector<bool>, float64, float64>
+TensorBackend::_truncate_singular_values_selection(
+  std::vector<float64> const& S,
+  std::optional<std::vector<float64>> const& qdims,
+  std::optional<int64> chi_max,
+  int64 chi_min,
+  float64 degeneracy_tol,
+  float64 trunc_cut,
+  std::optional<float64> svd_min,
+  bool minimize_error)
 {
     // --- hints from Python TensorBackend._truncate_singular_values_selection ---
     // contributions ``err[i] = d[i] * S[i] ** 2`` to the error, if S[i] would be truncated.
     // ---
-    auto S_v = f64_array_to_vector(S);
+    auto const& S_v = S;
     std::vector<float64> marginal_errs(S_v.size());
-    if (qdims.is_none()) {
+    if (!qdims) {
         for (std::size_t i = 0; i < S_v.size(); ++i) {
             marginal_errs[i] = S_v[i] * S_v[i];
         }
     } else {
-        auto q = f64_array_to_vector(py::cast<py::array>(qdims));
+        auto const& q = *qdims;
         if (q.size() != S_v.size()) {
             throw std::invalid_argument(
               "_truncate_singular_values_selection: qdims size mismatch");
@@ -308,8 +330,35 @@ TensorBackend::_truncate_singular_values_selection(py::array S,
     for (std::size_t i = cut; i < n; ++i) {
         mask[piv[i]] = true;
     }
+    return { std::move(mask), err, new_norm };
+}
+
+#if LASYTEN_HAS_PYTHON
+std::tuple<py::array, float64, float64>
+TensorBackend::_truncate_singular_values_selection(py::array S,
+                                                   py::object qdims,
+                                                   std::optional<int64> chi_max,
+                                                   int64 chi_min,
+                                                   float64 degeneracy_tol,
+                                                   float64 trunc_cut,
+                                                   std::optional<float64> svd_min,
+                                                   bool minimize_error)
+{
+    std::optional<std::vector<float64>> q;
+    if (!qdims.is_none()) {
+        q = f64_array_to_vector(py::cast<py::array>(qdims));
+    }
+    auto [mask, err, new_norm] = _truncate_singular_values_selection(f64_array_to_vector(S),
+                                                                     q,
+                                                                     chi_max,
+                                                                     chi_min,
+                                                                     degeneracy_tol,
+                                                                     trunc_cut,
+                                                                     svd_min,
+                                                                     minimize_error);
     return { bool_vector_to_array(mask), err, new_norm };
 }
+#endif // LASYTEN_HAS_PYTHON
 
 bool
 TensorBackend::is_real(TensorCPtr a)
@@ -329,6 +378,7 @@ TensorBackend::save_hdf5(lasyten::hdf5::Saver& saver,
     hdf5_export::save_block_backend(saver, subpath + "block_backend", block_backend);
 }
 
+#if LASYTEN_HAS_PYTHON
 TensorBackend::Ptr
 TensorBackend::from_hdf5(py::object cls,
                          lasyten::hdf5::Loader& loader,
@@ -341,6 +391,7 @@ TensorBackend::from_hdf5(py::object cls,
     loader.memorize_load(h5gr.getId(), std::static_pointer_cast<void>(ptr));
     return ptr;
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::vector<Leg::Ptr>
 conventional_leg_order(TensorProduct::Ptr codomain, TensorProduct::Ptr domain)
@@ -354,6 +405,7 @@ conventional_leg_order(TensorProduct::Ptr codomain, TensorProduct::Ptr domain)
     return out;
 }
 
+#if LASYTEN_HAS_PYTHON
 std::vector<Leg::Ptr>
 conventional_leg_order(py::object tensor_or_codomain, py::object domain)
 {
@@ -368,6 +420,7 @@ conventional_leg_order(py::object tensor_or_codomain, py::object domain)
     }
     return conventional_leg_order(codomain_ptr, domain_ptr);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::vector<Leg::Ptr>
 conventional_leg_order(TensorCPtr tensor)
@@ -375,6 +428,7 @@ conventional_leg_order(TensorCPtr tensor)
     return conventional_leg_order(tensor->codomain, tensor->domain);
 }
 
+#if LASYTEN_HAS_PYTHON
 TensorBackend::Ptr
 get_same_backend(const std::vector<py::object>& objs, std::string error_msg)
 {
@@ -395,6 +449,7 @@ get_same_backend(const std::vector<py::object>& objs, std::string error_msg)
     }
     return backend;
 }
+#endif // LASYTEN_HAS_PYTHON
 
 TensorBackend::Ptr
 get_same_backend(const std::vector<TensorCPtr>& objs, std::string error_msg)

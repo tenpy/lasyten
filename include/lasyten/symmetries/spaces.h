@@ -98,10 +98,12 @@ class Leg
     [[nodiscard]] std::vector<int64> _flat_leg_permutation(int64 offset = 0) const;
     [[nodiscard]] std::string ascii_arrow() const;
 
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] py::object apply_basis_perm(py::object arr,
                                               int64 axis = 0,
                                               bool inverse = false,
                                               bool pre_compose = false) const;
+#endif // LASYTEN_HAS_PYTHON
 
     bool operator==(Leg const& other) const;
     bool operator!=(Leg const& other) const { return !(*this == other); }
@@ -260,10 +262,12 @@ class LegPipe : public std::enable_shared_from_this<LegPipe>
     [[nodiscard]] bool is_pipe() const { return true; }
     [[nodiscard]] bool is_abelian_leg_pipe() const { return false; }
 
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] py::object apply_basis_perm(py::object arr,
                                               int64 axis = 0,
                                               bool inverse = false,
                                               bool pre_compose = false) const;
+#endif // LASYTEN_HAS_PYTHON
 
     bool operator==(LegPipe const& other) const;
 
@@ -397,8 +401,9 @@ class ElementarySpace : public Space
     /// Loses the product (pipe) structure and results in a plain `ElementarySpace`.
     ///
     /// @param blockmask For every basis state of self, in the public basis order, if it
-    ///     should be kept (``True``) or discarded (``False``).
-    [[nodiscard]] virtual Ptr take_slice(py::array blockmask) const;
+    ///     should be kept (``true``) or discarded (``false``). Python-free; the Python binding
+    ///     converts any array-like of bool.
+    [[nodiscard]] virtual Ptr take_slice(std::vector<bool> const& blockmask) const;
 
     /// A space isomorphic to self with opposite ``is_dual`` attribute.
     ///
@@ -422,10 +427,12 @@ class ElementarySpace : public Space
     virtual void set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm);
     [[nodiscard]] bool has_custom_basis_perm() const noexcept { return _basis_perm.has_value(); }
 
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] virtual py::object apply_basis_perm(py::object arr,
                                                       int64 axis = 0,
                                                       bool inverse = false,
                                                       bool pre_compose = false) const;
+#endif // LASYTEN_HAS_PYTHON
 
     /// True for `AbelianLegPipe` (composed pipe structure).
     [[nodiscard]] virtual bool is_pipe() const { return false; }
@@ -527,7 +534,7 @@ class DirectSumSpace : public ElementarySpace
 
     Space::Ptr drop_symmetry(std::optional<std::vector<int64>> which = std::nullopt) override;
 
-    ElementarySpace::Ptr take_slice(py::array blockmask) const override;
+    ElementarySpace::Ptr take_slice(std::vector<bool> const& blockmask) const override;
 
     ElementarySpace::Ptr with_opposite_duality() const override;
 
@@ -954,7 +961,7 @@ class AbelianLegPipe : public ElementarySpace
 
     void set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm) override;
 
-    ElementarySpace::Ptr take_slice(py::array blockmask) const override;
+    ElementarySpace::Ptr take_slice(std::vector<bool> const& blockmask) const override;
 
     ElementarySpace::Ptr with_opposite_duality() const override;
     bool operator==(Space const& other) const override;

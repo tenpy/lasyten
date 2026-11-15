@@ -28,6 +28,11 @@
 #include <utility>
 #include <variant>
 
+// With LASYTEN_WITH_PYTHON=ON this file implements the decompositions through the py-object port
+// (Python tensors / duck typing, all variants). Without Python only the native subset below is
+// built: `svd`, `qr`, `lq` on plain (Symmetric)Tensors.
+#if LASYTEN_HAS_PYTHON
+
 namespace lasyten {
 
 namespace {
@@ -1214,3 +1219,309 @@ truncated_svd(TensorCPtr tensor,
 }
 
 } // namespace lasyten
+
+#else // !LASYTEN_HAS_PYTHON
+
+namespace lasyten {
+
+namespace {
+
+/// The native (Python-free) decompositions do not handle ChargedTensor / HiddenLegTensor inputs.
+void
+reject_unsupported_decomposition_input(TensorCPtr const& tensor, char const* name)
+{
+    if (std::dynamic_pointer_cast<ChargedTensor const>(tensor)) {
+        throw NotImplemented(std::string(name) + " for ChargedTensor without Python");
+    }
+    for (auto const& lab : tensor->labels.as_list()) {
+        if (HiddenLegTensor::is_hidden_leg_label(lab)) {
+            throw NotImplemented(std::string(name) + " for HiddenLegTensor without Python");
+        }
+    }
+}
+
+/// Labels ``[*codomain_labels, new_label]`` of a factor with one new domain leg.
+LegLabelList
+labels_with_new_domain_leg(LegLabelList codomain_labels, std::string const& new_label)
+{
+    codomain_labels.push_back(new_label);
+    return codomain_labels;
+}
+
+/// Labels ``[new_label, *reversed(domain_labels)]`` of a factor with one new codomain leg.
+LegLabelList
+labels_with_new_codomain_leg(std::string const& new_label, LegLabelList const& domain_labels)
+{
+    LegLabelList out{ new_label };
+    out.insert(out.end(), domain_labels.rbegin(), domain_labels.rend());
+    return out;
+}
+
+std::pair<std::string, std::string>
+parse_two_decomposition_labels(std::optional<LegLabelList> const& new_labels)
+{
+    // ``None`` is a single unset label.
+    return _decomposition_labels(new_labels.has_value() ? *new_labels : LegLabelList{ "" });
+}
+
+TensorPtr
+make_decomposition_factor(TensorBackend::DataPtr data,
+                          TensorProduct::Ptr codomain,
+                          TensorProduct::Ptr domain,
+                          TensorBackend::Ptr const& backend,
+                          Symmetry::Ptr const& symmetry,
+                          LegLabelList labels)
+{
+    return std::make_shared<SymmetricTensor>(std::move(data),
+                                             std::move(codomain),
+                                             std::move(domain),
+                                             backend,
+                                             symmetry,
+                                             std::move(labels));
+}
+
+TensorPtr
+split_one_leg(TensorPtr const& tensor, int64 idx)
+{
+    return split_legs(tensor, std::vector<LegRef>{ idx });
+}
+
+} // namespace
+
+std::tuple<TensorPtr, TensorPtr>
+qr(TensorCPtr tensor,
+   std::optional<LegLabelList> new_labels,
+   bool new_leg_dual,
+   bool /*charge_leg_top*/)
+{
+    reject_unsupported_decomposition_input(tensor, "qr");
+    auto const [a, b] = parse_two_decomposition_labels(new_labels);
+    auto [tens, new_co_domain, combine_codomain, combine_domain] =
+      _decomposition_prepare(tensor, new_leg_dual);
+    auto backend = tens->backend;
+    auto [q_data, r_data] = backend->qr(tens, new_co_domain);
+    TensorPtr Q =
+      make_decomposition_factor(std::move(q_data),
+                                tens->codomain,
+                                new_co_domain,
+                                backend,
+                                tens->symmetry,
+                                labels_with_new_domain_leg(tens->codomain_labels(), a));
+    TensorPtr R =
+      make_decomposition_factor(std::move(r_data),
+                                new_co_domain,
+                                tens->domain,
+                                backend,
+                                tens->symmetry,
+                                labels_with_new_codomain_leg(b, tens->domain_labels()));
+    if (combine_codomain) {
+        Q = split_one_leg(Q, 0);
+    }
+    if (combine_domain) {
+        R = split_one_leg(R, -1);
+    }
+    return { std::move(Q), std::move(R) };
+}
+
+std::tuple<TensorPtr, TensorPtr>
+lq(TensorCPtr tensor,
+   std::optional<LegLabelList> new_labels,
+   bool new_leg_dual,
+   bool /*charge_leg_top*/)
+{
+    reject_unsupported_decomposition_input(tensor, "lq");
+    auto const [a, b] = parse_two_decomposition_labels(new_labels);
+    auto [tens, new_co_domain, combine_codomain, combine_domain] =
+      _decomposition_prepare(tensor, new_leg_dual);
+    auto backend = tens->backend;
+    auto [l_data, q_data] = backend->lq(tens, new_co_domain);
+    TensorPtr L =
+      make_decomposition_factor(std::move(l_data),
+                                tens->codomain,
+                                new_co_domain,
+                                backend,
+                                tens->symmetry,
+                                labels_with_new_domain_leg(tens->codomain_labels(), a));
+    TensorPtr Q =
+      make_decomposition_factor(std::move(q_data),
+                                new_co_domain,
+                                tens->domain,
+                                backend,
+                                tens->symmetry,
+                                labels_with_new_codomain_leg(b, tens->domain_labels()));
+    if (combine_codomain) {
+        L = split_one_leg(L, 0);
+    }
+    if (combine_domain) {
+        Q = split_one_leg(Q, -1);
+    }
+    return { std::move(L), std::move(Q) };
+}
+
+std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr>
+svd(TensorCPtr tensor,
+    std::optional<LegLabelList> new_labels,
+    bool new_leg_dual,
+    bool /*charge_leg_top*/,
+    std::optional<std::string> algorithm)
+{
+    reject_unsupported_decomposition_input(tensor, "svd");
+    auto const [a, b, c, d] = _svd_new_labels(new_labels);
+    auto [tens, new_co_domain, combine_codomain, combine_domain] =
+      _decomposition_prepare(tensor, new_leg_dual);
+    auto backend = tens->backend;
+    auto [u_data, s_data, vh_data] = backend->svd(tens, new_co_domain, std::move(algorithm));
+    TensorPtr U =
+      make_decomposition_factor(std::move(u_data),
+                                tens->codomain,
+                                new_co_domain,
+                                backend,
+                                tens->symmetry,
+                                labels_with_new_domain_leg(tens->codomain_labels(), a));
+    auto S = std::make_shared<DiagonalTensor>(std::move(s_data),
+                                              new_co_domain->factors.at(0).as_space(),
+                                              backend,
+                                              tens->symmetry,
+                                              LegLabelList{ b, c });
+    TensorPtr Vh =
+      make_decomposition_factor(std::move(vh_data),
+                                new_co_domain,
+                                tens->domain,
+                                backend,
+                                tens->symmetry,
+                                labels_with_new_codomain_leg(d, tens->domain_labels()));
+    if (combine_codomain) {
+        U = split_one_leg(U, 0);
+    }
+    if (combine_domain) {
+        Vh = split_one_leg(Vh, -1);
+    }
+    return { std::move(U), std::move(S), std::move(Vh) };
+}
+
+DiagonalTensorPtr
+apply_mask_DiagonalTensor(DiagonalTensorCPtr tensor, MaskCPtr mask)
+{
+    if (tensor->device != mask->device) {
+        throw std::invalid_argument("Incompatible devices.");
+    }
+    if (!mask->is_projection) {
+        throw std::invalid_argument("mask must be a projection");
+    }
+    if (!(mask->large_leg() == tensor->leg())) {
+        throw std::invalid_argument("mask.large_leg must match the tensor leg");
+    }
+    auto backend = tensor->backend;
+    if (mask->backend != backend) {
+        throw std::invalid_argument("Incompatible backends.");
+    }
+    if (auto ident = std::dynamic_pointer_cast<Identity const>(tensor)) {
+        return std::make_shared<Identity>(mask->small_leg(),
+                                          backend,
+                                          tensor->symmetry,
+                                          tensor->labels.as_list(),
+                                          tensor->dtype,
+                                          tensor->device);
+    }
+    auto data = backend->apply_mask_to_DiagonalTensor(tensor, mask);
+    return std::make_shared<DiagonalTensor>(
+      std::move(data), mask->small_leg(), backend, tensor->symmetry, tensor->labels.as_list());
+}
+
+std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr>
+svd_apply_mask(TensorCPtr U, DiagonalTensorCPtr S, TensorCPtr Vh, MaskCPtr mask)
+{
+    if (!mask->is_projection) {
+        throw std::invalid_argument("mask must be a projection");
+    }
+    if (!(mask->domain->factors.at(0) == S->domain->factors.at(0))) {
+        throw std::invalid_argument("mask domain leg must match the singular-value tensor");
+    }
+    auto mask_dagger = std::dynamic_pointer_cast<Mask>(dagger(mask));
+    if (!mask_dagger) {
+        throw std::logic_error("decompositions: unexpected tensor type");
+    }
+    TensorPtr u = _compose_with_Mask(U, mask_dagger, -1);
+    DiagonalTensorPtr s = apply_mask_DiagonalTensor(S, mask);
+    TensorPtr vh = _compose_with_Mask(Vh, mask, 0);
+    return { std::move(u), std::move(s), std::move(vh) };
+}
+
+std::tuple<MaskPtr, float64, float64>
+truncate_singular_values(DiagonalTensorCPtr S,
+                         std::optional<int64> chi_max,
+                         int64 chi_min,
+                         float64 degeneracy_tol,
+                         float64 trunc_cut,
+                         float64 svd_min,
+                         bool minimize_error,
+                         std::optional<LegLabelList> mask_labels)
+{
+    if (!dtype::is_real(S->dtype)) {
+        throw std::invalid_argument("truncate_singular_values requires a real dtype");
+    }
+    auto backend = S->backend;
+    auto [mask_data, new_leg, err, new_norm] =
+      backend->truncate_singular_values(S,
+                                        chi_max,
+                                        chi_min,
+                                        degeneracy_tol,
+                                        trunc_cut,
+                                        std::optional<float64>{ svd_min },
+                                        minimize_error);
+    if (!mask_labels.has_value()) {
+        std::string lab0 = S->labels.as_list().at(0);
+        mask_labels = LegLabelList{ lab0, _dual_leg_label(lab0) };
+    }
+    auto mask = std::make_shared<Mask>(std::move(mask_data),
+                                       S->leg(),
+                                       new_leg,
+                                       /*is_projection=*/true,
+                                       backend,
+                                       S->symmetry,
+                                       *mask_labels,
+                                       S->device);
+    return { std::move(mask), err, new_norm };
+}
+
+std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr, float64, float64>
+truncated_svd(TensorCPtr tensor,
+              std::optional<LegLabelList> new_labels,
+              bool new_leg_dual,
+              bool charge_leg_top,
+              std::optional<std::string> algorithm,
+              std::optional<float64> normalize_to,
+              std::optional<int64> chi_max,
+              int64 chi_min,
+              float64 degeneracy_tol,
+              float64 trunc_cut,
+              float64 svd_min)
+{
+    // norm(S[mask]) == S_norm * new_norm
+    auto [U, S, Vh] = svd(tensor, new_labels, new_leg_dual, charge_leg_top, std::move(algorithm));
+    float64 const S_norm = norm(TensorCPtr(S)).as_float64();
+    auto& bb = *S->backend->block_backend;
+    auto S_normed = std::dynamic_pointer_cast<DiagonalTensor>(
+      scalar_multiply(bb.as_scalar(complex128{ 1. / S_norm }, S->dtype), TensorCPtr(S)));
+    if (!S_normed) {
+        throw std::logic_error("decompositions: unexpected tensor type");
+    }
+    auto [mask, err, new_norm] = truncate_singular_values(
+      S_normed, chi_max, chi_min, degeneracy_tol, trunc_cut, svd_min, true, std::nullopt);
+    std::tie(U, S, Vh) = svd_apply_mask(U, S, Vh, mask);
+    float64 renormalize = 1.;
+    if (normalize_to.has_value()) {
+        // Scale the returned S to normalize_to; renormalize restores the original scale.
+        renormalize = S_norm * new_norm / *normalize_to;
+        S = std::dynamic_pointer_cast<DiagonalTensor>(scalar_multiply(
+          bb.as_scalar(complex128{ *normalize_to / S_norm / new_norm }, S->dtype), TensorCPtr(S)));
+        if (!S) {
+            throw std::logic_error("decompositions: unexpected tensor type");
+        }
+    }
+    return { std::move(U), std::move(S), std::move(Vh), err, renormalize };
+}
+
+} // namespace lasyten
+
+#endif // LASYTEN_HAS_PYTHON

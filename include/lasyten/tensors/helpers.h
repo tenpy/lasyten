@@ -75,6 +75,7 @@ void _check_compatible_legs(std::vector<Space::Ptr> const& legs1,
   std::optional<std::map<std::string, std::string>> relabel1 = std::nullopt,
   std::optional<std::map<std::string, std::string>> relabel2 = std::nullopt);
 
+#if LASYTEN_HAS_PYTHON // Abelian / FusionTree backends are only built with Python
 /// Convert tensor from abelian backend to FT backend. Return the data.
 ///
 /// Same idea as `_convert_FT_to_abelian`; see its documentation.
@@ -113,6 +114,7 @@ void _check_compatible_legs(std::vector<Space::Ptr> const& legs1,
                                                              AbelianBackend::Ptr backend,
                                                              Dtype dtype,
                                                              std::string device);
+#endif // LASYTEN_HAS_PYTHON
 
 /// Common steps to prepare a SymmetricTensor before a decomposition.
 ///

@@ -3852,7 +3852,7 @@ FusionTreeBackend::get_element(SymmetricTensorCPtr a, std::vector<int64> idcs)
 }
 
 TensorBackend::DataPtr
-FusionTreeBackend::from_grid(std::vector<std::vector<py::object>> grid,
+FusionTreeBackend::from_grid(std::vector<std::vector<TensorCPtr>> grid,
                              TensorProduct::Ptr new_codomain,
                              TensorProduct::Ptr new_domain,
                              std::vector<std::vector<int64>> left_mult_slices,
@@ -3873,10 +3873,9 @@ FusionTreeBackend::from_grid(std::vector<std::vector<py::object>> grid,
     auto new_domain_legs = new_domain->flat_legs();
     for (std::size_t i = 0; i < grid.size(); ++i) {
         for (std::size_t j = 0; j < grid[i].size(); ++j) {
-            py::object op = grid[i][j];
-            if (op.is_none())
+            TensorCPtr op_t = grid[i][j];
+            if (!op_t)
                 continue;
-            auto op_t = py::cast<TensorCPtr>(op);
             auto op_data = data_from_tensor(op_t);
             auto op_codomain = op_t->codomain;
             auto op_domain = op_t->domain;

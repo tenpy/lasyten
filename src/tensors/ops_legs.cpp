@@ -1238,6 +1238,7 @@ move_onto_target_side(TensorPtr tensor, LegRef moving, LegRef target, bool after
       tensor, std::move(moving), std::nullopt, insert, std::move(levels), BendRight{ true });
 }
 
+#if LASYTEN_HAS_PYTHON // FusionTreeBackend is only built with Python
 /// Permutation of the block rows (codomain) / columns (domain) of a `FusionTreeBackend` tensor,
 /// if the pipe ``old_prod.factors[0]`` is replaced by the `ElementarySpace`
 /// ``new_prod.factors[0]``.
@@ -1387,6 +1388,7 @@ flatten_first_pipe_data_fusion_tree(SymmetricTensor const& tensor,
     return FusionTreeBackend::wrap(std::make_shared<FusionTreeData>(
       data->block_inds, std::move(blocks), data->dtype, data->device, true));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 /// The unitary ``U: pipe -> flat`` used by `flatten_pipe_leg` for the `FusionTreeBackend`, as a
 /// tensor with codomain ``[flat]`` and domain ``[pipe]``.
@@ -1484,8 +1486,12 @@ flatten_pipe_leg_at(TensorCPtr tensor, int64 legs_idx)
     if (!factor || !factor.is_pipe()) {
         return std::const_pointer_cast<Tensor>(tensor);
     }
+#if LASYTEN_HAS_PYTHON
     bool const fusion_tree =
       static_cast<bool>(std::dynamic_pointer_cast<FusionTreeBackend const>(tensor->backend));
+#else
+    constexpr bool fusion_tree = false; // FusionTreeBackend is only built with Python
+#endif
     ElementarySpace::Ptr es;
     LegPipe::Ptr plain_pipe;
     if (factor.is_abelian_leg_pipe()) {
@@ -1511,10 +1517,14 @@ flatten_pipe_leg_at(TensorCPtr tensor, int64 legs_idx)
                                                        product->multiplicities);
     auto new_cod = in_domain ? tensor->codomain : new_product;
     auto new_dom = in_domain ? new_product : tensor->domain;
+#if LASYTEN_HAS_PYTHON
     auto data =
       fusion_tree && plain_pipe
         ? flatten_first_pipe_data_fusion_tree(*sym, in_domain, *product, *new_product, *plain_pipe)
         : sym->data;
+#else
+    auto data = sym->data;
+#endif
     auto out = std::make_shared<SymmetricTensor>(std::move(data),
                                                  std::move(new_cod),
                                                  std::move(new_dom),

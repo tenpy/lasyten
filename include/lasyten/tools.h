@@ -25,6 +25,11 @@ bool is_iterable(py::object a);
 py::object to_iterable(py::object a);
 #endif // LASYTEN_HAS_PYTHON
 
+/// Python-free `format_like_list`: ``[a, b, c]`` of already formatted items.
+[[nodiscard]] std::string format_like_list(std::vector<std::string> const& items);
+/// Python-free `format_like_list` of integers (``str(int)`` of each item).
+[[nodiscard]] std::string format_like_list(std::vector<int64> const& items);
+
 /// Convert to a valid index into the given length, with python convention of negative indices from
 /// back
 int64 to_valid_idx(int64 idx, int64 length);

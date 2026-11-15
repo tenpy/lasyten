@@ -238,6 +238,7 @@ class SymmetricTensor : public Tensor
     /// `SymmetricTensor`.
     /// @param dtype The dtype of the resulting tensor.
     /// @param device The device of the tensor. If omitted, use the default device of the backend.
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] static Ptr from_tree_pairs(py::object trees,
                                              TensorProduct::Ptr codomain,
                                              TensorProduct::Ptr domain = nullptr,
@@ -245,6 +246,7 @@ class SymmetricTensor : public Tensor
                                              std::optional<LegLabelList> labels = std::nullopt,
                                              std::optional<Dtype> dtype = std::nullopt,
                                              std::optional<std::string> device = std::nullopt);
+#endif // LASYTEN_HAS_PYTHON
 
     /// A zero tensor.
     ///
