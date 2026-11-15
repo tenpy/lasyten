@@ -25,15 +25,21 @@ namespace lasyten {
 
 namespace {
 
-/// nanobind trampoline so Python subclasses can override ``matvec`` / ``to_tensor``.
+/// nanobind trampoline so Python subclasses (TeNPy ``EffectiveH`` / ``OneSiteH`` / …) can
+/// override ``matvec`` / ``to_tensor`` / ``adjoint``. ``adjoint`` must be listed here: the
+/// derived trampoline type is ``PyPlanarLinearOperator``, so ``PyLinearOperator::adjoint``
+/// is never reached for PlanarLO subclasses (C++ would hit ``LinearOperator::adjoint`` and
+/// throw ``No adjoint defined``).
 class PyPlanarLinearOperator : public PlanarLinearOperator
 {
   public:
-    NB_TRAMPOLINE(PlanarLinearOperator, 2);
+    NB_TRAMPOLINE(PlanarLinearOperator, 3);
 
     VectorLike::Ptr matvec(VectorLike::CPtr vec) override { NB_OVERRIDE(matvec, vec); }
 
     TensorPtr to_tensor(TensorBackend::Ptr backend) override { NB_OVERRIDE(to_tensor, backend); }
+
+    LinearOperator::Ptr adjoint() override { NB_OVERRIDE(adjoint); }
 };
 
 LegRef
@@ -708,7 +714,8 @@ bind_tensors_planar(nb::module_& m)
       .def_rw("op_tensors", &PlanarLinearOperator::op_tensors)
       .def_rw("vec_name", &PlanarLinearOperator::vec_name)
       .def("matvec", &PlanarLinearOperator::matvec, nb::arg("vec"))
-      .def("to_tensor", &PlanarLinearOperator::to_tensor, nb::arg("backend").none() = nullptr);
+      .def("to_tensor", &PlanarLinearOperator::to_tensor, nb::arg("backend").none() = nullptr)
+      .def("adjoint", &PlanarLinearOperator::adjoint);
 
     m.def("parse_leg_bipartition",
           &parse_leg_bipartition,

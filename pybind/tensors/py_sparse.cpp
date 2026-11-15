@@ -117,7 +117,10 @@ class PyLinearOperator : public LinearOperator
 void
 bind_tensors_sparse(nb::module_& m)
 {
-    nb::class_<LinearOperator, PyLinearOperator> linear_operator(m, "LinearOperator");
+    // ``nb::dynamic_attr``: TeNPy ``TransferMatrix`` / ``MPOTransferMatrix`` store many
+    // instance attributes (``_ket_M``, ``charge_leg``, …) that are not C++ members.
+    nb::class_<LinearOperator, PyLinearOperator> linear_operator(
+      m, "LinearOperator", nb::dynamic_attr());
     linear_operator.doc() = DOC(lasyten, LinearOperator);
     linear_operator.attr("acts_on") = LinearOperator::acts_on;
 

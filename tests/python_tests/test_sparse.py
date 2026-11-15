@@ -128,6 +128,27 @@ def test_ShiftedLinearOperator(make_compatible_tensor):
     check_to_tensor(op, vec)
 
 
+def test_LinearOperator_trampoline_virtual_dispatch(make_compatible_tensor):
+    """TeNPy subclasses LinearOperator; C++ Krylov / wrappers must hit Python matvec/adjoint.
+
+    ``ShiftedLinearOperator`` / ``SumLinearOperator`` call the virtuals on the wrapped
+    operator from C++, which is the same dispatch path as ``LanczosGroundState``.
+    """
+    vec = make_compatible_tensor(codomain=1, labels=['a'], use_pipes=False)
+    factor = 2.0 - 0.5j
+    op = ScalingDummyOperator(factor=factor, vector_legs=vec.legs, vector_labels=vec.labels)
+
+    shifted = sparse.ShiftedLinearOperator(op, 0.0)
+    assert almost_equal(shifted.matvec(vec), factor * vec)
+
+    adj = shifted.adjoint()
+    assert almost_equal(adj.matvec(vec), np.conj(factor) * vec)
+
+    summed = sparse.SumLinearOperator(op)
+    adj2 = summed.adjoint()
+    assert almost_equal(adj2.matvec(vec), np.conj(factor) * vec)
+
+
 @pytest.mark.parametrize(['penalty', 'project_operator'], [(None, True), (2.0 - 0.3j, True), (-4, False)])
 @pytest.mark.skip(reason='ProjectedLinearOperator.to_tensor not implemented yet')
 def test_ProjectedLinearOperator(make_compatible_tensor, penalty, project_operator):

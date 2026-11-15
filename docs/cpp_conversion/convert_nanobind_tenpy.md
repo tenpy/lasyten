@@ -18,6 +18,13 @@ These override `matvec` / `adjoint` and are passed into C++ `LanczosGroundState`
 / `Arnoldi`. lasyten **must** keep `PyLinearOperator` /
 `PyPlanarLinearOperator` trampolines across the nanobind port.
 
+Status (nanobind port): both trampolines are bound. `PyPlanarLinearOperator`
+overrides `matvec`, `to_tensor`, **and** `adjoint` (the base trampoline alone is
+not enough — the dynamic type is the derived trampoline). `LinearOperator` is
+bound with `nb::dynamic_attr` for TeNPy instance attributes. Regression:
+`test_LinearOperator_trampoline_virtual_dispatch`,
+`test_PlanarLinearOperator` (adjoint via `ShiftedLinearOperator`).
+
 After bumping lasyten: no TeNPy API change expected for these if trampolines
 are preserved — confirm Krylov still dispatches into Python `matvec`.
 

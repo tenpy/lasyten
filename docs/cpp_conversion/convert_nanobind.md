@@ -313,5 +313,9 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
 8. **Implicit conversions / caster ergonomics** — Sector / BlockInds / Leg may need explicit Python helpers.
 9. **Stubgen / typing** — nanobind stub generation vs `scripts/check_core_stub_parity.py`.
 10. **Dual-framework zero-copy edge cases / `nb::ndarray` everywhere** — done for `EigenBlockBackend` only (copying import, zero-copy writable export; unsupported dtypes raise `TypeError`). Open: other binding signatures still use `py::array`, read-only DLPack exports, non-CPU devices, JAX/TF return paths, `to_numpy()` of the other backends.
-11. **TeNPy `MPOTransferMatrix`** — still `NotImplementedError`; when implemented, needs LinearOperator trampoline.
+11. **TeNPy `MPOTransferMatrix`** — still `NotImplementedError` on the TeNPy side. lasyten
+    trampolines for `LinearOperator` (`matvec` / `to_tensor` / `adjoint`, `nb::dynamic_attr`)
+    and `PlanarLinearOperator` (same three virtuals; `adjoint` must live on the *derived*
+    trampoline or C++ wrappers hit `LinearOperator::adjoint` and throw) are in place for
+    `TransferMatrix` / `EffectiveH` / future `MPOTransferMatrix`.
 12. **Docs drift** — refresh notes that still describe pybind `smart_holder` / old MI.
