@@ -2833,7 +2833,9 @@ FusionTreeBackend::truncate_singular_values(DiagonalTensorCPtr S,
         if (!block_backend->any(keep_block))
             continue;
         int64 mult = block_backend->sum_all(keep_block).as_int64();
-        auto const& slc = domain->slices->at(j);
+        // TensorProduct domains may not populate ``slices``; the dense S layout already
+        // tracks the multiplicity window as ``[start, stop)``.
+        std::array<int64, 2> const slc{ start, stop };
         m.add(*block_backend,
               std::move(keep_block),
               mult,
