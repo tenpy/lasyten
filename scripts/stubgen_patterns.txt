@@ -25,3 +25,40 @@ lasyten\._core\.BlockBackend\.Scalar\.to_numpy:
     \from typing import Any
     def to_numpy(self) -> Any:
         \doc
+
+# Leftover #10: nb::ndarray interchange on BlockBackend / Eigen (AnyCpuArray ingress).
+lasyten\._core\.BlockBackend\.block_from_ndarray:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def block_from_ndarray(self, arr: NDArray[Any] | Any, dtype: Dtype | None = None, device: str | None = None) -> BlockBackend.Block:
+        \doc
+
+lasyten\._core\.BlockBackend\.to_ndarray:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def to_ndarray(self, block: BlockBackend.Block, writable: bool = True) -> NDArray[Any]:
+        \doc
+
+lasyten\._core\.BlockBackend\.Block\.to_ndarray:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def to_ndarray(self, writable: bool = True) -> NDArray[Any]:
+        \doc
+
+lasyten\._core\.EigenBlockBackend\.block_from_ndarray:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def block_from_ndarray(self, arr: NDArray[Any] | Any, dtype: Dtype | None = None) -> EigenBlockBackend.BlockCls:
+        \doc
+
+lasyten\._core\.EigenBlockBackend\.to_ndarray:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def to_ndarray(self, block: EigenBlockBackend.BlockCls, writable: bool = True) -> NDArray[Any]:
+        \doc
+
+lasyten\._core\.EigenBlockBackend\.BlockCls\.to_ndarray:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def to_ndarray(self, writable: bool = True) -> NDArray[Any]:
+        \doc

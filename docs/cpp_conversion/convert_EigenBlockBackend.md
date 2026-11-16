@@ -15,7 +15,7 @@ buffer/DLPack). Master port note: [convert_nanobind.md](convert_nanobind.md).
 | `src/block_backend/eigen.cpp` | Done (all pure virtuals; no NumPy calls for compute) |
 | CMake: Eigen + LAPACK(E) | Done |
 | Python I/O (`py::array`) | Copy-based (`to_numpy` / `block_from_numpy`), kept for liblasyten-internal callers; compiled out without Python |
-| Python I/O (`nb::ndarray`) | Done: `block_from_ndarray` (copying import, any CPU DLPack / buffer-protocol array, dtypes bool / int64 / float32/64 / complex64/128), `to_ndarray` (zero-copy writable NumPy view that keeps the block alive) on backend and on `BlockCls`; `pybind/block_backend/eigen_ndarray.h` |
+| Python I/O (`nb::ndarray`) | Done: `block_from_ndarray` (copying import, any CPU DLPack / buffer-protocol array, dtypes bool / int64 / float32/64 / complex64/128), `to_ndarray(writable=True|False)` (zero-copy NumPy view; writable aliases storage, `False` is read-only) on Eigen backend/`BlockCls` and via `BlockBackend` dispatch; `pybind/block_backend/eigen_ndarray.h` + `ndarray_dispatch.h`. `to_numpy()` remains an owning copy. |
 | Python-free operation | Done for `LASYTEN_WITH_PYTHON=OFF`: native HDF5 save/load (`hdf5_io::Hdf5Buffer`), `apply_axis_permutations`, repr; ctest `test_eigen_block_backend_no_python` |
 | Bindings (`pybind/block_backend/py_eigen.cpp`) | Done |
 | BlockBackend-contract tests | Basic ops + SVD/QR/eigh/tdot (`tests/ctest/test_eigen_block_backend.cpp`, `tests/python_tests/backends/test_eigen_block_backend.py`) |
@@ -66,20 +66,16 @@ for Eigen↔Python exchange, not a BlockBackend.
 
 ### Python boundary
 
-- Ingress: accept `nb::ndarray<>` (any CPU framework via buffer/DLPack); copy
-  into owning storage when needed for layout/dtype, else share when safe.
-- Egress: return `nb::ndarray` (typically numpy-tagged) for `to_numpy`-style
-  APIs; zero-copy view when the buffer is stable and contiguous.
-- Implemented in `pybind/block_backend/eigen_ndarray.h` (`block_from_ndarray`, `to_ndarray`;
-  Python: `bb.block_from_ndarray(arr, dtype=None)`, `bb.to_ndarray(block)`, `block.to_ndarray()`).
-  Import always copies (the backend owns its memory); export is a zero-copy view aliasing the
-  block, so mutate it only if you want to mutate the block. Unsupported dtypes (e.g. int32,
-  float16) raise `TypeError`. `nb::ndarray` stays a bindings-only type: liblasyten itself never
-  includes it.
+- Ingress: `block_from_ndarray` accepts any CPU `nb::ndarray` (NumPy / Torch / DLPack /
+  buffer); always **copies** into owned Eigen storage. Unsupported dtypes raise `TypeError`.
+- Egress: `to_ndarray(writable=True|False)` is a **zero-copy** NumPy view (writable aliases
+  storage; `writable=False` is read-only). `to_numpy()` remains an **owning copy**.
+- Also exposed on abstract `BlockBackend` / `Block` via `ndarray_dispatch.h` (Eigen fast path;
+  other backends fall back to the NumPy copy path).
+- Implemented in `pybind/block_backend/eigen_ndarray.h`. `nb::ndarray` stays bindings-only.
 - With `LASYTEN_WITH_PYTHON=OFF` the `py::` members of `eigen.h` are compiled out; use
   `Block::shape()` / `dtype()` / `data<T>()` / `bytes()` and the native HDF5 I/O instead.
-- Long-term: no `py::array` in `include/lasyten/block_backend/` public API
-  ([convert_nanobind.md](convert_nanobind.md) Phase 5, leftover #10).
+- Remaining `py::array` in public `include/lasyten/block_backend/` is leftover #10 remainder.
 
 ### Factory
 

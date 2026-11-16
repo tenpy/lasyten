@@ -157,3 +157,50 @@ def test_ndarray_view_aliases_block(bb):
 def test_ndarray_unsupported_dtype(bb):
     with pytest.raises(TypeError):
         bb.block_from_ndarray(np.zeros(3, dtype=np.int32))
+
+
+def test_ndarray_readonly_view(bb):
+    """writable=False returns a read-only zero-copy view (TeNPy-safe)."""
+    block = bb.zeros([2, 2], Dtype.float64)
+    ro = block.to_ndarray(writable=False)
+    assert not ro.flags.writeable
+    npt.assert_array_equal(ro, np.zeros((2, 2)))
+    with pytest.raises((ValueError, TypeError)):
+        ro[0, 0] = 1.0
+    # owning copy path still works and is independent of the view
+    copy = bb.to_numpy(block)
+    assert copy.flags.writeable
+    copy[0, 0] = 7.0
+    npt.assert_array_equal(bb.to_ndarray(block), np.zeros((2, 2)))
+
+
+def test_ndarray_via_abstract_block_backend(bb):
+    """BlockBackend.block_from_ndarray / to_ndarray dispatch (Eigen fast path)."""
+    from lasyten import BlockBackend
+
+    assert isinstance(bb, BlockBackend)
+    arr = _rand((3, 2))
+    # Call through the base class API (same instance, Eigen fast path).
+    block = bb.block_from_ndarray(arr)
+    out = bb.to_ndarray(block)
+    npt.assert_array_equal(out, arr)
+    view = block.to_ndarray()
+    npt.assert_array_equal(view, arr)
+    ro = bb.to_ndarray(block, writable=False)
+    assert not ro.flags.writeable
+
+
+@pytest.mark.skipif(
+    __import__('importlib').util.find_spec('torch') is None,
+    reason='torch not installed',
+)
+def test_ndarray_from_torch_cpu(bb):
+    """CPU torch tensors import via DLPack / buffer into Eigen blocks."""
+    import torch
+
+    t = torch.randn(2, 3, dtype=torch.float64)
+    block = bb.block_from_ndarray(t)
+    npt.assert_allclose(bb.to_ndarray(block), t.numpy())
+    # mutating torch after import must not affect the block (copying import)
+    t.zero_()
+    assert abs(bb.to_numpy(block)).max() > 0

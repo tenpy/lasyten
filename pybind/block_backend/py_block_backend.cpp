@@ -1,6 +1,7 @@
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
 #include "docstrings/block_backend/block_backend.h"
+#include "ndarray_dispatch.h"
 #if LASYTEN_WITH_NUMPY_BACKEND
 #include "py_array_api.cpp"
 #endif
@@ -21,8 +22,10 @@
 #include <lasyten/block_backend/torch.h>
 #include <lasyten/config.h>
 #include <lasyten/symmetries/spaces.h>
+#include <optional>
 #include <span>
 #include <sstream>
+#include <string>
 
 namespace lasyten {
 
@@ -619,7 +622,18 @@ bind_block_backend(nb::module_& m)
       .def("to_numpy",
            nb::overload_cast<Dtype>(&BlockBackend::Block::to_numpy, nb::const_),
            nb::arg("dtype"),
-           "Convert to numpy array with the given Dtype.")
+           "Owning NumPy copy converted to dtype (never aliases block storage).")
+      .def(
+        "to_ndarray",
+        [](nb::object self, bool writable) {
+            auto& b = nb::cast<BlockBackend::Block&>(self);
+            return ndarray_dispatch::export_to_python(
+              ndarray_dispatch::block_to_ndarray(*b.get_backend(), b, self, writable));
+        },
+        nb::arg("writable") = true,
+        "Array interchange view of the block. Eigen: zero-copy NumPy "
+        "(writable aliases storage; writable=False is read-only). Other backends: owning "
+        "NumPy copy via to_numpy(). Prefer this over to_numpy() for Eigen.")
       .def("_item_as_complex128",
            &BlockBackend::Block::_item_as_complex128,
            "Return the element of a zero-dimensional block as a complex128.")
@@ -848,7 +862,34 @@ bind_block_backend(nb::module_& m)
            &BlockBackend::block_from_numpy,
            nb::arg("a"),
            nb::arg("dtype").none() = nb::none(),
-           nb::arg("device").none() = nb::none())
+           nb::arg("device").none() = nb::none(),
+           "Copy a NumPy array into a new block. Prefer block_from_ndarray for "
+           "Torch/DLPack/buffer inputs (Eigen fast path; other backends fall back).")
+      .def(
+        "block_from_ndarray",
+        [](BlockBackend& self,
+           eigen_ndarray::AnyCpuArray arr,
+           std::optional<Dtype> dtype,
+           std::optional<std::string> device) {
+            return ndarray_dispatch::block_from_ndarray(self, arr, dtype, std::move(device));
+        },
+        nb::arg("arr"),
+        nb::arg("dtype") = nb::none(),
+        nb::arg("device") = nb::none(),
+        "Import a CPU array (NumPy, PyTorch, DLPack, buffer protocol) into a new block. "
+        "Eigen copies into owned storage; other backends route through block_from_numpy.")
+      .def(
+        "to_ndarray",
+        [](BlockBackend& self, nb::object block, bool writable) {
+            auto& b = nb::cast<BlockBackend::Block&>(block);
+            return ndarray_dispatch::export_to_python(
+              ndarray_dispatch::block_to_ndarray(self, b, block, writable));
+        },
+        nb::arg("block"),
+        nb::arg("writable") = true,
+        "Export a block as an array. Eigen: zero-copy NumPy view "
+        "(writable=False for read-only). Other backends: owning NumPy copy. "
+        "Contrast with to_numpy(), which always copies.")
       .def("get_device", &BlockBackend::get_device, nb::arg("a"))
       .def("get_diagonal",
            &BlockBackend::get_diagonal,

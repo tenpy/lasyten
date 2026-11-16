@@ -198,7 +198,8 @@ block the OFF build.)
   - [x] Numpy / ArrayApi marked **transitional** (`backend_factory.cpp`, docs); Eigen (`"eigen"`) preferred CPU, Torch for GPU
   - [x] CMake `LASYTEN_WITH_NUMPY_BACKEND` (default ON with Python): OFF drops `numpy.cpp` / `array_api.cpp`, their bindings and the Python classes (`lasyten.block_backends.WITH_NUMPY_BACKEND`), keeps Eigen
   - [x] `nb::ndarray` boundary for `EigenBlockBackend` (`pybind/block_backend/eigen_ndarray.h`: `block_from_ndarray`, zero-copy `to_ndarray`)
-  - [ ] `py::array` in the *remaining* binding signatures / `BlockBackend::to_numpy` -> `nb::ndarray` (leftover #10)
+  - [x] `BlockBackend` / `Block` `block_from_ndarray` + `to_ndarray(writable=…)` dispatch (Eigen zero-copy; others via `to_numpy` copy); read-only export; Torch CPU import smoke test (leftover #10 progress)
+  - [ ] Remaining `py::array` binding signatures (Sector/BlockInds/Space/models/`Tensor.to_numpy`) → `nb::ndarray` (leftover #10 remainder)
   - [ ] Default `"cpu"` -> Eigen (deliberately not switched; test-suite parity first)
   - [x] Remove pybind11 from `include/` / `src/` / CMake (no `find_package(pybind11)`, no `pybind11::` link, not in `environment.yml` / `pyproject.toml` build requires); `py::` is now `lasyten::py` over nanobind, the two bridges (`py_nanobind_bridge.h`, `py_pybind11_bridge.h`) are deleted
 - [x] Stable ABI: `LASYTEN_STABLE_ABI`, `Development.SABIModule`, `nanobind-static-abi3` linked into liblasyten and `_core`, `nanobind_add_module(_core STABLE_ABI ...)`, `wheel.py-api = "cp312"`
@@ -309,7 +310,20 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
       a leftover `_core.cpython-*.so` shadows abi3 and types `py::array` as
       `typing.Any`). Regression: `test_core_pyi_array_typing`. Remaining
       `object`/`Any` on true `py::object` APIs is leftover #10 (`nb::ndarray`).
-10. **Dual-framework zero-copy edge cases / `nb::ndarray` everywhere** — done for `EigenBlockBackend` only (copying import, zero-copy writable export; unsupported dtypes raise `TypeError`). Open: other binding signatures still use `py::array`, read-only DLPack exports, non-CPU devices, JAX/TF return paths, `to_numpy()` of the other backends.
+10. **Dual-framework zero-copy / `nb::ndarray` everywhere** — **Eigen path largely done**, plus abstract
+    `BlockBackend` dispatch:
+    - Import: `block_from_ndarray` on `EigenBlockBackend` and `BlockBackend` (Eigen copies from any
+      CPU DLPack/buffer array; other backends fall back to `block_from_numpy`). Unsupported dtypes
+      raise `TypeError`. Torch CPU smoke test in `test_eigen_block_backend.py`.
+    - Export: `to_ndarray(writable=True|False)` on Eigen backend/block and on abstract
+      `BlockBackend` / `Block` (writable = zero-copy alias; `writable=False` = read-only view;
+      non-Eigen = owning NumPy copy). Documented dual path vs `to_numpy()` (always owning copy).
+    - Stubgen patterns for the new methods in `scripts/stubgen_patterns.txt`.
+    - `Sector` / `SectorArray` / `BlockInds` `.to_numpy()` (and related index helpers) now return
+      owning `nb::ndarray` via `pybind/ndarray_utils.h`.
+    **Still open:** other `py::array` binding signatures (Space perms/masks, models,
+    `Tensor.to_numpy`), native Numpy/Torch `to_ndarray` (no copy fallback), non-CPU devices,
+    JAX/TF-tagged return arrays (today NumPy-tagged only).
 11. **TeNPy `MPOTransferMatrix`** — still `NotImplementedError` on the TeNPy side. lasyten
     trampolines for `LinearOperator` (`matvec` / `to_tensor` / `adjoint`, `nb::dynamic_attr`)
     and `PlanarLinearOperator` (same three virtuals; `adjoint` must live on the *derived*

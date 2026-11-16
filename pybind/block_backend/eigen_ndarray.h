@@ -1,19 +1,24 @@
 #pragma once
 
-/// ``nb::ndarray`` interchange for ``EigenBlockBackend`` blocks (convert_nanobind.md, Phase 4).
+/// ``nb::ndarray`` interchange for ``EigenBlockBackend`` blocks (convert_nanobind.md, leftover
+/// #10).
 ///
 /// ``nb::ndarray`` is a *view/interchange* type only (NumPy, PyTorch, JAX, anything DLPack /
-/// buffer-protocol), it does not provide compute. The Eigen backend owns a contiguous C-order
+/// buffer-protocol); it does not provide compute. The Eigen backend owns a contiguous C-order
 /// ``std::vector<std::byte>``; this header exposes it across the Python boundary without going
 /// through the ``py::array`` adapter:
 ///
-/// - export: ``block_to_ndarray`` returns a *zero-copy* NumPy view, kept alive by the block.
-/// - import: ``block_from_ndarray`` copies (the backend owns its memory) from any CPU array that
+/// - export: ``block_to_ndarray`` returns a *zero-copy* NumPy view kept alive by the block.
+///   Default is **writable** (aliases block memory). Pass ``writable=false`` for a read-only
+///   view (TeNPy-safe default for consumers that must not mutate storage).
+/// - import: ``block_from_ndarray`` **copies** into owned Eigen storage from any CPU array that
 ///   supports DLPack / the buffer protocol.
 ///
-/// The classic ``to_numpy()`` / ``block_from_numpy()`` (``py::array``) remain for the numpy-based
-/// call paths inside liblasyten (``py::array`` = ``detail/py_array.h``), until those are ported
-/// (leftover #10).
+/// Dual path vs ``to_numpy()`` / ``block_from_numpy()`` (``py::array`` via ``detail/py_array.h``):
+/// those allocate an owning NumPy copy (never alias Eigen storage). Prefer ``to_ndarray`` /
+/// ``block_from_ndarray`` at new Python call sites; keep ``to_numpy`` for code that needs an
+/// independent buffer or a non-Eigen backend.
+///
 
 #include <lasyten/block_backend/dtypes.h>
 #include <lasyten/block_backend/eigen.h>
@@ -35,8 +40,10 @@ namespace nb = nanobind;
 
 /// Any CPU array, C-contiguous (non-contiguous inputs are made contiguous by nanobind).
 using AnyCpuArray = nb::ndarray<nb::c_contig, nb::device::cpu>;
-/// NumPy array handed back to Python.
+/// Writable NumPy array handed back to Python.
 using NumpyArray = nb::ndarray<nb::numpy>;
+/// Read-only NumPy view (``flags.writeable == False``).
+using NumpyArrayRo = nb::ndarray<nb::numpy, nb::ro>;
 
 [[nodiscard]] inline nb::dlpack::dtype
 to_dlpack_dtype(Dtype dt)
@@ -93,7 +100,7 @@ from_dlpack_dtype(nb::dlpack::dtype const& dt)
 }
 
 /// Zero-copy NumPy view of the block's buffer. ``owner`` must be the Python object wrapping
-/// ``block``; the view keeps it alive. The view is writable and aliases the block's memory.
+/// ``block``; the view keeps it alive. Writable alias of the block's memory.
 [[nodiscard]] inline NumpyArray
 block_to_ndarray(EigenBlockBackend::Block& block, nb::handle owner)
 {
@@ -105,6 +112,21 @@ block_to_ndarray(EigenBlockBackend::Block& block, nb::handle owner)
                       owner,
                       nullptr,
                       to_dlpack_dtype(block.dtype()));
+}
+
+/// Zero-copy **read-only** NumPy view of the block's buffer (same lifetime rules as
+/// ``block_to_ndarray``).
+[[nodiscard]] inline NumpyArrayRo
+block_to_ndarray_readonly(EigenBlockBackend::Block const& block, nb::handle owner)
+{
+    auto const shape_i = block.shape();
+    std::vector<std::size_t> shape(shape_i.begin(), shape_i.end());
+    return NumpyArrayRo(block.bytes().data(),
+                        shape.size(),
+                        shape.data(),
+                        owner,
+                        nullptr,
+                        to_dlpack_dtype(block.dtype()));
 }
 
 /// Copy any CPU array into a new Eigen block, optionally converting to ``dtype``.

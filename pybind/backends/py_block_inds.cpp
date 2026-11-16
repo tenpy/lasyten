@@ -1,4 +1,5 @@
 #include "../doc_plus.h"
+#include "../ndarray_utils.h"
 #include "../py_lasyten_nanobind.h"
 #include "docstrings/backends/block_inds.h"
 
@@ -22,14 +23,24 @@ namespace lasyten {
 
 namespace {
 
-py::array_t<std::size_t>
-indices_to_numpy(std::vector<std::size_t> const& v)
+nb::ndarray<nb::numpy, std::size_t>
+indices_to_numpy(std::vector<std::size_t> v)
 {
-    py::array_t<std::size_t> arr(static_cast<py::ssize_t>(v.size()));
-    if (!v.empty()) {
-        std::copy(v.begin(), v.end(), arr.mutable_data());
+    return ndarray_utils::vector_to_numpy_1d(std::move(v));
+}
+
+nb::ndarray<nb::numpy, int64>
+block_inds_to_ndarray(BlockInds const& src)
+{
+    std::size_t const rows = src.nrows();
+    std::size_t const cols = src.ncols();
+    std::vector<int64> v(rows * cols);
+    for (std::size_t i = 0; i < rows; ++i) {
+        for (std::size_t j = 0; j < cols; ++j) {
+            v[i * cols + j] = src(i, j);
+        }
     }
-    return arr;
+    return ndarray_utils::vector_to_numpy_2d(std::move(v), rows, cols);
 }
 
 std::vector<std::size_t>
@@ -186,11 +197,14 @@ bind_block_inds(nb::module_& m)
       .def(
         "__array__",
         [](BlockInds const& self, py::object /*dtype*/, py::object /*copy*/) {
-            return block_inds_to_numpy(self);
+            return block_inds_to_ndarray(self);
         },
         nb::arg("dtype").none() = nb::none(),
         nb::arg("copy").none() = nb::none())
-      .def("to_numpy", &block_inds_to_numpy)
+      .def(
+        "to_numpy",
+        [](BlockInds const& self) { return block_inds_to_ndarray(self); },
+        "Return a copy as a 2D ``int64`` NumPy array (``nb::ndarray``).")
       .def("lexsort_indices",
            [](BlockInds const& self) { return indices_to_numpy(self.lexsort_indices()); })
       .def("sorted",

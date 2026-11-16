@@ -1,4 +1,5 @@
 #include "../doc_plus.h"
+#include "../ndarray_utils.h"
 #include "docstrings/symmetries/sector.h"
 #include "py_lasyten_nanobind.h"
 #include "tools/hdf5_bind.h"
@@ -18,24 +19,40 @@ namespace lasyten {
 
 namespace {
 
-py::array_t<std::size_t>
-indices_to_numpy(std::vector<std::size_t> const& v)
+nb::ndarray<nb::numpy, std::size_t>
+indices_to_numpy(std::vector<std::size_t> v)
 {
-    py::array_t<std::size_t> arr(static_cast<py::ssize_t>(v.size()));
-    if (!v.empty()) {
-        std::copy(v.begin(), v.end(), arr.mutable_data());
-    }
-    return arr;
+    return ndarray_utils::vector_to_numpy_1d(std::move(v));
 }
 
-py::array_t<std::int64_t>
-i64_to_numpy(std::vector<std::int64_t> const& v)
+nb::ndarray<nb::numpy, std::int64_t>
+i64_to_numpy(std::vector<std::int64_t> v)
 {
-    py::array_t<std::int64_t> arr(static_cast<py::ssize_t>(v.size()));
-    if (!v.empty()) {
-        std::copy(v.begin(), v.end(), arr.mutable_data());
+    return ndarray_utils::vector_to_numpy_1d(std::move(v));
+}
+
+nb::ndarray<nb::numpy, std::int64_t>
+sector_to_ndarray(Sector const& src)
+{
+    std::vector<std::int64_t> v(src.len());
+    for (std::uint8_t i = 0; i < src.len(); ++i) {
+        v[i] = src.q[i];
     }
-    return arr;
+    return ndarray_utils::vector_to_numpy_1d(std::move(v));
+}
+
+nb::ndarray<nb::numpy, std::int64_t>
+sector_array_to_ndarray(SectorArray const& src)
+{
+    std::size_t const rows = src.size();
+    std::size_t const cols = src.sector_ind_len();
+    std::vector<std::int64_t> v(rows * cols);
+    for (std::size_t i = 0; i < rows; ++i) {
+        for (std::uint8_t j = 0; j < cols; ++j) {
+            v[i * cols + j] = src[i][j];
+        }
+    }
+    return ndarray_utils::vector_to_numpy_2d(std::move(v), rows, cols);
 }
 
 std::vector<std::size_t>
@@ -224,8 +241,8 @@ bind_sector(nb::module_& m)
       .def("copy", [](Sector const& self) { return Sector(self); })
       .def(
         "to_numpy",
-        [](Sector const& self) { return sector_to_numpy(self); },
-        "Return a copy as a 1D ``int64`` NumPy array.")
+        [](Sector const& self) { return sector_to_ndarray(self); },
+        "Return a copy as a 1D ``int64`` NumPy array (``nb::ndarray``).")
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5_const<Sector>(),
            nb::arg("hdf5_saver"),
@@ -357,8 +374,8 @@ bind_sector(nb::module_& m)
       .def("copy", [](SectorArray const& self) { return SectorArray(self); })
       .def(
         "to_numpy",
-        [](SectorArray const& self) { return sector_array_to_numpy(self); },
-        "Return a copy as a 2D ``int64`` NumPy array.")
+        [](SectorArray const& self) { return sector_array_to_ndarray(self); },
+        "Return a copy as a 2D ``int64`` NumPy array (``nb::ndarray``).")
       .def("lexsort_indices",
            [](SectorArray const& self) { return indices_to_numpy(self.lexsort_indices()); })
       .def("sorted",
