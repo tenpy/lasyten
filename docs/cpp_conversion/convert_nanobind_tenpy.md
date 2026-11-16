@@ -28,6 +28,12 @@ bound with `nb::dynamic_attr` for TeNPy instance attributes. Regression:
 After bumping lasyten: no TeNPy API change expected for these if trampolines
 are preserved — confirm Krylov still dispatches into Python `matvec`.
 
+**nanobind pitfall:** C++ `LinearOperator.dtype` is a property. TeNPy subclasses
+must assign `self.dtype = …` only *after* `PlanarLinearOperator.__init__` /
+`LinearOperator.__init__` (uninitialized trampoline instances raise
+`TypeError` / warn). Prefer `env.H.dtype` (already a lasyten `Dtype`) over
+`Dtype.from_numpy_dtype(...)`.
+
 ## Likely API / behavior changes
 
 | Area | Current tenpy usage | Expected lasyten change | Downstream action |
