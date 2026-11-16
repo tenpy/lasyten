@@ -23,7 +23,7 @@ TeNPy downstream: [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md).
 | Phase 4 cleanup (gating, `nb::ndarray` boundary, `py::` inventory) | Done for first port (Numpy gate + Eigen `to_ndarray` / `block_from_ndarray`; default `"cpu"` → Eigen **deferred**, leftover #5) |
 | pybind11 removed from liblasyten | Done: `include/` / `src/` use nanobind only, through the thin `lasyten::py` layer (`detail/python_api.h`, `detail/py_array.h`); no `find_package(pybind11)` |
 | Stable ABI (abi3) | Done: `LASYTEN_STABLE_ABI` (default ON, Python >= 3.12), `_core.abi3.so`, `wheel.py-api = "cp312"` (leftover #2) |
-| `LASYTEN_WITH_PYTHON=OFF` Python-free | Partial: Eigen + Space/Leg/Tensors, `NoSymmetryBackend`, **`AbelianBackend`**, **`FusionTreeBackend`** (core paths; heavy mask / truncate / partial_trace still `NotImplemented` without Python), `fusion_tree_mapping`, krylov, and native `svd`/`qr`/`lq`/`eigh`/`eig*`/`entropy` (incl. Charged/HiddenLeg factors) build without libpython (`ctest -R no_python`); models and Numpy/ArrayApi/Torch still Python-gated (leftover #1 remainder) |
+| `LASYTEN_WITH_PYTHON=OFF` Python-free | Partial: Eigen + Space/Leg/Tensors, `NoSymmetryBackend`, **`AbelianBackend`**, **`FusionTreeBackend`** (core paths green; OFF stub inventory in [convert_FusionTreeBackend.md](convert_FusionTreeBackend.md) / leftover #1), `fusion_tree_mapping`, krylov, and native `svd`/`qr`/`lq`/`eigh`/`eig*`/`entropy` (incl. Charged/HiddenLeg factors) build without libpython (`ctest -R no_python`); models and Numpy/ArrayApi/Torch still Python-gated |
 
 ## Motivations
 
@@ -296,15 +296,23 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
    With OFF, liblasyten includes Space / Leg, the Tensor classes (`Symmetric` / `Diagonal` / `Mask` /
    `Charged`), `NoSymmetryBackend`, **`AbelianBackend`**, **`FusionTreeBackend`** (in
    `LASYTEN_PYTHON_FREE_SOURCES`; native helpers + `apply_instructions` / `permute_legs` / dense
-   block I/O; several mask/truncate/partial paths still throw `NotImplemented` when OFF),
-   **`fusion_tree_mapping`**, **`krylov_based`** (typed `KrylovOptions`), `decompositions` (native
-   `svd` / `qr` / `lq` / `eigh` / `eig*` / `entropy`, including Charged/HiddenLeg factors for
-   svd/qr/lq), and `backend_factory` (`"no_symmetry"`, `"abelian"`, and `"fusion_tree"` + Eigen).
-   `ctest -R no_python` passes in an OFF build (`cmake -S . -B build_off -G Ninja
-   -DLASYTEN_WITH_PYTHON=OFF && ninja -C build_off && ctest --test-dir build_off -R no_python`).
+   block I/O), **`fusion_tree_mapping`**, **`krylov_based`** (typed `KrylovOptions`),
+   `decompositions` (native `svd` / `qr` / `lq` / `eigh` / `eig*` / `entropy`, including
+   Charged/HiddenLeg factors for svd/qr/lq), and `backend_factory` (`"no_symmetry"`, `"abelian"`,
+   and `"fusion_tree"` + Eigen). `ctest -R no_python` passes in an OFF build
+   (`cmake -S . -B build_off -G Ninja -DLASYTEN_WITH_PYTHON=OFF && ninja -C build_off &&
+   ctest --test-dir build_off -R no_python`).
+   **FusionTree OFF stubs** (issue #326 item 3; full table in
+   [convert_FusionTreeBackend.md](convert_FusionTreeBackend.md)): `combine_legs`, `compose`,
+   `partial_compose`, `outer`, `linear_combination`, `scale_axis`, `svd` / `qr` / `lq`,
+   `truncate_singular_values`, `partial_trace`, `get_element` / `get_element_mask`,
+   `from_tree_pairs` / `from_grid`, `diagonal_from_block` / `diagonal_tensor_to_block` /
+   `diagonal_to_mask`, `_mask_contract`, `mask_*`. These still use Space/NumPy via `lasyten::py`
+   when ON; OFF throws `NotImplemented`. Implementing them Python-free means C++ Space accessors
+   instead of `py::cast(space).attr(...)`.
    **Still in `LASYTEN_PYTHON_API_SOURCES`:** `block_inds_numpy.cpp` only (NumPy casting for
-   `BlockInds`); models / `su2.cpp` and Numpy / ArrayApi / Torch block backends stay Python-gated
-   (models optional for leftover #1).
+   `BlockInds`). Models / `su2.cpp` and Numpy / ArrayApi / Torch stay in separate Python-gated
+   `target_sources` (not shrunk further while models keep `py::array` storage).
 2. **Stable ABI / abi3 wheels** — **done** (`LASYTEN_STABLE_ABI`, `_core.abi3.so`, `wheel.py-api = "cp312"`). Open: CI wheel jobs (cibuildwheel) for `cp312-abi3`, and checking the `Py_LIMITED_API` build on macOS.
 3. **Restore trampolines** (optional) for `Tensor`, `BlockBackend`, `TensorBackend`, `Symmetry`, `Site`, … if downstream needs Python subclassing again.
 4. **`unique_ptr` where ownership is unique** — audit `shared_ptr`-everywhere; migrate carefully without breaking `shared_from_this`.

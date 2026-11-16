@@ -8,9 +8,40 @@
 
 - `_tree_block_iter` — Python helper used by tests / cross-checks (not part of the backend method surface).
 
-None of the FusionTreeBackend method surface is Python-delegated. `partial_trace` / `permute_legs` / `apply_instructions` are native C++.
+With `LASYTEN_WITH_PYTHON=ON`, the FusionTreeBackend method surface is native C++ (no Python
+delegation). `partial_trace` / `permute_legs` / `apply_instructions` are implemented in C++, but
+several heavy paths still reach into Space / Leg / NumPy via the `lasyten::py` layer and are
+compiled out when `LASYTEN_WITH_PYTHON=OFF` (see below).
 
 `tests/python_tests/backends/test_fusion_tree_backend.py`: **21 passed**. Fixed `partial_trace_helper` multiplicity check for 2-leg trees (must match numpy broadcast of `multiplicities[:2] == [0, 0]`).
+
+## `LASYTEN_WITH_PYTHON=OFF` gaps (issue #326 item 3)
+
+`FusionTreeBackend` lives in `LASYTEN_PYTHON_FREE_SOURCES` and links in OFF builds. Core paths
+used by `ctest -R no_python` (factory, tree mapping, permute / apply_instructions, dense block
+I/O helpers) are native. Methods whose bodies still need the Python Space/NumPy glue are stubbed
+with `throw NotImplemented(...)` in the `#else` of `#if LASYTEN_HAS_PYTHON`:
+
+| Group | OFF stubs (`NotImplemented`) |
+| --- | --- |
+| Legs / algebra | `combine_legs`, `compose`, `partial_compose`, `outer`, `linear_combination`, `scale_axis` |
+| Decompositions | `svd`, `qr`, `lq`, `truncate_singular_values` |
+| Trace / elements | `partial_trace`, `get_element`, `get_element_mask`, `from_tree_pairs`, `from_grid` |
+| Diagonal | `diagonal_from_block`, `diagonal_tensor_to_block`, `diagonal_to_mask` |
+| Masks | `_mask_contract`, `mask_binary_operand`, `mask_unary_operand`, `mask_from_block`, `mask_to_block`, `mask_transpose` |
+
+Always stubbed (even with Python ON; match historical Python API):
+`from_dense_block_trivial_sector`, `inv_part_*`, `state_tensor_product`,
+`to_dense_block_trivial_sector`. Conditional inside the Python path:
+`truncate_singular_values` with `basis_perm`; `_mask_contract` on a `LegPipe`.
+
+**Not shrinking further now:** `LASYTEN_PYTHON_API_SOURCES` is already only
+`block_inds_numpy.cpp`. Models / `su2.cpp` / Numpy / ArrayApi / Torch stay in separate
+Python-gated `target_sources` blocks (intentional; models keep `py::array` storage).
+
+**Next implementation step** (when needed): replace `py::cast(space).attr(...)` / NumPy mask
+tiling in the OFF stubs with direct C++ `Space` / `ElementarySpace` / Eigen block helpers so the
+table above moves into the Python-free set without libpython.
 
 ## Metadata
 

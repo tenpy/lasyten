@@ -1,3 +1,12 @@
+/// FusionTreeBackend implementation.
+///
+/// With ``LASYTEN_WITH_PYTHON=OFF``, methods whose bodies still go through ``lasyten::py``
+/// Space/NumPy glue are compiled as ``throw NotImplemented(...)`` (``#else`` of
+/// ``#if LASYTEN_HAS_PYTHON``). Inventory and next steps:
+/// ``docs/cpp_conversion/convert_FusionTreeBackend.md`` (``LASYTEN_WITH_PYTHON=OFF`` gaps) and
+/// issue #326 item 3. Core OFF paths (mapping, permute / ``apply_instructions``, dense I/O)
+/// stay native and are covered by ``ctest -R no_python``.
+
 #include <lasyten/backends/fusion_tree_backend.h>
 #include <lasyten/backends/fusion_tree_mapping.h>
 #include <lasyten/backends/fusion_tree_permute.h>
