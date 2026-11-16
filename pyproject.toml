@@ -84,6 +84,8 @@ cmake.version = ">=3.15"
 # Only print install lines for files that actually changed (hides "-- Up-to-date: ..." spam).
 cmake.define.CMAKE_INSTALL_MESSAGE = "LAZY"
 cmake.define.BUILD_DOC = {env="BUILD_DOC", default="OFF"}
+# Wheel/editable builds do not need ctests (and SKBUILD skips Development.Embed).
+cmake.define.BUILD_TESTING = {env="BUILD_TESTING", default="OFF"}
 build-dir = "build" # The build directory. Defaults to a temporary directory, but can be set.
 cmake.build-type = "Debug"  # TODO: for now setup debug builds - update this once we release!
 # Select the editable mode to use. Can be "redirect" (default) or "inplace".
@@ -136,19 +138,22 @@ build = "cp314-*"
 skip = "pp* *-musllinux_* *i686* *win32*"
 build-verbosity = 1
 # Release wheels (repo default cmake.build-type is Debug for local editable installs).
-config-settings = "cmake.build-type=Release"
+# BUILD_TESTING=OFF: no Development.Embed / ctest targets in the wheel build.
+config-settings = "cmake.build-type=Release cmake.define.BUILD_TESTING=OFF cmake.define.LASYTEN_STABLE_ABI=ON"
 # CPU torch: avoid CUDA wheels that need the toolkit at link time.
 environment = { PIP_EXTRA_INDEX_URL = "https://download.pytorch.org/whl/cpu" }
 test-skip = "*"
 
 [tool.cibuildwheel.linux]
 before-all = [
-  "yum install -y eigen3-devel lapack-devel openblas-devel hdf5-devel cmake doxygen || dnf install -y eigen3-devel lapack-devel openblas-devel hdf5-devel cmake doxygen",
+  "yum install -y eigen3-devel lapack-devel openblas-devel hdf5-devel doxygen || dnf install -y eigen3-devel lapack-devel openblas-devel hdf5-devel doxygen",
 ]
-before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm"
+# Eigen3_DIR is set via CIBW_ENVIRONMENT in .github/workflows/wheels.yml (FindEigen3 NO_MODULE).
+before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm cmake ninja"
 
 [tool.cibuildwheel.macos]
-before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm"
+before-all = "brew install eigen hdf5 openblas doxygen || true"
+before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm cmake ninja"
 
 
 [tool.ruff]

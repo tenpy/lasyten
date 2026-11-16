@@ -116,8 +116,16 @@ cmake_print_variables(CMAKE_CXX_STANDARD)
 # so that tools like the stub generator could use it; failing to find one is fine.)
 
 if(LASYTEN_WITH_PYTHON)
-  set(Python_FIND_VIRTUALENV ONLY)
-  set(Python_FIND_STRATEGY LOCATION)
+  # Local/editable: pin to the active venv. Wheel builds (``SKBUILD`` / cibuildwheel) use an
+  # isolated build env that has an Interpreter but no Development.* artifacts — FindPython must
+  # fall through to the underlying CPython (manylinux / macOS) that cibuildwheel provides.
+  if(DEFINED SKBUILD)
+    set(Python_FIND_VIRTUALENV STANDARD)
+    set(Python_FIND_STRATEGY LOCATION)
+  else()
+    set(Python_FIND_VIRTUALENV ONLY)
+    set(Python_FIND_STRATEGY LOCATION)
+  endif()
 
   # Stable ABI needs CPython >= 3.12 (nanobind's linked abi3 mode); decide before asking
   # FindPython for the Development.SABIModule component.
@@ -127,13 +135,19 @@ if(LASYTEN_WITH_PYTHON)
       "${Python_VERSION}); building a version-specific extension instead")
     set(LASYTEN_STABLE_ABI OFF)
   endif()
+  # Development.Embed is only needed for ctest / examples that embed libpython. Pure wheel
+  # builds (SKBUILD + BUILD_TESTING=OFF) skip it — manylinux isolated envs often lack Embed.
+  set(_lasyten_python_dev_components Development.Module)
+  if(BUILD_TESTING OR NOT DEFINED SKBUILD)
+    list(APPEND _lasyten_python_dev_components Development.Embed)
+  endif()
   if(LASYTEN_STABLE_ABI)
-    find_package(Python REQUIRED COMPONENTS Interpreter Development.Module Development.Embed
-      Development.SABIModule)
+    list(APPEND _lasyten_python_dev_components Development.SABIModule)
+    find_package(Python REQUIRED COMPONENTS Interpreter ${_lasyten_python_dev_components})
     set(LASYTEN_NB_STABLE_ABI_ARG STABLE_ABI)
     set(LASYTEN_NB_LIB_NAME nanobind-static-abi3)
   else()
-    find_package(Python REQUIRED COMPONENTS Interpreter Development.Module Development.Embed)
+    find_package(Python REQUIRED COMPONENTS Interpreter ${_lasyten_python_dev_components})
     set(LASYTEN_NB_STABLE_ABI_ARG "")
     set(LASYTEN_NB_LIB_NAME nanobind-static)
   endif()

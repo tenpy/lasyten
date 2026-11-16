@@ -72,6 +72,11 @@ jobs:
       - name: Smoke-import from the wheel
         run: |
           pip install --no-deps --force-reinstall wheelhouse/*.whl
+          # Cwd is the repo root; its ``lasyten/`` source tree shadows site-packages and has
+          # no importable ``_core`` for a clean wheel check. Import from an empty directory.
+          SMOKE_DIR="${RUNNER_TEMP:-/tmp}/lasyten_wheel_smoke"
+          mkdir -p "$SMOKE_DIR"
+          cd "$SMOKE_DIR"
           python -c "import lasyten._core as c; print(c.__file__); assert 'abi3' in c.__file__"
 
       - name: Upload wheel
@@ -86,6 +91,8 @@ jobs:
     name: cibuildwheel (linux)
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # Optional until manylinux Torch auditwheel/RPATH is fully hardened; micromamba
+    # abi3-wheel jobs above are the required Stable ABI check.
     continue-on-error: true
     steps:
       - name: Checkout
@@ -95,6 +102,11 @@ jobs:
 
       - name: Build wheels with cibuildwheel
         uses: pypa/cibuildwheel@v3.4.1
+        env:
+          # Point FindEigen3 at the yum eigen3-devel CMake package inside the container.
+          CIBW_ENVIRONMENT: >-
+            PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
+            Eigen3_DIR=/usr/share/eigen3/cmake
 
       - name: Check abi3 wheels
         if: success()
