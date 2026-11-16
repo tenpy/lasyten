@@ -1,11 +1,9 @@
-#include <lasyten/block_backend/dtypes.h>
 #include <lasyten/tensors/tensor.h>
 
 #include "py_trampolines.hpp"
 
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
-#include "block_backend/ndarray_dispatch.h"
 
 #include "docstrings/tensors/tensor.h"
 
@@ -401,18 +399,13 @@ bind_tensors_tensor(nb::module_& m)
         nb::arg("which_leg"),
         DOC(lasyten, Tensor, get_leg_co_domain));
 
+    // Always an owning NumPy copy (dual path: use BlockBackend.to_ndarray for DLPack /
+    // framework-tagged views). Torch block_to_ndarray defaults to a torch.Tensor and breaks
+    // callers that expect np.ndarray.
     cls.def(
       "to_numpy",
       [](Tensor& self, py::object leg_order, py::object numpy_dtype, bool understood_braiding) {
-          std::optional<Dtype> dt;
-          if (!numpy_dtype.is_none()) {
-              dt = dtype::from_numpy_dtype(numpy_dtype);
-          }
-          auto block = self.to_dense_block(optional_leg_order(leg_order), dt, understood_braiding);
-          // Read-only nb::ndarray export (Eigen: zero-copy; other backends: owning copy).
-          nb::object owner = nb::cast(block);
-          return ndarray_dispatch::export_to_python(ndarray_dispatch::block_to_ndarray(
-            *self.backend->block_backend, *block, owner, /*writable=*/false));
+          return self.to_numpy(optional_leg_order(leg_order), numpy_dtype, understood_braiding);
       },
       nb::arg("leg_order").none() = nb::none(),
       nb::arg("numpy_dtype").none() = nb::none(),

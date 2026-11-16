@@ -326,9 +326,10 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
     - Stubgen patterns for the new methods in `scripts/stubgen_patterns.txt`.
     - `Sector` / `SectorArray` / `BlockInds` `.to_numpy()` (and related index helpers) now return
       owning `nb::ndarray` via `pybind/ndarray_utils.h`.
-    - Space / Leg property helpers (`basis_perm`, multiplicities, slices, …) and
-      `Tensor` / `Mask` / `DiagonalTensor.to_numpy` / `diagonal_as_numpy` export via
-      `nb::ndarray` (read-only Eigen zero-copy where applicable).
+    - Space / Leg property helpers (`basis_perm`, multiplicities, slices, …) export via
+      `nb::ndarray`. `Tensor` / `Mask` / `DiagonalTensor.to_numpy` / `diagonal_as_numpy` stay
+      owning NumPy copies (do not route through `block_to_ndarray`, which is torch-tagged for
+      Torch and broke `np.*` callers).
     - Non-CPU: Torch `block_from_ndarray` accepts CUDA DLPack sources without a host bounce;
       `to_ndarray` returns pytorch-tagged CUDA views. Eigen/Numpy stay host-only and raise
       `TypeError` on non-CPU inputs (`require_cpu_device`).

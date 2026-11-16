@@ -8,7 +8,6 @@
 
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
-#include "block_backend/ndarray_dispatch.h"
 
 #include "docstrings/tensors/diagonal_tensor.h"
 
@@ -446,19 +445,9 @@ bind_tensors_diagonal_tensor(nb::module_& m)
     cls.def("diagonal_as_block",
             &DiagonalTensor::diagonal_as_block,
             nb::arg("dtype").none() = nb::none());
-    cls.def(
-      "diagonal_as_numpy",
-      [](DiagonalTensor& self, py::object numpy_dtype) {
-          std::optional<Dtype> dt;
-          if (!numpy_dtype.is_none()) {
-              dt = dtype::from_numpy_dtype(numpy_dtype);
-          }
-          auto block = self.diagonal_as_block(dt);
-          nb::object owner = nb::cast(block);
-          return ndarray_dispatch::export_to_python(ndarray_dispatch::block_to_ndarray(
-            *self.backend->block_backend, *block, owner, /*writable=*/false));
-      },
-      nb::arg("numpy_dtype").none() = nb::none());
+    cls.def("diagonal_as_numpy",
+            &DiagonalTensor::diagonal_as_numpy,
+            nb::arg("numpy_dtype").none() = nb::none());
     cls.def(
       "elementwise_almost_equal",
       [](DiagonalTensor& self, py::object other, float64 rtol, float64 atol) {
@@ -699,20 +688,9 @@ bind_tensors_diagonal_tensor(nb::module_& m)
                DOC(lasyten, Identity, diagonal));
     id_cls.def(
       "diagonal_as_block", &Identity::diagonal_as_block, nb::arg("dtype").none() = nb::none());
-    id_cls.def(
-      "diagonal_as_numpy",
-      [](Identity& self, py::object numpy_dtype) {
-          Dtype dt = self.dtype;
-          if (!numpy_dtype.is_none()) {
-              dt = dtype::from_numpy_dtype(numpy_dtype);
-          }
-          auto block = self.backend->block_backend->ones_block(
-            { static_cast<int64>(self.leg()->dim) }, dt, self.device);
-          nb::object owner = nb::cast(block);
-          return ndarray_dispatch::export_to_python(ndarray_dispatch::block_to_ndarray(
-            *self.backend->block_backend, *block, owner, /*writable=*/false));
-      },
-      nb::arg("numpy_dtype").none() = nb::none());
+    id_cls.def("diagonal_as_numpy",
+               &Identity::diagonal_as_numpy,
+               nb::arg("numpy_dtype").none() = nb::none());
     id_cls.def(
       "_get_item", &Identity::_get_item, nb::arg("idx"), DOC(lasyten, Identity, _get_item));
     id_cls.def("all", &Identity::all, DOC(lasyten, Identity, all));
