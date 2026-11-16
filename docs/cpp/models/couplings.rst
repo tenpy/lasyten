@@ -11,6 +11,9 @@ Declared in ``include/lasyten/models/couplings.h``.
 Free functions
 --------------
 
+.. doxygenfunction:: lasyten::dagger_factorization
+   :project: lasyten
+
 .. doxygenfunction:: lasyten::freeze
    :project: lasyten
 

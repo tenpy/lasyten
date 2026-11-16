@@ -149,6 +149,8 @@ Functions
 
 .. autofunction:: lasyten.tensors.move_hidden_leg
 
+.. autofunction:: lasyten.tensors.flip_arrows
+
 .. autofunction:: lasyten.tensors.move_leg
 
 .. autofunction:: lasyten.tensors.norm

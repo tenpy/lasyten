@@ -268,6 +268,68 @@ void check_same_legs(TensorCPtr t1, TensorCPtr t2);
   std::optional<int64> target_codomain_pos = std::nullopt,
   std::optional<int64> target_domain_pos = std::nullopt);
 
+/// Flip the duality (``is_dual``) of the bond between two contracted legs, in a gauge-like way.
+///
+/// `A` and `B` share a contractible pair of legs, ``A.get_leg(leg_A) == B.get_leg(leg_B).dual``.
+/// The result ``A2, B2`` has the same contraction,
+///
+///     tdot(A, B, leg_A, leg_B) == tdot(A2, B2, leg_A, leg_B)
+///
+/// (or the planar version of it, there are no braids involved), but the bond is represented by
+/// the *isomorphic* space with opposite ``is_dual``: ``A2.get_leg(leg_A).is_dual`` is
+/// ``!A.get_leg(leg_A).is_dual``, and ``B2`` likewise. The sectors of the leg are not changed,
+/// i.e. only the convention how the bond space is written down changes. Each leg stays on its
+/// side, i.e. in the codomain or in the domain of its tensor, and all labels are preserved.
+///
+/// This is the tensor-level version of the isomorphism @f$ Z_a : a^* \to \bar{a} @f$ (see
+/// `BaseSymmetry::Z_iso`) on one end of the bond and its inverse on the other end. Note that
+/// bending the leg alone cannot achieve this, since a bent leg is listed as the same space.
+///
+/// The typical use case is an MPO that was conjugated tensor by tensor: ``dagger`` dualizes all
+/// virtual legs, and this function brings them back to the convention of the original MPO, such
+/// that the two can be added or compared.
+///
+/// Internally, each leg is combined into a one-leg pipe with opposite duality and flattened
+/// again, as in `move_hidden_leg`. `LegPipe` bond legs are flattened to `ElementarySpace`s; on the
+/// `FusionTreeBackend`, nested pipes that are dual raise a `NotImplementedError` (from
+/// `flatten_pipe_leg`). A `DirectSumSpace` bond stays a `DirectSumSpace` with the same summands
+/// and `summand_labels`, but with each summand flipped (see
+/// `ElementarySpace::with_opposite_duality`).
+///
+/// @note Only the contraction of the pair is guaranteed to be preserved. The public basis order
+///     of the flipped leg (its ``basis_perm``) is not, and for non-abelian or anyonic symmetries
+///     flipping a single tensor twice differs from the original by the Frobenius-Schur
+///     indicators of the bond sectors. Both are irrelevant for virtual bonds.
+///
+/// @param A,B The tensors, both `SymmetricTensor`s without hidden legs. They may be the same
+///     object if `leg_A` and `leg_B` are different legs of it (both ends of the bond on one
+///     tensor, e.g. the wrap bond of an infinite MPO with a one-site unit cell). Then both legs
+///     are flipped on that tensor, which is returned twice, such that tracing the two legs gives
+///     the same result before and after.
+/// @param leg_A,leg_B The legs to flip.
+/// @returns ``(A2, B2)`` as described above.
+///
+/// @see flip_leg_duality, move_hidden_leg, flatten_pipe_leg
+[[nodiscard]] std::pair<TensorPtr, TensorPtr> flip_arrows(TensorCPtr A,
+                                                          TensorCPtr B,
+                                                          LegRef leg_A,
+                                                          LegRef leg_B);
+
+/// Single-leg version of `flip_arrows`, for legs that are not contracted with another tensor.
+///
+/// Replaces the leg by the isomorphic space with opposite ``is_dual``. This *changes the tensor*
+/// by the isomorphism ``Z`` unless it is paired with `flip_leg_duality` on the contracted partner
+/// leg (which is what `flip_arrows` does); use it only for open legs, e.g. the trivial boundary
+/// legs of a finite MPO. Labels and the position of the leg (codomain / domain) are preserved.
+///
+/// This is deliberately public C++ API, since `dagger_factorization` (a different translation
+/// unit) needs it for the open boundary legs. It is not exposed to Python: on its own it is easy
+/// to misuse, use `flip_arrows` there.
+///
+/// @param tensor A `SymmetricTensor` without hidden legs.
+/// @param which_leg The leg to flip.
+[[nodiscard]] TensorPtr flip_leg_duality(TensorCPtr tensor, LegRef which_leg);
+
 /// Permute the legs of a tensor by braiding legs and bending lines.
 ///
 /// Graphically (note that we ignore the `levels` graphically and do not draw braid

@@ -5031,3 +5031,126 @@ def test_flatten_pipe_leg(dual_pipes, make_compatible_tensor, make_compatible_sp
     assert isinstance(H2, HiddenLegTensor)
     assert H2.labels == H.labels
     assert not isinstance(H2.get_leg('vL'), LegPipe)
+
+
+def _flip_arrows_pair(make_compatible_tensor, use_pipes=False):
+    """Two MPO-like tensors ``[wL, p | p*, wR]`` with ``A.wR`` dual to ``B.wL``."""
+    kwargs = {'use_pipes': use_pipes, 'max_blocks': 3, 'max_block_size': 3}
+    A = make_compatible_tensor(codomain=[None, None], domain=[None, None], labels=['wL', 'p', 'wR', 'p*'], **kwargs)
+    B = make_compatible_tensor(
+        codomain=[A.get_leg('wR').dual, None], domain=[None, None], labels=['wL', 'p', 'wR', 'p*'], **kwargs
+    )
+    return A, B
+
+
+def _contract_wR_wL(A, B):
+    """Planar contraction of ``A.wR`` with ``B.wL`` (no braids), as the MPS-like chain ``A B``."""
+    res = tensors.planar_contraction(A, B, ['wR'], ['wL'], {'wL': 'wL_A', 'p': 'p_A', 'p*': 'p*_A'}, {})
+    return getattr(res, 'tensor', res)
+
+
+@pytest.mark.parametrize('use_pipes', [False, True])
+def test_flip_arrows(make_compatible_tensor, use_pipes):
+    A, B = _flip_arrows_pair(make_compatible_tensor, use_pipes=use_pipes)
+    expect = _contract_wR_wL(A, B)
+    A2, B2 = tensors.flip_arrows(A, B, 'wR', 'wL')
+    got = _contract_wR_wL(A2, B2)
+    A2.test_sanity()
+    B2.test_sanity()
+    # same labels, same position of the legs (codomain / domain), same other legs
+    assert A2.labels == A.labels and B2.labels == B.labels
+    assert A2.num_codomain_legs == A.num_codomain_legs and B2.num_codomain_legs == B.num_codomain_legs
+    for lab in ['wL', 'p', 'p*']:
+        assert A2.get_leg(lab) == A.get_leg(lab)
+    for lab in ['p', 'p*', 'wR']:
+        assert B2.get_leg(lab) == B.get_leg(lab)
+    # the bond has opposite duality, is a plain space, and the two ends still match
+    assert A2.get_leg('wR').is_dual != A.get_leg('wR').is_dual
+    assert B2.get_leg('wL').is_dual != B.get_leg('wL').is_dual
+    assert not isinstance(A2.get_leg('wR'), LegPipe) and not isinstance(B2.get_leg('wL'), LegPipe)
+    assert A2.get_leg('wR') == B2.get_leg('wL').dual
+    # the sectors are unchanged (only the convention of writing the space down differs)
+    assert A2.get_leg('wR').dim == A.get_leg('wR').dim
+    # the contraction is unchanged
+    _assert_tdot_equal(expect, got)
+
+
+def test_flip_arrows_involution(make_compatible_tensor):
+    # Flipping twice restores ``is_dual`` and the contraction. The individual tensors are in
+    # general only restored up to the Z isomorphisms, i.e. up to signs given by the
+    # Frobenius-Schur indicator on non-abelian bonds and up to the public basis order of the bond.
+    A, B = _flip_arrows_pair(make_compatible_tensor)
+    expect = _contract_wR_wL(A, B)
+    A2, B2 = tensors.flip_arrows(A, B, 'wR', 'wL')
+    A3, B3 = tensors.flip_arrows(A2, B2, 'wR', 'wL')
+    got = _contract_wR_wL(A3, B3)
+    assert A3.get_leg('wR').is_dual == A.get_leg('wR').is_dual
+    assert B3.get_leg('wL').is_dual == B.get_leg('wL').is_dual
+    assert A3.get_leg('wR').dim == A.get_leg('wR').dim
+    assert A3.get_leg('wR') == B3.get_leg('wL').dual
+    _assert_tdot_equal(expect, got)
+
+
+def test_flip_arrows_errors(make_compatible_tensor):
+    A, B = _flip_arrows_pair(make_compatible_tensor)
+    with pytest.raises(ValueError, match='contractible'):
+        tensors.flip_arrows(A, B, 'wL', 'wL')
+    with pytest.raises(ValueError, match='requires non-null Tensor arguments'):
+        tensors.flip_arrows(A, None, 'wR', 'wL')
+
+
+def _tensor_with_both_ends_of_a_bond(make_compatible_tensor, make_compatible_space):
+    """``[p, wL | wR, p*]`` with ``wL`` dual to ``wR``, i.e. a one-site unit cell with a wrap bond.
+
+    The bond legs are adjacent (last codomain leg and first leg of the domain, in label order), such that they
+    can be traced with ``planar_partial_trace``, which needs no braids.
+    """
+    V = make_compatible_space(max_sectors=2, max_mult=2)
+    kwargs = {'use_pipes': False, 'max_blocks': 3, 'max_block_size': 3}
+    return make_compatible_tensor(codomain=[None, V], domain=[None, V], labels=['p', 'wL', 'wR', 'p*'], **kwargs)
+
+
+def test_flip_arrows_same_tensor(make_compatible_tensor, make_compatible_space):
+    """If both ends of the bond are legs of one tensor, both are flipped there; the trace is unchanged."""
+    T = _tensor_with_both_ends_of_a_bond(make_compatible_tensor, make_compatible_space)
+    T2, T3 = tensors.flip_arrows(T, T, 'wL', 'wR')
+    assert T2 is T3
+    T2.test_sanity()
+    assert T2.labels == T.labels
+    for lab in ['wL', 'wR']:
+        assert T2.get_leg(lab).is_dual != T.get_leg(lab).is_dual
+    assert T2.get_leg('wL') == T2.get_leg('wR').dual
+    # the bond legs are adjacent, so the planar trace needs no braids and works for all symmetries
+    pair = (T.labels.index('wL'), T.labels.index('wR'))
+    assert tensors.almost_equal(tensors.planar_partial_trace(T2, pair), tensors.planar_partial_trace(T, pair))
+
+
+def test_flip_arrows_same_leg_error(make_compatible_tensor, make_compatible_space):
+    T = _tensor_with_both_ends_of_a_bond(make_compatible_tensor, make_compatible_space)
+    with pytest.raises(ValueError, match='must be different legs'):
+        tensors.flip_arrows(T, T, 'wL', 'wL')
+
+
+def test_flip_arrows_direct_sum(make_compatible_tensor, make_compatible_space):
+    """A `DirectSumSpace` bond (e.g. of an MPO) keeps its summands and summand labels."""
+    from lasyten.symmetries.spaces import DirectSumSpace
+
+    summands = [make_compatible_space(max_sectors=2, max_mult=2).with_is_dual(False) for _ in range(3)]
+    V = DirectSumSpace(summands, is_dual=False, summand_labels=['IdL', 'A', 'IdR'])
+    kwargs = {'use_pipes': False, 'max_blocks': 3, 'max_block_size': 3}
+    A = make_compatible_tensor(codomain=[None, None], domain=[None, V], labels=['wL', 'p', 'wR', 'p*'], **kwargs)
+    B = make_compatible_tensor(codomain=[V, None], domain=[None, None], labels=['wL', 'p', 'wR', 'p*'], **kwargs)
+    assert isinstance(A.get_leg('wR'), DirectSumSpace) and isinstance(B.get_leg('wL'), DirectSumSpace)
+    expect = _contract_wR_wL(A, B)
+    A2, B2 = tensors.flip_arrows(A, B, 'wR', 'wL')
+    got = _contract_wR_wL(A2, B2)
+    A2.test_sanity()
+    B2.test_sanity()
+    for leg, old in [(A2.get_leg('wR'), A.get_leg('wR')), (B2.get_leg('wL'), B.get_leg('wL'))]:
+        assert isinstance(leg, DirectSumSpace)
+        assert leg.is_dual != old.is_dual
+        assert leg.summand_labels == old.summand_labels
+        assert leg.dim == old.dim
+        assert [s.dim for s in leg.spaces] == [s.dim for s in old.spaces]
+    assert A2.get_leg('wR') == B2.get_leg('wL').dual
+    _assert_tdot_equal(expect, got)

@@ -24,6 +24,12 @@ Free functions
 .. doxygenfunction:: lasyten::move_hidden_leg
     :project: lasyten
 
+.. doxygenfunction:: lasyten::flip_arrows
+    :project: lasyten
+
+.. doxygenfunction:: lasyten::flip_leg_duality
+    :project: lasyten
+
 .. doxygenfunction:: lasyten::permute_legs
    :project: lasyten
 

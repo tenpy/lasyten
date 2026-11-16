@@ -14,6 +14,7 @@ from .._core import (  # noqa: F401
     chiral_3spin_coupling,
     clock_clock_coupling,
     clock_field_coupling,
+    dagger_factorization,
     density_density_interaction,
     freeze,
     gold_coupling,

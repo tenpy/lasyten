@@ -18,6 +18,38 @@ namespace lasyten {
 /// Recursively turn the output of the ``_*_to_dict`` helpers into hashable nested tuples.
 [[nodiscard]] py::object freeze(py::object obj);
 
+/// Hermitian conjugate of an MPO-like chain of tensors, tensor by tensor.
+///
+/// Each tensor of `factorization` must have labels ``['wL', 'p', 'wR', 'p*']`` with two codomain
+/// and two domain legs, as the `Coupling::factorization` and the ``W`` tensors of an MPO. The
+/// product of the (contracted) tensors is an operator ``O = sum_{a} W_0[a_0, a_1] W_1[a_1, a_2]
+/// ...``, where every term acts on different sites and the terms commute. Hence the hermitian
+/// conjugate is ``O^dagger = sum_{a} W_0[a_0, a_1]^dagger W_1[a_1, a_2]^dagger ...`` with the
+/// *same* virtual indices, i.e. only the physical legs are transposed (and the entries
+/// conjugated). Note that this does *not* exchange ``wL`` and ``wR``.
+///
+/// The conjugate tensors are brought back to the standard leg order and labels by planar leg
+/// permutations (no braids, i.e. this works for fermions and anyons), and the virtual legs, which
+/// are dualized by `dagger`, are flipped back with `flip_arrows`, such that the result has the
+/// same duality convention as the input: ``result[i].get_leg('wR').is_dual`` equals
+/// ``factorization[i].get_leg('wR').is_dual``, and likewise for ``'wL'``. The sectors of the
+/// virtual legs are the conjugated ones, since e.g. the dagger of ``S+`` is ``S-``, and
+/// the ``summand_labels`` of ``DirectSumSpace`` legs are kept. This is crucial for combining the
+/// result with the original chain, e.g. to add an MPO and its hermitian conjugate. The cost is
+/// linear in the number of tensors; in contrast to going via the contracted (dense) operator it
+/// does not grow exponentially.
+///
+/// @param factorization The tensors, one per site.
+/// @param cyclic Whether the rightmost ``wR`` leg is also contracted with the leftmost ``wL``
+///     leg (infinite MPO unit cell). If ``False``, the two outermost virtual legs are open and
+///     are flipped as well, such that all virtual legs have the same duality as in the input.
+/// @returns The tensors of the hermitian conjugate chain, same length and labels as the input.
+///
+/// @see Coupling::dagger, flip_arrows
+[[nodiscard]] std::vector<SymmetricTensorPtr> dagger_factorization(
+  std::vector<SymmetricTensorPtr> const& factorization,
+  bool cyclic = false);
+
 /// A coupling is an operator on a few `Site` s, factorized as one tensor per site.
 ///
 /// A coupling represents an operator of the following form::

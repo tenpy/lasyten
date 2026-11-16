@@ -27,6 +27,12 @@ bind_models_couplings(py::module_& m)
 
     m.def("space_to_dict", &space_to_dict, py::arg("space"));
 
+    m.def("dagger_factorization",
+          &dagger_factorization,
+          py::arg("factorization"),
+          py::arg("cyclic") = false,
+          DOC(lasyten, dagger_factorization));
+
     py::class_<Coupling, py::smart_holder> coupling(m, "Coupling");
     coupling.doc() = DOC(lasyten, Coupling);
 
