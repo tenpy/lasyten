@@ -62,3 +62,48 @@ lasyten\._core\.EigenBlockBackend\.BlockCls\.to_ndarray:
     \from numpy.typing import NDArray
     def to_ndarray(self, writable: bool = True, framework: str | None = None) -> NDArray[Any] | Any:
         \doc
+
+# Models DOF (issue #326 item 2): nb::ndarray property views + owning to_numpy / *_numpy.
+lasyten\._core\.SpinDOF\.spin_vector:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    @property
+    def spin_vector(self) -> NDArray[Any]:
+        \doc
+
+lasyten\._core\.SpinDOF\.to_numpy:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def to_numpy(self) -> NDArray[Any]:
+        \doc
+
+lasyten\._core\.ClockDOF\.clock_operators:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    @property
+    def clock_operators(self) -> NDArray[Any]:
+        \doc
+
+lasyten\._core\.ClockDOF\.to_numpy:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def to_numpy(self) -> NDArray[Any]:
+        \doc
+
+lasyten\._core\.OccupationDOF\.get_creator_numpy:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def get_creator_numpy(self, species: Any, include_JW: bool = False) -> NDArray[Any]:
+        \doc
+
+lasyten\._core\.OccupationDOF\.get_annihilator_numpy:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def get_annihilator_numpy(self, species: Any, include_JW: bool = False) -> NDArray[Any]:
+        \doc
+
+lasyten\._core\.OccupationDOF\.get_occupation_numpy:
+    \from typing import Any
+    \from numpy.typing import NDArray
+    def get_occupation_numpy(self, species: Any = ...) -> NDArray[Any]:
+        \doc

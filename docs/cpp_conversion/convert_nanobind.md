@@ -207,7 +207,9 @@ block the OFF build.)
   - [x] Native Numpy / Torch `block_from_ndarray` / `to_ndarray` (zero-copy NumPy view / pytorch-tagged DLPack; CUDA export for Torch)
   - [x] Non-CPU devices: Torch CUDA import/export (device-preserving); Eigen/Numpy reject non-CPU with `TypeError`
   - [x] JAX/TF-tagged returns via `to_ndarray(..., framework='jax'|'tensorflow'|'torch'|'numpy')`
-  - [ ] Remaining models DOF `py::array` fields (deferred leftover #10 remainder)
+  - [x] Models DOF public surfaces: ctors / properties / `*_numpy` factories use `nb::ndarray`
+        interchange (zero-copy read-only views) vs owning `to_numpy` / `*_numpy` copies; C++
+        storage stays `py::array` (Python-gated)
   - [ ] Default `"cpu"` → Eigen (**deferred**): suite is correct under Eigen, but ~6× slower on
         tiny-block / `to_numpy` check-heavy paths vs Numpy on the same BLAS; revisit after small-op
         tuning or when default workloads are large-block dominated (leftover #5)
@@ -348,7 +350,9 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
       `TypeError` on non-CPU inputs (`require_cpu_device`).
     - Framework tags: `to_ndarray(..., framework='numpy'|'torch'|'jax'|'tensorflow')` retags the
       same buffer for the chosen DLPack consumer (defaults: numpy for Eigen/Numpy, torch for Torch).
-    **Still open:** models DOF `py::array` fields (deferred).
+    - Models DOF: binding ctors accept CPU `nb::ndarray`; properties export zero-copy read-only
+      views; `to_numpy` / `get_*_numpy` / creation factories return owning NumPy copies. C++
+      members remain `py::array` (models stay Python-gated).
     TeNPy follow-up: `~/code/tenpy_v2` sets EffectiveH `dtype` after LO init and treats dense
     `to_numpy` as read-only; MPS still uses `block_from_numpy` (Numpy `block_from_ndarray`
     not yet stable there) — see [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md).

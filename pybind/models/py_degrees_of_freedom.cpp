@@ -1,5 +1,7 @@
 #include <lasyten/models/degrees_of_freedom.h>
 
+#include "../block_backend/eigen_ndarray.h"
+#include "../block_backend/ndarray_dispatch.h"
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
 #include "docstrings/models/degrees_of_freedom.h"
@@ -9,13 +11,39 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace lasyten {
 
 namespace {
 
-py::object
+using AnyCpuArray = eigen_ndarray::AnyCpuArray;
+
+/// Dual path for DOF ``py::array`` fields (issue #326 / leftover #10):
+/// import copies into owning ``py::array``; property getters return zero-copy views;
+/// ``*_numpy`` / factory returns use owning copies.
+[[nodiscard]] py::array
+array_from_ndarray(AnyCpuArray const& arr)
+{
+    eigen_ndarray::require_cpu_device(arr.device_type(), "models DOF");
+    return py::array::ensure(nb::cast(arr).ptr());
+}
+
+[[nodiscard]] nb::object
+dof_array_as_ndarray(py::array const& arr, bool writable = false)
+{
+    return ndarray_dispatch::numpy_array_as_ndarray(arr, writable);
+}
+
+[[nodiscard]] nb::object
+dof_array_to_numpy(py::array const& arr)
+{
+    nb::object np = nb::module_::import_("numpy");
+    return np.attr("array")(nb::borrow(arr.ptr()), nb::arg("copy") = true);
+}
+
+[[nodiscard]] py::object
 dim_to_python(float64 dim)
 {
     if (std::isfinite(dim) && std::floor(dim) == dim) {
@@ -200,18 +228,36 @@ bind_models_degrees_of_freedom(nb::module_& m)
     spin_dof.doc() = DOC(lasyten, SpinDOF);
 
     spin_dof
-      .def(lasyten::ctor<decltype(spin_dof), ElementarySpace::Ptr, py::array>(),
+      .def(nb::new_([](ElementarySpace::Ptr leg, AnyCpuArray const& spin_vector) {
+               return std::make_shared<SpinDOF>(std::move(leg), array_from_ndarray(spin_vector));
+           }),
            nb::arg("leg"),
            nb::arg("spin_vector"))
-      .def_rw("spin_vector", &SpinDOF::spin_vector)
+      .def_prop_rw(
+        "spin_vector",
+        [](SpinDOF& self) { return dof_array_as_ndarray(self.spin_vector); },
+        [](SpinDOF& self, AnyCpuArray const& arr) {
+            self.spin_vector = as_immutable_array(array_from_ndarray(arr));
+        },
+        "Zero-copy ``nb::ndarray`` view of the stored spin operators (read-only). "
+        "Assignment copies from any CPU array-like. Use ``np.array(..., copy=True)`` for an "
+        "owning NumPy copy.")
+      .def(
+        "to_numpy",
+        [](SpinDOF const& self) { return dof_array_to_numpy(self.spin_vector); },
+        "Owning NumPy copy of ``spin_vector`` (dual path vs the property view).")
       .def("test_sanity",
            &SpinDOF::test_sanity,
            doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::SpinDOF::test_sanity()"))
-      .def_static("spin_vector_from_Sp",
-                  &SpinDOF::spin_vector_from_Sp,
-                  nb::arg("Sz"),
-                  nb::arg("Sp"),
-                  DOC(lasyten, SpinDOF, spin_vector_from_Sp))
+      .def_static(
+        "spin_vector_from_Sp",
+        [](AnyCpuArray const& Sz, AnyCpuArray const& Sp) {
+            return dof_array_to_numpy(
+              SpinDOF::spin_vector_from_Sp(array_from_ndarray(Sz), array_from_ndarray(Sp)));
+        },
+        nb::arg("Sz"),
+        nb::arg("Sp"),
+        DOC(lasyten, SpinDOF, spin_vector_from_Sp))
       .def_static("conservation_law_to_symmetry",
                   &SpinDOF::conservation_law_to_symmetry,
                   nb::arg("conserve"),
@@ -222,10 +268,23 @@ bind_models_degrees_of_freedom(nb::module_& m)
     clock_dof.doc() = DOC(lasyten, ClockDOF);
 
     clock_dof
-      .def(lasyten::ctor<decltype(clock_dof), ElementarySpace::Ptr, py::array>(),
+      .def(nb::new_([](ElementarySpace::Ptr leg, AnyCpuArray const& clock_operators) {
+               return std::make_shared<ClockDOF>(std::move(leg),
+                                                 array_from_ndarray(clock_operators));
+           }),
            nb::arg("leg"),
            nb::arg("clock_operators"))
-      .def_rw("clock_operators", &ClockDOF::clock_operators)
+      .def_prop_rw(
+        "clock_operators",
+        [](ClockDOF& self) { return dof_array_as_ndarray(self.clock_operators); },
+        [](ClockDOF& self, AnyCpuArray const& arr) {
+            self.clock_operators = as_immutable_array(array_from_ndarray(arr));
+        },
+        "Zero-copy ``nb::ndarray`` view of the stored clock operators (read-only).")
+      .def(
+        "to_numpy",
+        [](ClockDOF const& self) { return dof_array_to_numpy(self.clock_operators); },
+        "Owning NumPy copy of ``clock_operators``.")
       .def("test_sanity",
            &ClockDOF::test_sanity,
            doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::ClockDOF::test_sanity()"))
@@ -261,12 +320,32 @@ bind_models_degrees_of_freedom(nb::module_& m)
     occupation_dof.doc() = DOC(lasyten, OccupationDOF);
 
     occupation_dof.def_rw("num_species", &OccupationDOF::num_species)
-      .def_rw("creators", &OccupationDOF::creators)
-      .def_rw("annihilators", &OccupationDOF::annihilators)
+      .def_prop_rw(
+        "creators",
+        [](OccupationDOF& self) { return dof_array_as_ndarray(self.creators); },
+        [](OccupationDOF& self, AnyCpuArray const& arr) {
+            self.creators = as_immutable_array(array_from_ndarray(arr));
+        })
+      .def_prop_rw(
+        "annihilators",
+        [](OccupationDOF& self) { return dof_array_as_ndarray(self.annihilators); },
+        [](OccupationDOF& self, AnyCpuArray const& arr) {
+            self.annihilators = as_immutable_array(array_from_ndarray(arr));
+        })
       .def_rw("anti_commute_sign", &OccupationDOF::anti_commute_sign)
       .def_rw("species_names", &OccupationDOF::species_names)
-      .def_rw("number_operators", &OccupationDOF::number_operators)
-      .def_rw("n_tot", &OccupationDOF::n_tot)
+      .def_prop_rw(
+        "number_operators",
+        [](OccupationDOF& self) { return dof_array_as_ndarray(self.number_operators); },
+        [](OccupationDOF& self, AnyCpuArray const& arr) {
+            self.number_operators = as_immutable_array(array_from_ndarray(arr));
+        })
+      .def_prop_rw(
+        "n_tot",
+        [](OccupationDOF& self) { return dof_array_as_ndarray(self.n_tot); },
+        [](OccupationDOF& self, AnyCpuArray const& arr) {
+            self.n_tot = as_immutable_array(array_from_ndarray(arr));
+        })
       .def("test_sanity",
            &OccupationDOF::test_sanity,
            doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::OccupationDOF::test_sanity()"))
@@ -279,40 +358,69 @@ bind_models_degrees_of_freedom(nb::module_& m)
            nb::arg("site"),
            doc_cpp_ref(R"pydoc(add_total_occupation_ops)pydoc",
                        "lasyten::OccupationDOF::add_total_occupation_ops()"))
-      .def("get_annihilator_numpy",
-           &OccupationDOF::get_annihilator_numpy,
-           nb::arg("species"),
-           nb::arg("include_JW") = false,
-           DOC(lasyten, OccupationDOF, get_annihilator_numpy))
-      .def("get_creator_numpy",
-           &OccupationDOF::get_creator_numpy,
-           nb::arg("species"),
-           nb::arg("include_JW") = false,
-           DOC(lasyten, OccupationDOF, get_creator_numpy))
-      .def("get_occupation_numpy",
-           &OccupationDOF::get_occupation_numpy,
-           nb::arg("species") = all_species_sentinel(),
-           DOC(lasyten, OccupationDOF, get_occupation_numpy))
+      .def(
+        "get_annihilator_numpy",
+        [](OccupationDOF& self, py::object species, bool include_JW) {
+            return dof_array_to_numpy(self.get_annihilator_numpy(std::move(species), include_JW));
+        },
+        nb::arg("species"),
+        nb::arg("include_JW") = false,
+        DOC(lasyten, OccupationDOF, get_annihilator_numpy))
+      .def(
+        "get_creator_numpy",
+        [](OccupationDOF& self, py::object species, bool include_JW) {
+            return dof_array_to_numpy(self.get_creator_numpy(std::move(species), include_JW));
+        },
+        nb::arg("species"),
+        nb::arg("include_JW") = false,
+        DOC(lasyten, OccupationDOF, get_creator_numpy))
+      .def(
+        "get_occupation_numpy",
+        [](OccupationDOF& self, py::object species) {
+            return dof_array_to_numpy(self.get_occupation_numpy(std::move(species)));
+        },
+        nb::arg("species") = all_species_sentinel(),
+        DOC(lasyten, OccupationDOF, get_occupation_numpy))
       .def("get_species_idx", &OccupationDOF::get_species_idx, nb::arg("species"));
 
     nb::class_<BosonicDOF, OccupationDOF> bosonic_dof(m, "BosonicDOF");
     bosonic_dof.doc() = DOC(lasyten, BosonicDOF);
 
     bosonic_dof
-      .def(lasyten::ctor<decltype(bosonic_dof),
-                         ElementarySpace::Ptr,
-                         py::array,
-                         py::array,
-                         py::array,
-                         std::vector<std::optional<std::string>>>(),
+      .def(nb::new_([](ElementarySpace::Ptr leg,
+                       AnyCpuArray const& Nmax,
+                       AnyCpuArray const& creators,
+                       AnyCpuArray const& annihilators,
+                       std::vector<std::optional<std::string>> species_names) {
+               return std::make_shared<BosonicDOF>(std::move(leg),
+                                                   array_from_ndarray(Nmax),
+                                                   array_from_ndarray(creators),
+                                                   array_from_ndarray(annihilators),
+                                                   std::move(species_names));
+           }),
            nb::arg("leg"),
            nb::arg("Nmax"),
            nb::arg("creators"),
            nb::arg("annihilators"),
            nb::arg("species_names") = std::vector<std::optional<std::string>>{})
-      .def_rw("Nmax", &BosonicDOF::Nmax)
-      .def_rw("JW", &BosonicDOF::JW)
-      .def_rw("_JW", &BosonicDOF::JW)
+      .def_prop_rw(
+        "Nmax",
+        [](BosonicDOF& self) { return dof_array_as_ndarray(self.Nmax); },
+        [](BosonicDOF& self, AnyCpuArray const& arr) {
+            self.Nmax = as_immutable_array(array_from_ndarray(arr));
+        })
+      .def_prop_rw(
+        "JW",
+        [](BosonicDOF& self) { return dof_array_as_ndarray(self.JW); },
+        [](BosonicDOF& self, AnyCpuArray const& arr) {
+            self.JW = as_immutable_array(array_from_ndarray(arr));
+        })
+      .def_prop_rw(
+        "_JW",
+        [](BosonicDOF& self) { return dof_array_as_ndarray(self.JW); },
+        [](BosonicDOF& self, AnyCpuArray const& arr) {
+            self.JW = as_immutable_array(array_from_ndarray(arr));
+        })
       .def("test_sanity",
            &BosonicDOF::test_sanity,
            doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::BosonicDOF::test_sanity()"))
@@ -321,68 +429,117 @@ bind_models_degrees_of_freedom(nb::module_& m)
            nb::arg("site"),
            doc_cpp_ref(R"pydoc(add_individual_occupation_ops)pydoc",
                        "lasyten::BosonicDOF::add_individual_occupation_ops()"))
-      .def("get_annihilator_numpy",
-           &BosonicDOF::get_annihilator_numpy,
-           nb::arg("species"),
-           nb::arg("include_JW") = false)
-      .def("get_creator_numpy",
-           &BosonicDOF::get_creator_numpy,
-           nb::arg("species"),
-           nb::arg("include_JW") = false)
+      .def(
+        "get_annihilator_numpy",
+        [](BosonicDOF& self, py::object species, bool include_JW) {
+            return dof_array_to_numpy(self.get_annihilator_numpy(std::move(species), include_JW));
+        },
+        nb::arg("species"),
+        nb::arg("include_JW") = false)
+      .def(
+        "get_creator_numpy",
+        [](BosonicDOF& self, py::object species, bool include_JW) {
+            return dof_array_to_numpy(self.get_creator_numpy(std::move(species), include_JW));
+        },
+        nb::arg("species"),
+        nb::arg("include_JW") = false)
       .def_static("conservation_law_to_symmetry",
                   &BosonicDOF::conservation_law_to_symmetry,
                   nb::arg("conserve"),
                   doc_cpp_ref(R"pydoc(conservation_law_to_symmetry)pydoc",
                               "lasyten::BosonicDOF::conservation_law_to_symmetry()"))
-      .def_static("creation_annihilation_op_from_single_Nmax",
-                  &BosonicDOF::creation_annihilation_op_from_single_Nmax,
-                  nb::arg("Nmax"),
-                  nb::arg("dim"))
-      .def_static("creation_annihilation_ops_from_Nmax",
-                  &BosonicDOF::creation_annihilation_ops_from_Nmax,
-                  nb::arg("Nmax"),
-                  nb::arg("dim"))
-      .def_static("creation_annihilation_ops",
-                  &BosonicDOF::creation_annihilation_ops,
-                  nb::arg("num_species"),
-                  nb::arg("Nmax"),
-                  nb::arg("dim"));
+      .def_static(
+        "creation_annihilation_op_from_single_Nmax",
+        [](int64 Nmax, int64 dim) {
+            auto [c, a] = BosonicDOF::creation_annihilation_op_from_single_Nmax(Nmax, dim);
+            return py::make_tuple(dof_array_to_numpy(c), dof_array_to_numpy(a));
+        },
+        nb::arg("Nmax"),
+        nb::arg("dim"))
+      .def_static(
+        "creation_annihilation_ops_from_Nmax",
+        [](AnyCpuArray const& Nmax, int64 dim) {
+            auto [c, a] =
+              BosonicDOF::creation_annihilation_ops_from_Nmax(array_from_ndarray(Nmax), dim);
+            return py::make_tuple(dof_array_to_numpy(c), dof_array_to_numpy(a));
+        },
+        nb::arg("Nmax"),
+        nb::arg("dim"))
+      .def_static(
+        "creation_annihilation_ops",
+        [](int64 num_species, AnyCpuArray const& Nmax, int64 dim) {
+            auto [c, a] =
+              BosonicDOF::creation_annihilation_ops(num_species, array_from_ndarray(Nmax), dim);
+            return py::make_tuple(dof_array_to_numpy(c), dof_array_to_numpy(a));
+        },
+        nb::arg("num_species"),
+        nb::arg("Nmax"),
+        nb::arg("dim"));
 
     nb::class_<FermionicDOF, OccupationDOF> fermionic_dof(m, "FermionicDOF");
     fermionic_dof.doc() = DOC(lasyten, FermionicDOF);
 
     fermionic_dof
-      .def(lasyten::ctor<decltype(fermionic_dof),
-                         ElementarySpace::Ptr,
-                         py::array,
-                         py::array,
-                         std::vector<std::optional<std::string>>>(),
+      .def(nb::new_([](ElementarySpace::Ptr leg,
+                       AnyCpuArray const& creators,
+                       AnyCpuArray const& annihilators,
+                       std::vector<std::optional<std::string>> species_names) {
+               return std::make_shared<FermionicDOF>(std::move(leg),
+                                                     array_from_ndarray(creators),
+                                                     array_from_ndarray(annihilators),
+                                                     std::move(species_names));
+           }),
            nb::arg("leg"),
            nb::arg("creators"),
            nb::arg("annihilators"),
            nb::arg("species_names") = std::vector<std::optional<std::string>>{})
-      .def_rw("partial_JWs", &FermionicDOF::partial_JWs)
-      .def_rw("JW", &FermionicDOF::JW)
-      .def_rw("_JW", &FermionicDOF::JW)
+      .def_prop_rw(
+        "partial_JWs",
+        [](FermionicDOF& self) { return dof_array_as_ndarray(self.partial_JWs); },
+        [](FermionicDOF& self, AnyCpuArray const& arr) {
+            self.partial_JWs = as_immutable_array(array_from_ndarray(arr));
+        })
+      .def_prop_rw(
+        "JW",
+        [](FermionicDOF& self) { return dof_array_as_ndarray(self.JW); },
+        [](FermionicDOF& self, AnyCpuArray const& arr) {
+            self.JW = as_immutable_array(array_from_ndarray(arr));
+        })
+      .def_prop_rw(
+        "_JW",
+        [](FermionicDOF& self) { return dof_array_as_ndarray(self.JW); },
+        [](FermionicDOF& self, AnyCpuArray const& arr) {
+            self.JW = as_immutable_array(array_from_ndarray(arr));
+        })
       .def("test_sanity",
            &FermionicDOF::test_sanity,
            doc_cpp_ref(R"pydoc(test_sanity)pydoc", "lasyten::FermionicDOF::test_sanity()"))
-      .def("get_annihilator_numpy",
-           &FermionicDOF::get_annihilator_numpy,
-           nb::arg("species"),
-           nb::arg("include_JW") = false)
-      .def("get_creator_numpy",
-           &FermionicDOF::get_creator_numpy,
-           nb::arg("species"),
-           nb::arg("include_JW") = false)
+      .def(
+        "get_annihilator_numpy",
+        [](FermionicDOF& self, py::object species, bool include_JW) {
+            return dof_array_to_numpy(self.get_annihilator_numpy(std::move(species), include_JW));
+        },
+        nb::arg("species"),
+        nb::arg("include_JW") = false)
+      .def(
+        "get_creator_numpy",
+        [](FermionicDOF& self, py::object species, bool include_JW) {
+            return dof_array_to_numpy(self.get_creator_numpy(std::move(species), include_JW));
+        },
+        nb::arg("species"),
+        nb::arg("include_JW") = false)
       .def_static("conservation_law_to_symmetry",
                   &FermionicDOF::conservation_law_to_symmetry,
                   nb::arg("conserve"),
                   doc_cpp_ref(R"pydoc(conservation_law_to_symmetry)pydoc",
                               "lasyten::FermionicDOF::conservation_law_to_symmetry()"))
-      .def_static("creation_annihilation_ops",
-                  &FermionicDOF::creation_annihilation_ops,
-                  nb::arg("num_species"));
+      .def_static(
+        "creation_annihilation_ops",
+        [](int64 num_species) {
+            auto [c, a] = FermionicDOF::creation_annihilation_ops(num_species);
+            return py::make_tuple(dof_array_to_numpy(c), dof_array_to_numpy(a));
+        },
+        nb::arg("num_species"));
 
     m.def(
       "set_common_symmetry",
