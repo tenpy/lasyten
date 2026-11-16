@@ -94,6 +94,8 @@ CMake options for the block backends and a Python-free build
     i.e. it works for every CPython >= 3.12. The option is silently turned OFF for Python < 3.12 or a
     non-CPython interpreter (then ``_core.cpython-3XX-....so`` is built). pybind11 is not used anymore: it
     cannot be compiled with ``Py_LIMITED_API``.
+    CI builds and checks these wheels on Linux and macOS (``.github/workflows/wheels.yml``,
+    ``scripts/check_abi3_wheel.py``); ``[tool.cibuildwheel]`` configures optional manylinux builds.
 
 
 Building from source on MacOS

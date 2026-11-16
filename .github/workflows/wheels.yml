@@ -1,0 +1,110 @@
+name: Wheels (cp312-abi3)
+
+# Build Stable ABI wheels and check Py_LIMITED_API / ``_core.abi3.*`` (issue #326 item 4).
+#
+# Required: micromamba hosts (ubuntu + macOS) — same stack as pytest, Torch from
+# conda-forge, ``--no-isolation`` so pip does not pull a CUDA torch wheel.
+# The macOS matrix entry is the Py_LIMITED_API / abi3 build check from leftover #2.
+#
+# Also: ``cibuildwheel`` on Linux using ``[tool.cibuildwheel]`` in pyproject.toml
+# (manylinux + CPU torch). Marked continue-on-error until Torch/HDF5 bundling is
+# fully sorted for manylinux images.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  abi3-wheel:
+    if: github.event.pull_request.draft == false
+    name: abi3 wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Set up micromamba
+        uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-file: environment.yml
+          create-args: >-
+            python=3.14
+          cache-environment: true
+
+      - name: Build cp312-abi3 wheel
+        run: |
+          pip install --no-build-isolation -e ./external/hdf5_io
+          pip install build
+          # --no-isolation: use conda pytorch/eigen/hdf5 (isolated builds pull CUDA torch).
+          # Release build for artifacts; LASYTEN_STABLE_ABI stays ON (default).
+          python -m build --wheel --no-isolation -o wheelhouse \
+            -C cmake.build-type=Release \
+            -C cmake.define.LASYTEN_STABLE_ABI=ON
+
+      - name: Check abi3 wheel tag and _core.abi3 extension
+        run: |
+          python scripts/check_abi3_wheel.py wheelhouse/*.whl
+          python - <<'PY'
+          import pathlib, zipfile, sys
+          wheels = list(pathlib.Path('wheelhouse').glob('*.whl'))
+          assert wheels, 'no wheels'
+          with zipfile.ZipFile(wheels[0]) as zf:
+              cores = [n for n in zf.namelist() if '_core.abi3.' in n]
+          print('abi3 extension members:', cores)
+          if not cores:
+              sys.exit('missing _core.abi3.* inside wheel')
+          PY
+
+      - name: Smoke-import from the wheel
+        run: |
+          pip install --no-deps --force-reinstall wheelhouse/*.whl
+          python -c "import lasyten._core as c; print(c.__file__); assert 'abi3' in c.__file__"
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: abi3-wheel-${{ matrix.os }}
+          path: wheelhouse/*.whl
+          retention-days: 14
+
+  cibuildwheel-linux:
+    if: github.event.pull_request.draft == false
+    name: cibuildwheel (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Build wheels with cibuildwheel
+        uses: pypa/cibuildwheel@v3.4.1
+
+      - name: Check abi3 wheels
+        if: success()
+        run: python3 scripts/check_abi3_wheel.py wheelhouse/*.whl
+
+      - name: Upload cibuildwheel artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibuildwheel-linux
+          path: wheelhouse/*.whl
+          retention-days: 14
+          if-no-files-found: warn

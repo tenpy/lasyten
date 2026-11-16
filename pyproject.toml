@@ -127,6 +127,30 @@ log_format = "%(asctime)s %(levelname)-8s %(filename)-16s%(lineno)4d: %(message)
 testpaths = ["tests"]
 
 
+# cibuildwheel (issue #326 item 4 / leftover #2): produce cp312-abi3 wheels.
+# Build with CPython >= 3.14 (requires-python); scikit-build-core tags abi3 via wheel.py-api.
+# Torch/HDF5/Eigen make plain manylinux awkward — CI uses micromamba hosts (see
+# .github/workflows/wheels.yml) and optionally cibuildwheel with the settings below.
+[tool.cibuildwheel]
+build = "cp314-*"
+skip = "pp* *-musllinux_* *i686* *win32*"
+build-verbosity = 1
+# Release wheels (repo default cmake.build-type is Debug for local editable installs).
+config-settings = "cmake.build-type=Release"
+# CPU torch: avoid CUDA wheels that need the toolkit at link time.
+environment = { PIP_EXTRA_INDEX_URL = "https://download.pytorch.org/whl/cpu" }
+test-skip = "*"
+
+[tool.cibuildwheel.linux]
+before-all = [
+  "yum install -y eigen3-devel lapack-devel openblas-devel hdf5-devel cmake doxygen || dnf install -y eigen3-devel lapack-devel openblas-devel hdf5-devel cmake doxygen",
+]
+before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm"
+
+[tool.cibuildwheel.macos]
+before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm"
+
+
 [tool.ruff]
 line-length = 120
 target-version = "py314"

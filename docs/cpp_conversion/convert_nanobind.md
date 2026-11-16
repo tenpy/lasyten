@@ -22,7 +22,7 @@ TeNPy downstream: [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md).
 | Full pybind → nanobind `_core` | Done (LO trampolines only; DummyTensor tests skipped) |
 | Phase 4 cleanup (gating, `nb::ndarray` boundary, `py::` inventory) | Done for first port (Numpy gate + Eigen `to_ndarray` / `block_from_ndarray`; default `"cpu"` → Eigen **deferred**, leftover #5) |
 | pybind11 removed from liblasyten | Done: `include/` / `src/` use nanobind only, through the thin `lasyten::py` layer (`detail/python_api.h`, `detail/py_array.h`); no `find_package(pybind11)` |
-| Stable ABI (abi3) | Done: `LASYTEN_STABLE_ABI` (default ON, Python >= 3.12), `_core.abi3.so`, `wheel.py-api = "cp312"` (leftover #2) |
+| Stable ABI (abi3) | Done: `LASYTEN_STABLE_ABI` (default ON, Python >= 3.12), `_core.abi3.so`, `wheel.py-api = "cp312"`; CI in `.github/workflows/wheels.yml` (ubuntu + macOS micromamba abi3 wheels + `scripts/check_abi3_wheel.py`; optional Linux `cibuildwheel`) |
 | `LASYTEN_WITH_PYTHON=OFF` Python-free | Partial: Eigen + Space/Leg/Tensors, `NoSymmetryBackend`, **`AbelianBackend`**, **`FusionTreeBackend`** (core paths green; OFF stub inventory in [convert_FusionTreeBackend.md](convert_FusionTreeBackend.md) / leftover #1), `fusion_tree_mapping`, krylov, and native `svd`/`qr`/`lq`/`eigh`/`eig*`/`entropy` (incl. Charged/HiddenLeg factors) build without libpython (`ctest -R no_python`); models and Numpy/ArrayApi/Torch still Python-gated |
 
 ## Motivations
@@ -313,7 +313,12 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
    **Still in `LASYTEN_PYTHON_API_SOURCES`:** `block_inds_numpy.cpp` only (NumPy casting for
    `BlockInds`). Models / `su2.cpp` and Numpy / ArrayApi / Torch stay in separate Python-gated
    `target_sources` (not shrunk further while models keep `py::array` storage).
-2. **Stable ABI / abi3 wheels** — **done** (`LASYTEN_STABLE_ABI`, `_core.abi3.so`, `wheel.py-api = "cp312"`). Open: CI wheel jobs (cibuildwheel) for `cp312-abi3`, and checking the `Py_LIMITED_API` build on macOS.
+2. **Stable ABI / abi3 wheels** — **done** (`LASYTEN_STABLE_ABI`, `_core.abi3.so`, `wheel.py-api = "cp312"`).
+   CI (issue #326 item 4): `.github/workflows/wheels.yml` builds Release `cp312-abi3` wheels on
+   **ubuntu-latest** and **macos-latest** via micromamba (`python -m build --no-isolation`),
+   checks the tag / `_core.abi3.*` with `scripts/check_abi3_wheel.py`, and smoke-imports.
+   `[tool.cibuildwheel]` in `pyproject.toml` drives an optional Linux `cibuildwheel` job
+   (`continue-on-error` until manylinux Torch/HDF5 bundling is fully hardened).
 3. **Restore trampolines** (optional) for `Tensor`, `BlockBackend`, `TensorBackend`, `Symmetry`, `Site`, … if downstream needs Python subclassing again.
 4. **`unique_ptr` where ownership is unique** — audit `shared_ptr`-everywhere; migrate carefully without breaking `shared_from_this`.
 5. **Fate of NumpyBlockBackend / ArrayApiBlockBackend + default `"cpu"`** — **deferred.** Both stay:
