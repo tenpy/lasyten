@@ -86,8 +86,11 @@ block_from_ndarray(BlockBackend& backend,
             throw nb::type_error("block_from_ndarray: expected array-like");
         }
         if (dtype.has_value()) {
+            // ``nb::arg`` is only for ``.def()`` signatures — use a real kwargs dict.
+            nb::dict kwargs;
+            kwargs["copy"] = false;
             a = py::reinterpret_steal<py::array>(
-              a.attr("astype")(dtype::to_numpy_dtype(*dtype), nb::arg("copy") = false).ptr());
+              a.attr("astype")(dtype::to_numpy_dtype(*dtype), **kwargs).ptr());
         }
         return backend.block_from_numpy(a, dtype, std::move(device));
     }

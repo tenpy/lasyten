@@ -39,7 +39,7 @@ must assign `self.dtype = …` only *after* `PlanarLinearOperator.__init__` /
 | Area | Current tenpy usage | Expected lasyten change | Downstream action |
 | --- | --- | --- | --- |
 | Default CPU backend | Implicit numpy / `block_backend` | Eigen becomes default `"cpu"` | Smoke MPS/MPO/DMRG; pin backend only if numerical diffs appear |
-| `to_numpy()` / `block_from_numpy` | Widespread (mps, mpo, algorithms) | Tensor/`Mask`/`to_numpy` export read-only `nb::ndarray`; prefer `block_from_ndarray` | TeNPy: use `block_from_ndarray` for imports; treat `to_numpy()` as read-only (no in-place writes) |
+| `to_numpy()` / `block_from_numpy` | Widespread (mps, mpo, algorithms) | Tensor/`Mask`/`to_numpy` export read-only `nb::ndarray`; `block_from_ndarray` available | TeNPy: keep `block_from_numpy` for MPS imports until Numpy `block_from_ndarray` is stable; treat `to_numpy()` as read-only |
 | `Dtype.to_numpy_dtype()` | e.g. MPS init | Keep or re-export; binding style may change | Re-run type-sensitive paths after bump |
 | Import paths | `from lasyten.tensors.planar import PlanarLinearOperator` | Still exported from nanobind `_core` | Bump + full test; fix only if export layout changes |
 | `Scalar(...).to_numpy()` | norms, traces, residuals | Same idea; Eigen scalar blocks underneath | Compare float tolerances if Eigen vs SciPy SVD/eigh differ |
@@ -71,16 +71,17 @@ tenpy/networks/mpo.py
 
 ### Array bridge hotspots (review after Eigen default)
 
-- `tenpy/networks/mps.py` — **`block_from_ndarray`** (was `block_from_numpy`), `to_numpy` for dtype
-  conversion only, `permute_axes`, `reshape`
+- `tenpy/networks/mps.py` — `block_from_numpy` (keep until Numpy `block_from_ndarray` is
+  stable in MPS paths), `to_numpy` for dtype conversion, `permute_axes`, `reshape`
 - `tenpy/networks/mpo.py` — `to_numpy` on rearranged tensors / traces (read-only under Eigen)
 - Algorithm residuals / norms calling `.to_numpy()` on scalars (owning 0-d copies; unchanged)
+- `tenpy/algorithms/mps_common.py` — set `dtype` **after** `PlanarLinearOperator.__init__`
 
 ## Smoke checklist after bumping lasyten
 
-- [ ] DMRG one-site / two-site (`EffectiveH.matvec` → Lanczos)
+- [x] DMRG one-site / two-site (`EffectiveH.matvec` → Lanczos; dtype-after-init fix)
 - [ ] MPS transfer-matrix / `Arnoldi` (`TransferMatrix.matvec`)
-- [x] `to_numpy` / `block_from_ndarray` round-trips on MPS tensors (TeNPy call sites updated)
+- [ ] `block_from_ndarray` for MPS imports (deferred: Numpy-backend segfault in some paths)
 - [ ] Abelian + no-symmetry small models
 - [ ] Optional Torch device path unchanged
 - [ ] Compare a few SVD/truncation energies vs pre-Eigen baseline (tolerances)
