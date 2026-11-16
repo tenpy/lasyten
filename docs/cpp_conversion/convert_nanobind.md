@@ -335,6 +335,9 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
     - Framework tags: `to_ndarray(..., framework='numpy'|'torch'|'jax'|'tensorflow')` retags the
       same buffer for the chosen DLPack consumer (defaults: numpy for Eigen/Numpy, torch for Torch).
     **Still open:** models DOF `py::array` fields (deferred).
+    TeNPy follow-up (ndarray bridge): `~/code/tenpy_v2` uses `block_from_ndarray` at MPS
+    import sites; dense `to_numpy` treated as read-only — see
+    [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md).
 11. **TeNPy `MPOTransferMatrix`** — still `NotImplementedError` on the TeNPy side. lasyten
     trampolines for `LinearOperator` (`matvec` / `to_tensor` / `adjoint`, `nb::dynamic_attr`)
     and `PlanarLinearOperator` (same three virtuals; `adjoint` must live on the *derived*
