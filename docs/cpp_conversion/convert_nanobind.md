@@ -199,7 +199,8 @@ block the OFF build.)
   - [x] CMake `LASYTEN_WITH_NUMPY_BACKEND` (default ON with Python): OFF drops `numpy.cpp` / `array_api.cpp`, their bindings and the Python classes (`lasyten.block_backends.WITH_NUMPY_BACKEND`), keeps Eigen
   - [x] `nb::ndarray` boundary for `EigenBlockBackend` (`pybind/block_backend/eigen_ndarray.h`: `block_from_ndarray`, zero-copy `to_ndarray`)
   - [x] `BlockBackend` / `Block` `block_from_ndarray` + `to_ndarray(writable=…)` dispatch (Eigen zero-copy; others via `to_numpy` copy); read-only export; Torch CPU import smoke test (leftover #10 progress)
-  - [ ] Remaining `py::array` binding signatures (Sector/BlockInds/Space/models/`Tensor.to_numpy`) → `nb::ndarray` (leftover #10 remainder)
+  - [x] Native Numpy / Torch `block_from_ndarray` / `to_ndarray` (zero-copy NumPy view / pytorch-tagged DLPack; CUDA export for Torch)
+  - [ ] Remaining models DOF `py::array` fields; non-CPU / JAX-TF tags (leftover #10 remainder)
   - [ ] Default `"cpu"` -> Eigen (deliberately not switched; test-suite parity first)
   - [x] Remove pybind11 from `include/` / `src/` / CMake (no `find_package(pybind11)`, no `pybind11::` link, not in `environment.yml` / `pyproject.toml` build requires); `py::` is now `lasyten::py` over nanobind, the two bridges (`py_nanobind_bridge.h`, `py_pybind11_bridge.h`) are deleted
 - [x] Stable ABI: `LASYTEN_STABLE_ABI`, `Development.SABIModule`, `nanobind-static-abi3` linked into liblasyten and `_core`, `nanobind_add_module(_core STABLE_ABI ...)`, `wheel.py-api = "cp312"`
@@ -310,22 +311,24 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
       a leftover `_core.cpython-*.so` shadows abi3 and types `py::array` as
       `typing.Any`). Regression: `test_core_pyi_array_typing`. Remaining
       `object`/`Any` on true `py::object` APIs is leftover #10 (`nb::ndarray`).
-10. **Dual-framework zero-copy / `nb::ndarray` everywhere** — **Eigen path largely done**, plus abstract
+10. **Dual-framework zero-copy / `nb::ndarray` everywhere** — **Eigen + Numpy + Torch paths done**, plus abstract
     `BlockBackend` dispatch:
     - Import: `block_from_ndarray` on `EigenBlockBackend` and `BlockBackend` (Eigen copies from any
-      CPU DLPack/buffer array; other backends fall back to `block_from_numpy`). Unsupported dtypes
-      raise `TypeError`. Torch CPU smoke test in `test_eigen_block_backend.py`.
-    - Export: `to_ndarray(writable=True|False)` on Eigen backend/block and on abstract
+      CPU DLPack/buffer array; Numpy/Torch copy into their storage; others fall back to
+      `block_from_numpy`). Unsupported dtypes raise `TypeError`. Torch CPU smoke test in
+      `test_eigen_block_backend.py`; native Numpy/Torch roundtrips in `test_ndarray_backends.py`.
+    - Export: `to_ndarray(writable=True|False)` on Eigen / Numpy / Torch backend+block and on abstract
       `BlockBackend` / `Block` (writable = zero-copy alias; `writable=False` = read-only view;
-      non-Eigen = owning NumPy copy). Documented dual path vs `to_numpy()` (always owning copy).
+      other backends = owning NumPy copy). Torch export is pytorch-tagged (CPU or CUDA DLPack).
+      Documented dual path vs `to_numpy()` (always owning NumPy copy).
     - Stubgen patterns for the new methods in `scripts/stubgen_patterns.txt`.
     - `Sector` / `SectorArray` / `BlockInds` `.to_numpy()` (and related index helpers) now return
       owning `nb::ndarray` via `pybind/ndarray_utils.h`.
     - Space / Leg property helpers (`basis_perm`, multiplicities, slices, …) and
       `Tensor` / `Mask` / `DiagonalTensor.to_numpy` / `diagonal_as_numpy` export via
       `nb::ndarray` (read-only Eigen zero-copy where applicable).
-    **Still open:** models DOF `py::array` fields, native Numpy/Torch `to_ndarray` (no copy
-    fallback), non-CPU devices, JAX/TF-tagged return arrays (today NumPy-tagged only).
+    **Still open:** models DOF `py::array` fields (deferred), non-CPU Eigen/Numpy devices,
+    JAX/TF-tagged return arrays (today NumPy- or pytorch-tagged only).
 11. **TeNPy `MPOTransferMatrix`** — still `NotImplementedError` on the TeNPy side. lasyten
     trampolines for `LinearOperator` (`matvec` / `to_tensor` / `adjoint`, `nb::dynamic_attr`)
     and `PlanarLinearOperator` (same three virtuals; `adjoint` must live on the *derived*

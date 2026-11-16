@@ -103,7 +103,9 @@ Python still accepts `numbers.Number` in many tensor APIs; those call sites were
 - [ ] Eigen/LAPACK backend — [convert_EigenBlockBackend.md](convert_EigenBlockBackend.md)
 - [ ] Decouple `py::array` / `py::object` from `block_backend.h` public API
 - [x] Nanobind bindings
-- [x] `nb::ndarray` I/O for the Eigen backend (`pybind/block_backend/eigen_ndarray.h`); `to_numpy` / `block_from_numpy` (`py::array`) remain on the C++ API (leftover #10)
+- [x] `nb::ndarray` I/O for Eigen (`eigen_ndarray.h`) and native Numpy/Torch (`ndarray_dispatch.h`);
+      `to_numpy` / `block_from_numpy` (`py::array`) remain on the C++ API (leftover #10 remainder:
+      models DOF, JAX/TF tags)
 - [ ] Drop `PyBlockBackend` trampoline initially (tenpy does not subclass it)
 - [ ] Default `"cpu"` → Eigen once parity is good
 - [x] Gate Numpy/ArrayApi Python-dispatch backends (`LASYTEN_WITH_NUMPY_BACKEND`, marked transitional in `backend_factory.cpp`); removal is still open (leftover #5)

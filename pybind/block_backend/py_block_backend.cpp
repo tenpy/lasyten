@@ -631,9 +631,9 @@ bind_block_backend(nb::module_& m)
               ndarray_dispatch::block_to_ndarray(*b.get_backend(), b, self, writable));
         },
         nb::arg("writable") = true,
-        "Array interchange view of the block. Eigen: zero-copy NumPy "
-        "(writable aliases storage; writable=False is read-only). Other backends: owning "
-        "NumPy copy via to_numpy(). Prefer this over to_numpy() for Eigen.")
+        "Array interchange view of the block. Eigen/Numpy: zero-copy NumPy "
+        "(writable aliases storage; writable=False is read-only). Torch: zero-copy "
+        "torch.Tensor (CPU/CUDA). Other backends: owning NumPy copy via to_numpy().")
       .def("_item_as_complex128",
            &BlockBackend::Block::_item_as_complex128,
            "Return the element of a zero-dimensional block as a complex128.")
@@ -877,7 +877,7 @@ bind_block_backend(nb::module_& m)
         nb::arg("dtype") = nb::none(),
         nb::arg("device") = nb::none(),
         "Import a CPU array (NumPy, PyTorch, DLPack, buffer protocol) into a new block. "
-        "Eigen copies into owned storage; other backends route through block_from_numpy.")
+        "Eigen/Numpy/Torch use native paths; others route through block_from_numpy.")
       .def(
         "to_ndarray",
         [](BlockBackend& self, nb::object block, bool writable) {
@@ -887,9 +887,9 @@ bind_block_backend(nb::module_& m)
         },
         nb::arg("block"),
         nb::arg("writable") = true,
-        "Export a block as an array. Eigen: zero-copy NumPy view "
-        "(writable=False for read-only). Other backends: owning NumPy copy. "
-        "Contrast with to_numpy(), which always copies.")
+        "Export a block as an array. Eigen/Numpy: zero-copy NumPy "
+        "(writable=False for read-only). Torch: zero-copy torch.Tensor. "
+        "Other backends: owning NumPy copy. Contrast with to_numpy().")
       .def("get_device", &BlockBackend::get_device, nb::arg("a"))
       .def("get_diagonal",
            &BlockBackend::get_diagonal,
