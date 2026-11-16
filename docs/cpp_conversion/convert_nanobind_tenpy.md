@@ -38,7 +38,7 @@ must assign `self.dtype = …` only *after* `PlanarLinearOperator.__init__` /
 
 | Area | Current tenpy usage | Expected lasyten change | Downstream action |
 | --- | --- | --- | --- |
-| Default CPU backend | Implicit numpy / `block_backend` | Eigen becomes default `"cpu"` | Smoke MPS/MPO/DMRG; pin backend only if numerical diffs appear |
+| Default CPU backend | Implicit numpy / `block_backend` | Eigen as `"eigen"` only for now; **`"cpu"` stays Numpy** (switch deferred — leftover #5; Eigen pytest ~6× slower on tiny-block paths) | No action until lasyten flips the default; optional smoke with `block_backend="eigen"` |
 | `to_numpy()` / `block_from_numpy` | Widespread (mps, mpo, algorithms) | Tensor/`Mask`/`to_numpy` export read-only `nb::ndarray`; `block_from_ndarray` available | TeNPy: keep `block_from_numpy` for MPS imports until Numpy `block_from_ndarray` is stable; treat `to_numpy()` as read-only |
 | `Dtype.to_numpy_dtype()` | e.g. MPS init | Keep or re-export; binding style may change | Re-run type-sensitive paths after bump |
 | Import paths | `from lasyten.tensors.planar import PlanarLinearOperator` | Still exported from nanobind `_core` | Bump + full test; fix only if export layout changes |
@@ -69,7 +69,7 @@ tenpy/networks/mpo.py
   class MPOTransferMatrix(lasy.sparse.LinearOperator)  # NotImplementedError
 ```
 
-### Array bridge hotspots (review after Eigen default)
+### Array bridge hotspots (review if/when Eigen becomes default `"cpu"`)
 
 - `tenpy/networks/mps.py` — `block_from_numpy` (keep until Numpy `block_from_ndarray` is
   stable in MPS paths), `to_numpy` for dtype conversion, `permute_axes`, `reshape`

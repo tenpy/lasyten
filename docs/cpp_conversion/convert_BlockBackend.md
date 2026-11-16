@@ -16,7 +16,7 @@ boundaries with `nb::ndarray` / owning Eigen storage, and make
 | `NumpyBlockBackend` | `py::array` + Python NumPy/SciPy | **Transitional**; CMake option `LASYTEN_WITH_NUMPY_BACKEND` (default ON with Python) |
 | `TorchBlockBackend` | `torch::Tensor` + ATen | Keep for GPU |
 | `ArrayApiBlockBackend` | `py::object` + Array API | **Transitional**; same CMake option as Numpy |
-| `EigenBlockBackend` | Owning buffer + Eigen/LAPACK | **Preferred CPU backend** (`"eigen"`); `"cpu"` is still Numpy while that is built |
+| `EigenBlockBackend` | Owning buffer + Eigen/LAPACK | Opt-in CPU backend (`"eigen"`); long-term Python-free default, but **`"cpu"` stays Numpy for now** (switch deferred — leftover #5) |
 
 `LASYTEN_WITH_NUMPY_BACKEND=OFF` drops `numpy.cpp` / `array_api.cpp` (and their bindings and the
 Python classes `NumpyBlockBackend` / `ArrayApiBlockBackend`); `"cpu"` then resolves to Eigen
@@ -107,6 +107,7 @@ Python still accepts `numbers.Number` in many tensor APIs; those call sites were
       `to_numpy` / `block_from_numpy` (`py::array`) remain on the C++ API (leftover #10 remainder:
       models DOF, JAX/TF tags)
 - [ ] Drop `PyBlockBackend` trampoline initially (tenpy does not subclass it)
-- [ ] Default `"cpu"` → Eigen once parity is good
-- [x] Gate Numpy/ArrayApi Python-dispatch backends (`LASYTEN_WITH_NUMPY_BACKEND`, marked transitional in `backend_factory.cpp`); removal is still open (leftover #5)
+- [ ] Default `"cpu"` → Eigen — **deferred** (leftover #5): Eigen suite is correct but ~6× slower
+      than Numpy on tiny-block / densify-check paths; keep Numpy as `"cpu"` for now
+- [x] Gate Numpy/ArrayApi Python-dispatch backends (`LASYTEN_WITH_NUMPY_BACKEND`, marked transitional in `backend_factory.cpp`); removal + `"cpu"` switch still deferred (leftover #5)
 - [ ] `LASYTEN_WITH_PYTHON=OFF` builds without Python (Phase 5)

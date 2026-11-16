@@ -6,7 +6,11 @@ buffer/DLPack). Master port note: [convert_nanobind.md](convert_nanobind.md).
 
 ## Status
 
-**Implemented (v1); `"cpu"` still points to `NumpyBlockBackend` (while that is built).** Eigen is the preferred CPU backend (`"eigen"`).
+**Implemented (v1); `"cpu"` still points to `NumpyBlockBackend` (while that is built).** Eigen is
+available as `"eigen"` and is the long-term Python-free CPU backend, but **do not make it the
+default `"cpu"` yet** (deferred — leftover #5 / [convert_nanobind.md](convert_nanobind.md)): the
+pytest suite is ~6× slower under Eigen than Numpy on the same BLAS because it is tiny-block and
+densify-check heavy.
 
 | Piece | State |
 | --- | --- |
@@ -19,7 +23,7 @@ buffer/DLPack). Master port note: [convert_nanobind.md](convert_nanobind.md).
 | Python-free operation | Done for `LASYTEN_WITH_PYTHON=OFF`: native HDF5 save/load (`hdf5_io::Hdf5Buffer`), `apply_axis_permutations`, repr; ctest `test_eigen_block_backend_no_python` |
 | Bindings (`pybind/block_backend/py_eigen.cpp`) | Done |
 | BlockBackend-contract tests | Basic ops + SVD/QR/eigh/tdot (`tests/ctest/test_eigen_block_backend.cpp`, `tests/python_tests/backends/test_eigen_block_backend.py`) |
-| Default `"cpu"` factory | Leftover until parity |
+| Default `"cpu"` factory | **Deferred** (keep Numpy; Eigen opt-in until small-block perf catches up) |
 
 ### Implementation notes
 
@@ -31,9 +35,9 @@ buffer/DLPack). Master port note: [convert_nanobind.md](convert_nanobind.md).
   `eigen.cpp` only).
 - `matrix_svd`, `matrix_qr`, `eigh`, `eig*`: LAPACKE (row-major) with `std::complex` as complex type.
   `matrix_exp` uses `unsupported/Eigen/MatrixFunctions`.
-- Factory: `EigenBlockBackend::from_factory("eigen")` (also `"cpu"` on the class itself).
-  The central `get_backend(..., block_backend="eigen")` selects Eigen. `"cpu"` / `"numpy"` still
-  select `NumpyBlockBackend`.
+- Factory: `EigenBlockBackend::from_factory("eigen")` (also `"cpu"` on the class itself when
+  selected). The central `get_backend(..., block_backend="eigen")` selects Eigen. `"cpu"` /
+  `"numpy"` still select `NumpyBlockBackend` by design until leftover #5 is revisited.
 - `possible_svd_algorithms()`: `"gesdd"` (default, divide and conquer), `"gesvd"` (QR iteration,
   slower but more robust), `"robust"` (gesdd, falling back to gesvd with a warning if it fails)
   and `"robust_silent"` (same, without the warning).
@@ -79,11 +83,11 @@ for Eigen↔Python exchange, not a BlockBackend.
 
 ### Factory
 
-- Name: `"eigen"` initially; become default for `"cpu"` once parity + tests are
-  good enough.
+- Name: `"eigen"` for now; **defer** making it default `"cpu"` (correctness is fine; small-block
+  pytest wall time is not — see leftover #5).
 - Keep `TorchBlockBackend` for CUDA / libtorch.
-- `NumpyBlockBackend` / `ArrayApiBlockBackend`: transitional; gate or remove
-  under leftover #5.
+- `NumpyBlockBackend` / `ArrayApiBlockBackend`: still gated / transitional; keep as default
+  `"cpu"` until Eigen small-op performance justifies a switch (leftover #5).
 
 ## Dependencies
 
@@ -118,4 +122,6 @@ for Eigen↔Python exchange, not a BlockBackend.
 - [x] Document numerical defaults (LAPACK `gesdd` default; `gesvd` / `robust` options; Eigen Jacobi not used)
 - [x] Run the full BlockBackend/tensor test-suite with `default_block_backend="eigen"`
       (`pytest --block-backends eigen`: 8261 passed, 355 skipped, 605 xfailed; 2026-11-15)
-- [ ] Switch default `"cpu"` (after parity)
+- [ ] Switch default `"cpu"` → Eigen — **deferred** (leftover #5): suite ~6× slower than Numpy on
+      tiny-block / `to_numpy` check paths despite shared BLAS; revisit after Eigen small-op tuning
+      or when default workloads are large-block / Python-free dominated

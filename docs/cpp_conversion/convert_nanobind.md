@@ -18,9 +18,9 @@ TeNPy downstream: [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md).
 | #254 domain MI removed | Done |
 | Conversion docs for #255 | Done (this file + siblings) |
 | nanobind in CMake / pyproject | Done (`NB_MODULE`, nanobind in env/pyproject) |
-| Eigen/LAPACK `BlockBackend` | Done (factory `"eigen"`; `"cpu"` still Numpy while Numpy is built) |
+| Eigen/LAPACK `BlockBackend` | Done (factory `"eigen"`; `"cpu"` stays Numpy for now — switch deferred) |
 | Full pybind → nanobind `_core` | Done (LO trampolines only; DummyTensor tests skipped) |
-| Phase 4 cleanup (gating, `nb::ndarray` boundary, `py::` inventory) | Done for first port (Numpy gate + Eigen `to_ndarray` / `block_from_ndarray`; default `"cpu"` switch is leftover) |
+| Phase 4 cleanup (gating, `nb::ndarray` boundary, `py::` inventory) | Done for first port (Numpy gate + Eigen `to_ndarray` / `block_from_ndarray`; default `"cpu"` → Eigen **deferred**, leftover #5) |
 | pybind11 removed from liblasyten | Done: `include/` / `src/` use nanobind only, through the thin `lasyten::py` layer (`detail/python_api.h`, `detail/py_array.h`); no `find_package(pybind11)` |
 | Stable ABI (abi3) | Done: `LASYTEN_STABLE_ABI` (default ON, Python >= 3.12), `_core.abi3.so`, `wheel.py-api = "cp312"` (leftover #2) |
 | `LASYTEN_WITH_PYTHON=OFF` Python-free | Partial: Eigen + Space/Leg/Tensors, `NoSymmetryBackend`, **`AbelianBackend`**, **`FusionTreeBackend`** (core paths; heavy mask / truncate / partial_trace still `NotImplemented` without Python), `fusion_tree_mapping`, krylov, and native `svd`/`qr`/`lq`/`eigh`/`eig*`/`entropy` (incl. Charged/HiddenLeg factors) build without libpython (`ctest -R no_python`); models and Numpy/ArrayApi/Torch still Python-gated (leftover #1 remainder) |
@@ -115,11 +115,15 @@ it provides *opaque, member-less* `py::` stand-ins (so declarations compile, but
 End state:
 
 1. No `py::` / `nb::` in `include/lasyten/**` for the OFF build
-2. Default CPU backend = Eigen/LAPACK (no interpreter); `"cpu"` is chosen in exactly one place,
-   `default_cpu_block_backend_shared()` (`block_backend.h`): Numpy while built, else Eigen
+2. Default CPU backend long-term = Eigen/LAPACK (no interpreter); `"cpu"` is chosen in exactly one
+   place, `default_cpu_block_backend_shared()` (`block_backend.h`): **Numpy while built**, else Eigen.
+   Do **not** flip `"cpu"` → Eigen yet (leftover #5): on the same BLAS, the pytest suite is ~6×
+   slower under Eigen because it is tiny-block / densify-check dominated; NumPy’s small-array
+   kernels still win. Keep `"eigen"` opt-in via `--block-backends eigen` / factory until Eigen’s
+   small-block path (or the default workload) catches up.
 3. Torch optional via `LASYTEN_WITH_TORCH` (libtorch), independent of Python
 4. Numpy/ArrayApi backends gated behind `LASYTEN_WITH_NUMPY_BACKEND` (**done**, default ON with
-   Python; forced OFF without) and eventually removed (leftover #5)
+   Python; forced OFF without). Removal + `"cpu"` → Eigen remain deferred (leftover #5)
 5. CMake OFF → no `find_package(Python)`, no nanobind/pybind (**done**)
 6. CTest suite that runs without embedding Python (**started**: `test_eigen_block_backend_no_python`, `test_symmetric_blocks_no_python`)
 
@@ -195,7 +199,8 @@ block the OFF build.)
 - [x] Phase 3: remaining `_core` bindings, casters (`Leg`, `FusionSymbol`, pybind object types), `Dtype` / styles as `nb::enum_`, stubs (`nanobind.stubgen` + `scripts/generate_core_stubs.py` understands `nb::`); `py::array` -> `nb::ndarray` conversion of the binding signatures is **not** done (leftover #10)
 - [x] Phase 4 (first-port scope): gate Python-dispatch backends; Eigen `nb::ndarray` helpers; inventory remaining `py::`
   - [x] `py::` inventory by header (above) and leftover #1 list
-  - [x] Numpy / ArrayApi marked **transitional** (`backend_factory.cpp`, docs); Eigen (`"eigen"`) preferred CPU, Torch for GPU
+  - [x] Numpy / ArrayApi marked **transitional** (`backend_factory.cpp`, docs); Eigen available as
+        `"eigen"`, Torch for GPU; keep Numpy as default `"cpu"` for now (see leftover #5)
   - [x] CMake `LASYTEN_WITH_NUMPY_BACKEND` (default ON with Python): OFF drops `numpy.cpp` / `array_api.cpp`, their bindings and the Python classes (`lasyten.block_backends.WITH_NUMPY_BACKEND`), keeps Eigen
   - [x] `nb::ndarray` boundary for `EigenBlockBackend` (`pybind/block_backend/eigen_ndarray.h`: `block_from_ndarray`, zero-copy `to_ndarray`)
   - [x] `BlockBackend` / `Block` `block_from_ndarray` + `to_ndarray(writable=…)` dispatch (Eigen zero-copy; others via `to_numpy` copy); read-only export; Torch CPU import smoke test (leftover #10 progress)
@@ -203,7 +208,9 @@ block the OFF build.)
   - [x] Non-CPU devices: Torch CUDA import/export (device-preserving); Eigen/Numpy reject non-CPU with `TypeError`
   - [x] JAX/TF-tagged returns via `to_ndarray(..., framework='jax'|'tensorflow'|'torch'|'numpy')`
   - [ ] Remaining models DOF `py::array` fields (deferred leftover #10 remainder)
-  - [ ] Default `"cpu"` -> Eigen (deliberately not switched; test-suite parity first)
+  - [ ] Default `"cpu"` → Eigen (**deferred**): suite is correct under Eigen, but ~6× slower on
+        tiny-block / `to_numpy` check-heavy paths vs Numpy on the same BLAS; revisit after small-op
+        tuning or when default workloads are large-block dominated (leftover #5)
   - [x] Remove pybind11 from `include/` / `src/` / CMake (no `find_package(pybind11)`, no `pybind11::` link, not in `environment.yml` / `pyproject.toml` build requires); `py::` is now `lasyten::py` over nanobind, the two bridges (`py_nanobind_bridge.h`, `py_pybind11_bridge.h`) are deleted
 - [x] Stable ABI: `LASYTEN_STABLE_ABI`, `Development.SABIModule`, `nanobind-static-abi3` linked into liblasyten and `_core`, `nanobind_add_module(_core STABLE_ABI ...)`, `wheel.py-api = "cp312"`
 - [x] Phase 5 scaffolding (first-port scope): OFF configures/builds Eigen subset without Python
@@ -299,7 +306,13 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
 2. **Stable ABI / abi3 wheels** — **done** (`LASYTEN_STABLE_ABI`, `_core.abi3.so`, `wheel.py-api = "cp312"`). Open: CI wheel jobs (cibuildwheel) for `cp312-abi3`, and checking the `Py_LIMITED_API` build on macOS.
 3. **Restore trampolines** (optional) for `Tensor`, `BlockBackend`, `TensorBackend`, `Symmetry`, `Site`, … if downstream needs Python subclassing again.
 4. **`unique_ptr` where ownership is unique** — audit `shared_ptr`-everywhere; migrate carefully without breaking `shared_from_this`.
-5. **Fate of NumpyBlockBackend / ArrayApiBlockBackend** — gated behind `LASYTEN_WITH_NUMPY_BACKEND` and marked transitional; still to decide: remove for good (and switch `"cpu"` to Eigen).
+5. **Fate of NumpyBlockBackend / ArrayApiBlockBackend + default `"cpu"`** — **deferred.** Both stay:
+   Numpy remains default `"cpu"` while `LASYTEN_WITH_NUMPY_BACKEND` is ON; Eigen is opt-in
+   (`"eigen"`). Reason: full pytest under Eigen is ~6× slower than Numpy despite sharing conda
+   BLAS/LAPACK (tiny-block allocate/dispatch + densify checks dominate; NumPy C ufuncs win).
+   Revisit switching `"cpu"` / removing Numpy only after Eigen small-block performance is
+   competitive (or workloads shift to large blocks / Python-free embeds). Gate already exists;
+   do not flip the factory default yet.
 6. **Eigen numerical parity** — SVD/QR/eigh vs SciPy `gesdd`/`gesvd`; document defaults and tolerances for TeNPy.
 7. **GPU strategy** — Torch-only vs future CUDA Eigen; `nb::ndarray` device tags vs factory strings.
 8. **Implicit conversions / caster ergonomics** — Sector / BlockInds / Leg may need explicit Python helpers.
