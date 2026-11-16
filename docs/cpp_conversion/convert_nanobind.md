@@ -302,14 +302,14 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
    and `"fusion_tree"` + Eigen). `ctest -R no_python` passes in an OFF build
    (`cmake -S . -B build_off -G Ninja -DLASYTEN_WITH_PYTHON=OFF && ninja -C build_off &&
    ctest --test-dir build_off -R no_python`).
-   **FusionTree OFF stubs** (issue #326 item 3; full table in
-   [convert_FusionTreeBackend.md](convert_FusionTreeBackend.md)): `combine_legs`, `compose`,
-   `partial_compose`, `outer`, `linear_combination`, `scale_axis`, `svd` / `qr` / `lq`,
-   `truncate_singular_values`, `partial_trace`, `get_element` / `get_element_mask`,
-   `from_tree_pairs` / `from_grid`, `diagonal_from_block` / `diagonal_tensor_to_block` /
-   `diagonal_to_mask`, `_mask_contract`, `mask_*`. These still use Space/NumPy via `lasyten::py`
-   when ON; OFF throws `NotImplemented`. Implementing them Python-free means C++ Space accessors
-   instead of `py::cast(space).attr(...)`.
+   **FusionTree OFF** (issue #326 item 3; table in
+   [convert_FusionTreeBackend.md](convert_FusionTreeBackend.md)): OFF-native —
+   `combine_legs`, `compose`, `linear_combination`, `svd` / `qr` / `lq`,
+   `truncate_singular_values` (no custom `basis_perm`), `get_element_mask`,
+   `diagonal_from_block` / `diagonal_tensor_to_block`. Still OFF stubs —
+   `partial_compose`, `outer`, `scale_axis`, `partial_trace`, `get_element`,
+   `from_tree_pairs` / `from_grid`, `diagonal_to_mask`, `_mask_contract`, `mask_*`
+   (Python Space/NumPy glue when ON).
    **Still in `LASYTEN_PYTHON_API_SOURCES`:** `block_inds_numpy.cpp` only (NumPy casting for
    `BlockInds`). Models / `su2.cpp` and Numpy / ArrayApi / Torch stay in separate Python-gated
    `target_sources` (not shrunk further while models keep `py::array` storage).
