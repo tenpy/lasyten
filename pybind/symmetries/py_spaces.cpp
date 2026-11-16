@@ -132,7 +132,7 @@ slices_to_numpy(std::optional<std::vector<std::array<int64, 2>>> const& slices)
     return nb::cast(ndarray_utils::vector_to_numpy_2d(std::move(flat), rows, 2));
 }
 
-nb::ndarray<nb::numpy, std::int64_t>
+nb::object
 sector_array_to_ndarray(SectorArray const& src)
 {
     std::size_t const rows = src.size();
@@ -143,7 +143,9 @@ sector_array_to_ndarray(SectorArray const& src)
             v[i * cols + j] = src[i][j];
         }
     }
-    return ndarray_utils::vector_to_numpy_2d(std::move(v), rows, cols);
+    // Return as ``nb::object`` so ``def_prop_ro`` does not apply ``reference_internal`` to an
+    // ndarray that already has a capsule owner.
+    return nb::cast(ndarray_utils::vector_to_numpy_2d(std::move(v), rows, cols));
 }
 
 std::optional<std::vector<int64>>

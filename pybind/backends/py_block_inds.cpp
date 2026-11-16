@@ -23,13 +23,13 @@ namespace lasyten {
 
 namespace {
 
-nb::ndarray<nb::numpy, std::size_t>
+nb::object
 indices_to_numpy(std::vector<std::size_t> v)
 {
-    return ndarray_utils::vector_to_numpy_1d(std::move(v));
+    return nb::cast(ndarray_utils::vector_to_numpy_1d(std::move(v)));
 }
 
-nb::ndarray<nb::numpy, int64>
+nb::object
 block_inds_to_ndarray(BlockInds const& src)
 {
     std::size_t const rows = src.nrows();
@@ -40,7 +40,7 @@ block_inds_to_ndarray(BlockInds const& src)
             v[i * cols + j] = src(i, j);
         }
     }
-    return ndarray_utils::vector_to_numpy_2d(std::move(v), rows, cols);
+    return nb::cast(ndarray_utils::vector_to_numpy_2d(std::move(v), rows, cols));
 }
 
 std::vector<std::size_t>

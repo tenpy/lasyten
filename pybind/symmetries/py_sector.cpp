@@ -19,29 +19,29 @@ namespace lasyten {
 
 namespace {
 
-nb::ndarray<nb::numpy, std::size_t>
+nb::object
 indices_to_numpy(std::vector<std::size_t> v)
 {
-    return ndarray_utils::vector_to_numpy_1d(std::move(v));
+    return nb::cast(ndarray_utils::vector_to_numpy_1d(std::move(v)));
 }
 
-nb::ndarray<nb::numpy, std::int64_t>
+nb::object
 i64_to_numpy(std::vector<std::int64_t> v)
 {
-    return ndarray_utils::vector_to_numpy_1d(std::move(v));
+    return nb::cast(ndarray_utils::vector_to_numpy_1d(std::move(v)));
 }
 
-nb::ndarray<nb::numpy, std::int64_t>
+nb::object
 sector_to_ndarray(Sector const& src)
 {
     std::vector<std::int64_t> v(src.len());
     for (std::uint8_t i = 0; i < src.len(); ++i) {
         v[i] = src.q[i];
     }
-    return ndarray_utils::vector_to_numpy_1d(std::move(v));
+    return nb::cast(ndarray_utils::vector_to_numpy_1d(std::move(v)));
 }
 
-nb::ndarray<nb::numpy, std::int64_t>
+nb::object
 sector_array_to_ndarray(SectorArray const& src)
 {
     std::size_t const rows = src.size();
@@ -52,7 +52,7 @@ sector_array_to_ndarray(SectorArray const& src)
             v[i * cols + j] = src[i][j];
         }
     }
-    return ndarray_utils::vector_to_numpy_2d(std::move(v), rows, cols);
+    return nb::cast(ndarray_utils::vector_to_numpy_2d(std::move(v), rows, cols));
 }
 
 std::vector<std::size_t>
