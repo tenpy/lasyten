@@ -303,13 +303,11 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
    (`cmake -S . -B build_off -G Ninja -DLASYTEN_WITH_PYTHON=OFF && ninja -C build_off &&
    ctest --test-dir build_off -R no_python`).
    **FusionTree OFF** (issue #326 item 3; table in
-   [convert_FusionTreeBackend.md](convert_FusionTreeBackend.md)): OFF-native —
-   `combine_legs`, `compose`, `linear_combination`, `svd` / `qr` / `lq`,
-   `truncate_singular_values` (no custom `basis_perm`), `get_element_mask`,
-   `diagonal_from_block` / `diagonal_tensor_to_block`. Still OFF stubs —
-   `partial_compose`, `outer`, `scale_axis`, `partial_trace`, `get_element`,
-   `from_tree_pairs` / `from_grid`, `diagonal_to_mask`, `_mask_contract`, `mask_*`
-   (Python Space/NumPy glue when ON).
+   [convert_FusionTreeBackend.md](convert_FusionTreeBackend.md)): OFF-native includes heavy tree
+   paths (`partial_compose`, `outer`, `scale_axis`, `partial_trace`, `get_element`,
+   `from_tree_pairs` / `from_grid`) and mask paths (`diagonal_to_mask`, `_mask_contract` on a
+   single flat leg, `mask_*`). Remaining OFF stubs: always-stub dense I/O helpers,
+   `truncate_singular_values` with custom `basis_perm`, `_mask_contract` on a `LegPipe`.
    **Still in `LASYTEN_PYTHON_API_SOURCES`:** `block_inds_numpy.cpp` only (NumPy casting for
    `BlockInds`). Models / `su2.cpp` and Numpy / ArrayApi / Torch stay in separate Python-gated
    `target_sources` (not shrunk further while models keep `py::array` storage).

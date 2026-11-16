@@ -73,7 +73,7 @@ CMake options for the block backends and a Python-free build
     With ``-DLASYTEN_WITH_PYTHON=OFF`` CMake does not look for Python, nanobind, numpy or PyTorch, and
     builds ``liblasyten`` from the Python-free sources: ``EigenBlockBackend``, the symmetry stack,
     ``Space`` / ``Leg``, the Tensor classes, ``NoSymmetryBackend`` / ``AbelianBackend`` /
-    ``FusionTreeBackend`` (compose/svd/qr/lq/truncate and more are OFF-native; masks,
+    ``FusionTreeBackend`` (compose/svd/qr/lq/truncate, partial trace/compose, masks,
     ``partial_trace``, ``from_grid``, … still stubbed — see
     ``docs/cpp_conversion/convert_FusionTreeBackend.md``), krylov, and native
     decompositions -- but no ``_core`` extension and no models / Numpy/ArrayApi/Torch backends.

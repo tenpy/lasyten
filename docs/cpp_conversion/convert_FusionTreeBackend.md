@@ -9,9 +9,8 @@
 - `_tree_block_iter` — Python helper used by tests / cross-checks (not part of the backend method surface).
 
 With `LASYTEN_WITH_PYTHON=ON`, the FusionTreeBackend method surface is native C++ (no Python
-delegation). `partial_trace` / `permute_legs` / `apply_instructions` are implemented in C++, but
-several heavy paths still reach into Space / Leg / NumPy via the `lasyten::py` layer and are
-compiled out when `LASYTEN_WITH_PYTHON=OFF` (see below).
+delegation). Heavy tree / mask paths (`partial_compose`, `outer`, `from_grid`, `mask_*`, …) are
+implemented in C++ for both ON and OFF builds.
 
 `tests/python_tests/backends/test_fusion_tree_backend.py`: **21 passed**. Fixed `partial_trace_helper` multiplicity check for 2-leg trees (must match numpy broadcast of `multiplicities[:2] == [0, 0]`).
 
@@ -25,27 +24,19 @@ I/O helpers) stay native.
 
 | Group | Methods |
 | --- | --- |
-| Legs / algebra | `combine_legs`, `compose`, `linear_combination` |
+| Legs / algebra | `combine_legs`, `compose`, `linear_combination`, `partial_compose`, `outer`, `scale_axis` |
 | Decompositions | `svd`, `qr`, `lq`, `truncate_singular_values` (without custom `basis_perm`) |
-| Trace / elements | `get_element_mask` |
-| Diagonal | `diagonal_from_block`, `diagonal_tensor_to_block` |
+| Trace / elements | `partial_trace`, `get_element`, `get_element_mask`, `from_tree_pairs`, `from_grid` |
+| Diagonal / masks | `diagonal_from_block`, `diagonal_tensor_to_block`, `diagonal_to_mask`, `_mask_contract` (single flat leg), `mask_binary_operand`, `mask_unary_operand`, `mask_from_block`, `mask_to_block`, `mask_transpose` |
 
-Shared mask helpers (`MaskPieces`, `finish_mask`, …) are in the anonymous namespace for the next
-OFF ports.
+Shared mask helpers (`MaskPieces`, `finish_mask`, …) live in the anonymous namespace.
 
-### Still stubbed OFF (`throw NotImplemented` in the ``#else`` of ``#if LASYTEN_HAS_PYTHON``)
+### Still stubbed OFF (intentional ``NotImplemented``)
 
-| Group | Methods |
+| Reason | Methods / conditions |
 | --- | --- |
-| Legs / algebra | `partial_compose`, `outer`, `scale_axis` |
-| Trace / elements | `partial_trace`, `get_element`, `from_tree_pairs`, `from_grid` |
-| Diagonal | `diagonal_to_mask` |
-| Masks | `_mask_contract`, `mask_binary_operand`, `mask_unary_operand`, `mask_from_block`, `mask_to_block`, `mask_transpose` |
-
-Always stubbed (even with Python ON; match historical Python API):
-`from_dense_block_trivial_sector`, `inv_part_*`, `state_tensor_product`,
-`to_dense_block_trivial_sector`. Conditional inside the Python path:
-`truncate_singular_values` with `basis_perm`; `_mask_contract` on a `LegPipe`.
+| Always stubbed (historical Python API) | `from_dense_block_trivial_sector`, `inv_part_*`, `state_tensor_product`, `to_dense_block_trivial_sector` |
+| Conditional | `truncate_singular_values` when a leg has custom `basis_perm`; `_mask_contract` when masking a `LegPipe` |
 
 ## Metadata
 
