@@ -767,6 +767,7 @@ LASYTEN_MKDOC_HEADERS: tuple[str, ...] = (
     'block_backend/array_api.h',
     'block_backend/block_backend.h',
     'block_backend/dtypes.h',
+    'block_backend/eigen.h',
     'block_backend/numpy.h',
     'block_backend/torch.h',
     'tools/cost_polynomials.h',
@@ -795,6 +796,9 @@ def run_scoped_doxygen(
     xml_out.mkdir(parents=True, exist_ok=True)
     doxyfile = tempfile.NamedTemporaryFile('w', suffix='.doxyfile', delete=False, encoding='utf-8')
     try:
+        # Keep PREDEFINED in sync with CMakeLists.txt docstring Doxyfile and
+        # docs/Doxyfile so #if LASYTEN_HAS_PYTHON APIs (e.g. Scalar::to_numpy)
+        # appear in the DOC() map used by RTD stub generation (--from-doxygen).
         doxyfile.write(
             f"""PROJECT_NAME           = lasyten
 OUTPUT_DIRECTORY       = {xml_out}
@@ -808,6 +812,9 @@ QUIET                  = YES
 WARNINGS               = NO
 MARKDOWN_SUPPORT       = NO
 AUTOLINK_SUPPORT       = NO
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+PREDEFINED             = LASYTEN_HAS_PYTHON=1 LASYTEN_WITH_NUMPY_BACKEND=1 LASYTEN_WITH_TORCH_BACKEND=1
 """
         )
         doxyfile.close()
