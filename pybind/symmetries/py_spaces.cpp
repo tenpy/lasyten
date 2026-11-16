@@ -1,4 +1,5 @@
 #include "../doc_plus.h"
+#include "../ndarray_utils.h"
 #include "docstrings/symmetries/spaces.h"
 #include "py_lasyten_nanobind.h"
 
@@ -15,8 +16,10 @@
 #include "tools/hdf5_bind.h"
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace lasyten {
@@ -75,15 +78,10 @@ perm_from_python(py::handle obj)
     return out;
 }
 
-py::array_t<int64>
-perm_to_numpy(std::vector<int64> const& perm)
+nb::object
+perm_to_numpy(std::vector<int64> perm)
 {
-    py::array_t<int64> arr(static_cast<py::ssize_t>(perm.size()));
-    auto buf = arr.mutable_unchecked<1>();
-    for (std::size_t i = 0; i < perm.size(); ++i) {
-        buf(static_cast<py::ssize_t>(i)) = perm[i];
-    }
-    return arr;
+    return nb::cast(ndarray_utils::vector_to_numpy_1d(std::move(perm)));
 }
 
 py::object
@@ -113,30 +111,39 @@ sector_order_from_python(py::handle obj)
     return py::cast<std::string>(obj);
 }
 
-py::array_t<float64>
-f64_vector_to_numpy(std::vector<float64> const& v)
+nb::object
+f64_vector_to_numpy(std::vector<float64> v)
 {
-    py::array_t<float64> arr(static_cast<py::ssize_t>(v.size()));
-    auto buf = arr.mutable_unchecked<1>();
-    for (std::size_t i = 0; i < v.size(); ++i) {
-        buf(static_cast<py::ssize_t>(i)) = v[i];
-    }
-    return arr;
+    return nb::cast(ndarray_utils::vector_to_numpy_1d(std::move(v)));
 }
 
-py::object
+nb::object
 slices_to_numpy(std::optional<std::vector<std::array<int64, 2>>> const& slices)
 {
     if (!slices) {
-        return py::none();
+        return nb::none();
     }
-    py::array_t<int64> arr({ static_cast<py::ssize_t>(slices->size()), py::ssize_t{ 2 } });
-    auto buf = arr.mutable_unchecked<2>();
-    for (std::size_t i = 0; i < slices->size(); ++i) {
-        buf(static_cast<py::ssize_t>(i), 0) = (*slices)[i][0];
-        buf(static_cast<py::ssize_t>(i), 1) = (*slices)[i][1];
+    std::size_t const rows = slices->size();
+    std::vector<int64> flat(rows * 2);
+    for (std::size_t i = 0; i < rows; ++i) {
+        flat[i * 2] = (*slices)[i][0];
+        flat[i * 2 + 1] = (*slices)[i][1];
     }
-    return arr;
+    return nb::cast(ndarray_utils::vector_to_numpy_2d(std::move(flat), rows, 2));
+}
+
+nb::ndarray<nb::numpy, std::int64_t>
+sector_array_to_ndarray(SectorArray const& src)
+{
+    std::size_t const rows = src.size();
+    std::size_t const cols = src.sector_ind_len();
+    std::vector<std::int64_t> v(rows * cols);
+    for (std::size_t i = 0; i < rows; ++i) {
+        for (std::uint8_t j = 0; j < cols; ++j) {
+            v[i * cols + j] = src[i][j];
+        }
+    }
+    return ndarray_utils::vector_to_numpy_2d(std::move(v), rows, cols);
 }
 
 std::optional<std::vector<int64>>
@@ -527,7 +534,9 @@ bind_elementary_space(nb::module_& m)
       .def_rw("defining_sectors", &ElementarySpace::defining_sectors)
       .def_prop_ro(
         "sectors_of_basis",
-        [](ElementarySpace const& self) { return sector_array_to_numpy(self.sectors_of_basis()); },
+        [](ElementarySpace const& self) {
+            return sector_array_to_ndarray(self.sectors_of_basis());
+        },
         DOC(lasyten, ElementarySpace, sectors_of_basis))
       .def_prop_ro("dual", &ElementarySpace::dual_es, DOC(lasyten, Space, dual));
 

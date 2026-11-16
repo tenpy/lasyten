@@ -1,4 +1,5 @@
 #include <lasyten/backends/no_symmetry.h>
+#include <lasyten/block_backend/dtypes.h>
 #include <lasyten/tensors/mask.h>
 
 #include "py_callbacks.hpp"
@@ -6,6 +7,7 @@
 
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
+#include "block_backend/ndarray_dispatch.h"
 
 #include "docstrings/tensors/mask.h"
 
@@ -317,7 +319,14 @@ bind_tensors_mask(nb::module_& m)
     cls.def(
       "to_numpy",
       [](Mask& self, py::object leg_order, py::object numpy_dtype, bool understood_braiding) {
-          return self.to_numpy(optional_leg_order(leg_order), numpy_dtype, understood_braiding);
+          std::optional<Dtype> dt;
+          if (!numpy_dtype.is_none()) {
+              dt = dtype::from_numpy_dtype(numpy_dtype);
+          }
+          auto block = self.to_dense_block(optional_leg_order(leg_order), dt, understood_braiding);
+          nb::object owner = nb::cast(block);
+          return ndarray_dispatch::export_to_python(ndarray_dispatch::block_to_ndarray(
+            *self.backend->block_backend, *block, owner, /*writable=*/false));
       },
       nb::arg("leg_order").none() = nb::none(),
       nb::arg("numpy_dtype").none() = nb::none(),

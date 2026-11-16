@@ -321,9 +321,11 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
     - Stubgen patterns for the new methods in `scripts/stubgen_patterns.txt`.
     - `Sector` / `SectorArray` / `BlockInds` `.to_numpy()` (and related index helpers) now return
       owning `nb::ndarray` via `pybind/ndarray_utils.h`.
-    **Still open:** other `py::array` binding signatures (Space perms/masks, models,
-    `Tensor.to_numpy`), native Numpy/Torch `to_ndarray` (no copy fallback), non-CPU devices,
-    JAX/TF-tagged return arrays (today NumPy-tagged only).
+    - Space / Leg property helpers (`basis_perm`, multiplicities, slices, …) and
+      `Tensor` / `Mask` / `DiagonalTensor.to_numpy` / `diagonal_as_numpy` export via
+      `nb::ndarray` (read-only Eigen zero-copy where applicable).
+    **Still open:** models DOF `py::array` fields, native Numpy/Torch `to_ndarray` (no copy
+    fallback), non-CPU devices, JAX/TF-tagged return arrays (today NumPy-tagged only).
 11. **TeNPy `MPOTransferMatrix`** — still `NotImplementedError` on the TeNPy side. lasyten
     trampolines for `LinearOperator` (`matvec` / `to_tensor` / `adjoint`, `nb::dynamic_attr`)
     and `PlanarLinearOperator` (same three virtuals; `adjoint` must live on the *derived*
