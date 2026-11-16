@@ -40,27 +40,37 @@ bind_block_backend_torch(nb::module_& m)
       "(CUDA sources stay on device; no host round-trip).");
     torch_block_backend.def(
       "to_ndarray",
-      [](TorchBlockBackend& /*self*/, nb::object block, bool writable) {
+      [](TorchBlockBackend& /*self*/,
+         nb::object block,
+         bool writable,
+         std::optional<std::string> framework) {
           auto* tb = nb::cast<TorchBlockBackend::Block*>(block);
           if (!tb) {
               throw nb::type_error("to_ndarray: expected a TorchBlockBackend.Block");
           }
-          return ndarray_dispatch::torch_tensor_as_ndarray(tb->tensor(), block, writable);
+          auto const fw =
+            eigen_ndarray::parse_nd_framework(framework, eigen_ndarray::NdFramework::Pytorch);
+          return ndarray_dispatch::torch_tensor_as_ndarray(tb->tensor(), block, writable, fw);
       },
       nb::arg("block"),
       nb::arg("writable") = true,
-      "Zero-copy torch.Tensor view of the block (CPU or CUDA DLPack device).");
+      nb::arg("framework") = nb::none(),
+      "Zero-copy array view (default torch; also numpy/jax/tensorflow). "
+      "CPU or CUDA DLPack device.");
 
     nb::class_<TorchBlockBackend::Block, BlockBackend::Block>(
       torch_block_backend, "BlockCls", "Block that holds a torch::Tensor.")
       .def(
         "to_ndarray",
-        [](nb::object self, bool writable) {
+        [](nb::object self, bool writable, std::optional<std::string> framework) {
             auto& tb = nb::cast<TorchBlockBackend::Block&>(self);
-            return ndarray_dispatch::torch_tensor_as_ndarray(tb.tensor(), self, writable);
+            auto const fw =
+              eigen_ndarray::parse_nd_framework(framework, eigen_ndarray::NdFramework::Pytorch);
+            return ndarray_dispatch::torch_tensor_as_ndarray(tb.tensor(), self, writable, fw);
         },
         nb::arg("writable") = true,
-        "Zero-copy torch.Tensor view of the stored tensor.")
+        nb::arg("framework") = nb::none(),
+        "Zero-copy array view of the stored tensor (optional framework tag).")
       .def("to_numpy",
            nb::overload_cast<>(&TorchBlockBackend::Block::to_numpy, nb::const_),
            nb::rv_policy::reference_internal)

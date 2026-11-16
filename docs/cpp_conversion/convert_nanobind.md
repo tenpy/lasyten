@@ -201,7 +201,8 @@ block the OFF build.)
   - [x] `BlockBackend` / `Block` `block_from_ndarray` + `to_ndarray(writable=…)` dispatch (Eigen zero-copy; others via `to_numpy` copy); read-only export; Torch CPU import smoke test (leftover #10 progress)
   - [x] Native Numpy / Torch `block_from_ndarray` / `to_ndarray` (zero-copy NumPy view / pytorch-tagged DLPack; CUDA export for Torch)
   - [x] Non-CPU devices: Torch CUDA import/export (device-preserving); Eigen/Numpy reject non-CPU with `TypeError`
-  - [ ] Remaining models DOF `py::array` fields; JAX/TF tags (leftover #10 remainder)
+  - [x] JAX/TF-tagged returns via `to_ndarray(..., framework='jax'|'tensorflow'|'torch'|'numpy')`
+  - [ ] Remaining models DOF `py::array` fields (deferred leftover #10 remainder)
   - [ ] Default `"cpu"` -> Eigen (deliberately not switched; test-suite parity first)
   - [x] Remove pybind11 from `include/` / `src/` / CMake (no `find_package(pybind11)`, no `pybind11::` link, not in `environment.yml` / `pyproject.toml` build requires); `py::` is now `lasyten::py` over nanobind, the two bridges (`py_nanobind_bridge.h`, `py_pybind11_bridge.h`) are deleted
 - [x] Stable ABI: `LASYTEN_STABLE_ABI`, `Development.SABIModule`, `nanobind-static-abi3` linked into liblasyten and `_core`, `nanobind_add_module(_core STABLE_ABI ...)`, `wheel.py-api = "cp312"`
@@ -331,8 +332,9 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
     - Non-CPU: Torch `block_from_ndarray` accepts CUDA DLPack sources without a host bounce;
       `to_ndarray` returns pytorch-tagged CUDA views. Eigen/Numpy stay host-only and raise
       `TypeError` on non-CPU inputs (`require_cpu_device`).
-    **Still open:** models DOF `py::array` fields (deferred), JAX/TF-tagged return arrays
-    (today NumPy- or pytorch-tagged only).
+    - Framework tags: `to_ndarray(..., framework='numpy'|'torch'|'jax'|'tensorflow')` retags the
+      same buffer for the chosen DLPack consumer (defaults: numpy for Eigen/Numpy, torch for Torch).
+    **Still open:** models DOF `py::array` fields (deferred).
 11. **TeNPy `MPOTransferMatrix`** — still `NotImplementedError` on the TeNPy side. lasyten
     trampolines for `LinearOperator` (`matvec` / `to_tensor` / `adjoint`, `nb::dynamic_attr`)
     and `PlanarLinearOperator` (same three virtuals; `adjoint` must live on the *derived*

@@ -96,3 +96,54 @@ def test_eigen_rejects_cuda_ndarray():
     src = torch.zeros(2, 2, dtype=torch.float64, device='cuda:0')
     with pytest.raises(TypeError, match='CPU array'):
         bb.block_from_ndarray(src)
+
+
+@pytest.mark.skipif(importlib.util.find_spec('torch') is None, reason='torch not installed')
+def test_eigen_to_ndarray_framework_torch():
+    """framework='torch' retags Eigen storage as a torch.Tensor view."""
+    import torch
+
+    from lasyten.block_backends import EigenBlockBackend
+
+    bb = EigenBlockBackend.from_factory('cpu')
+    block = bb.block_from_ndarray(np.arange(4.0).reshape(2, 2))
+    view = bb.to_ndarray(block, framework='torch')
+    assert isinstance(view, torch.Tensor)
+    npt.assert_allclose(view.detach().cpu().numpy(), np.arange(4.0).reshape(2, 2))
+    # default remains NumPy
+    assert isinstance(block.to_ndarray(), np.ndarray)
+
+
+@pytest.mark.skipif(importlib.util.find_spec('jax') is None, reason='jax not installed')
+def test_eigen_to_ndarray_framework_jax():
+    import jax.numpy as jnp
+
+    from lasyten.block_backends import EigenBlockBackend
+
+    bb = EigenBlockBackend.from_factory('cpu')
+    block = bb.block_from_ndarray(np.arange(3.0))
+    view = bb.to_ndarray(block, framework='jax')
+    assert isinstance(view, jnp.ndarray) or type(view).__module__.startswith('jax')
+    npt.assert_allclose(np.asarray(view), np.arange(3.0))
+
+
+@pytest.mark.skipif(importlib.util.find_spec('tensorflow') is None, reason='tensorflow not installed')
+def test_eigen_to_ndarray_framework_tensorflow():
+    import tensorflow as tf
+
+    from lasyten.block_backends import EigenBlockBackend
+
+    bb = EigenBlockBackend.from_factory('cpu')
+    block = bb.block_from_ndarray(np.arange(3.0))
+    view = bb.to_ndarray(block, framework='tensorflow')
+    assert isinstance(view, tf.Tensor)
+    npt.assert_allclose(view.numpy(), np.arange(3.0))
+
+
+def test_to_ndarray_framework_invalid():
+    from lasyten.block_backends import EigenBlockBackend
+
+    bb = EigenBlockBackend.from_factory('cpu')
+    block = bb.block_from_ndarray(np.zeros(2))
+    with pytest.raises(TypeError, match='framework'):
+        bb.to_ndarray(block, framework='cupy')

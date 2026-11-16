@@ -48,7 +48,10 @@ numpy_array_as_ndarray(py::array arr, bool writable)
 
 #if defined(LASYTEN_WITH_TORCH_BACKEND) && LASYTEN_WITH_TORCH_BACKEND
 [[nodiscard]] inline nb::object
-torch_tensor_as_ndarray(torch::Tensor t, nb::handle owner, bool writable)
+torch_tensor_as_ndarray(torch::Tensor t,
+                        nb::handle owner,
+                        bool writable,
+                        eigen_ndarray::NdFramework framework = eigen_ndarray::NdFramework::Pytorch)
 {
     t = t.detach().contiguous().resolve_conj().resolve_neg();
     std::vector<std::size_t> shape(static_cast<std::size_t>(t.dim()));
@@ -59,12 +62,8 @@ torch_tensor_as_ndarray(torch::Tensor t, nb::handle owner, bool writable)
     int const device_type = t.is_cuda() ? static_cast<int>(nb::device::cuda::value)
                                         : static_cast<int>(nb::device::cpu::value);
     int const device_id = t.is_cuda() ? static_cast<int>(t.device().index()) : 0;
-    if (writable) {
-        return nb::cast(nb::ndarray<nb::pytorch>(
-          t.data_ptr(), shape.size(), shape.data(), owner, nullptr, dt, device_type, device_id));
-    }
-    return nb::cast(nb::ndarray<nb::pytorch, nb::ro>(
-      t.data_ptr(), shape.size(), shape.data(), owner, nullptr, dt, device_type, device_id));
+    return eigen_ndarray::export_cpu_buffer(
+      t.data_ptr(), shape, owner, dt, writable, framework, device_type, device_id);
 }
 #endif
 
@@ -141,7 +140,8 @@ block_from_ndarray(BlockBackend& backend,
 block_to_ndarray(BlockBackend& /*backend*/,
                  BlockBackend::Block& block,
                  nb::handle owner,
-                 bool writable = true)
+                 bool writable = true,
+                 std::optional<std::string> framework = std::nullopt)
 {
     // Prefer nanobind casts of ``owner`` over ``dynamic_cast`` on ``Block&``: with
     // ``-fvisibility=hidden``, Block RTTI can fail for Numpy/Torch even when the
@@ -150,17 +150,36 @@ block_to_ndarray(BlockBackend& /*backend*/,
     {
         EigenBlockBackend::Block* eigen = nullptr;
         if (nb::try_cast(owner, eigen) && eigen != nullptr) {
-            if (writable) {
-                return nb::cast(eigen_ndarray::block_to_ndarray(*eigen, owner));
-            }
-            return nb::cast(eigen_ndarray::block_to_ndarray_readonly(*eigen, owner));
+            auto const fw =
+              eigen_ndarray::parse_nd_framework(framework, eigen_ndarray::NdFramework::Numpy);
+            return eigen_ndarray::block_to_ndarray_framework(*eigen, owner, writable, fw);
         }
     }
 #if defined(LASYTEN_WITH_NUMPY_BACKEND) && LASYTEN_WITH_NUMPY_BACKEND
     {
         NumpyBlockBackend::Block* np = nullptr;
         if (nb::try_cast(owner, np) && np != nullptr) {
-            return numpy_array_as_ndarray(np->to_numpy(), writable);
+            auto const fw =
+              eigen_ndarray::parse_nd_framework(framework, eigen_ndarray::NdFramework::Numpy);
+            if (fw == eigen_ndarray::NdFramework::Numpy) {
+                return numpy_array_as_ndarray(np->to_numpy(), writable);
+            }
+            // Retag the stored buffer for torch/jax/tensorflow consumers.
+            py::array a = np->to_numpy();
+            if (!a) {
+                throw nb::type_error("Numpy block has no array");
+            }
+            std::vector<std::size_t> shape(static_cast<std::size_t>(a.ndim()));
+            for (py::ssize_t i = 0; i < a.ndim(); ++i) {
+                shape[static_cast<std::size_t>(i)] = static_cast<std::size_t>(a.shape(i));
+            }
+            return eigen_ndarray::export_cpu_buffer(
+              const_cast<void*>(a.data()),
+              shape,
+              owner,
+              eigen_ndarray::to_dlpack_dtype(dtype::from_numpy_dtype(a.dtype())),
+              writable,
+              fw);
         }
     }
 #endif
@@ -168,16 +187,17 @@ block_to_ndarray(BlockBackend& /*backend*/,
     {
         TorchBlockBackend::Block* tb = nullptr;
         if (nb::try_cast(owner, tb) && tb != nullptr) {
-            return torch_tensor_as_ndarray(tb->tensor(), owner, writable);
+            auto const fw =
+              eigen_ndarray::parse_nd_framework(framework, eigen_ndarray::NdFramework::Pytorch);
+            return torch_tensor_as_ndarray(tb->tensor(), owner, writable, fw);
         }
     }
 #endif
     // Fallbacks: C++ RTTI (Eigen) then owning NumPy copy.
     if (auto* eigen = dynamic_cast<EigenBlockBackend::Block*>(&block)) {
-        if (writable) {
-            return nb::cast(eigen_ndarray::block_to_ndarray(*eigen, owner));
-        }
-        return nb::cast(eigen_ndarray::block_to_ndarray_readonly(*eigen, owner));
+        auto const fw =
+          eigen_ndarray::parse_nd_framework(framework, eigen_ndarray::NdFramework::Numpy);
+        return eigen_ndarray::block_to_ndarray_framework(*eigen, owner, writable, fw);
     }
     return nb::cast(block.to_numpy());
 }

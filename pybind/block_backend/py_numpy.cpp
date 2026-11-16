@@ -41,25 +41,33 @@ bind_block_backend_numpy(nb::module_& m)
       "Import a CPU array into a Numpy block (zero-copy when already a NumPy array).");
     numpy_block_backend.def(
       "to_ndarray",
-      [](NumpyBlockBackend& self, nb::object block, bool writable) {
+      [](NumpyBlockBackend& self,
+         nb::object block,
+         bool writable,
+         std::optional<std::string> framework) {
           auto& b = nb::cast<BlockBackend::Block&>(block);
-          return ndarray_dispatch::block_to_ndarray(self, b, block, writable);
+          return ndarray_dispatch::block_to_ndarray(
+            self, b, block, writable, std::move(framework));
       },
       nb::arg("block"),
       nb::arg("writable") = true,
-      "Zero-copy NumPy view of the block (writable=False clears the writeable flag).");
+      nb::arg("framework") = nb::none(),
+      "Zero-copy array view (framework=numpy/torch/jax/tensorflow; default numpy). "
+      "writable=False clears the writeable flag for NumPy.");
 
     nb::class_<NumpyBlockBackend::Block, BlockBackend::Block>(
       numpy_block_backend, "BlockCls", "Block that holds a numpy array in a py::object.")
       .def(lasyten::ctor_for<NumpyBlockBackend::Block, py::array>(), nb::arg("arr"))
       .def(
         "to_ndarray",
-        [](nb::object self, bool writable) {
-            auto& np = nb::cast<NumpyBlockBackend::Block&>(self);
-            return ndarray_dispatch::numpy_array_as_ndarray(np.to_numpy(), writable);
+        [](nb::object self, bool writable, std::optional<std::string> framework) {
+            auto& b = nb::cast<BlockBackend::Block&>(self);
+            return ndarray_dispatch::block_to_ndarray(
+              *b.get_backend(), b, self, writable, std::move(framework));
         },
         nb::arg("writable") = true,
-        "Zero-copy NumPy view of the stored array.")
+        nb::arg("framework") = nb::none(),
+        "Zero-copy array view of the stored array (optional framework tag).")
       .def("to_numpy",
            nb::overload_cast<>(&NumpyBlockBackend::Block::to_numpy, nb::const_),
            nb::rv_policy::reference_internal)

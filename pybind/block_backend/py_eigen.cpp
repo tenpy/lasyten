@@ -45,18 +45,20 @@ bind_block_backend_eigen(nb::module_& m)
       "a new block, optionally converting to `dtype`.");
     eigen_block_backend.def(
       "to_ndarray",
-      [](EigenBlockBackend&, nb::object block, bool writable) -> nb::object {
+      [](EigenBlockBackend&, nb::object block, bool writable, std::optional<std::string> framework)
+        -> nb::object {
           auto& b = nb::cast<EigenBlockBackend::Block&>(block);
-          if (writable) {
-              return nb::cast(eigen_ndarray::block_to_ndarray(b, block));
-          }
-          return nb::cast(eigen_ndarray::block_to_ndarray_readonly(b, block));
+          auto const fw =
+            eigen_ndarray::parse_nd_framework(framework, eigen_ndarray::NdFramework::Numpy);
+          return eigen_ndarray::block_to_ndarray_framework(b, block, writable, fw);
       },
       nb::arg("block"),
       nb::arg("writable") = true,
-      "Zero-copy NumPy view of the block's buffer (keeps the block alive). "
+      nb::arg("framework") = nb::none(),
+      "Zero-copy array view of the block's buffer (keeps the block alive). "
+      "framework=None|'numpy'|'torch'|'jax'|'tensorflow' selects the DLPack consumer tag. "
       "writable=True (default) aliases storage; writable=False returns a read-only view. "
-      "Contrast with to_numpy(), which always returns an owning copy.");
+      "Contrast with to_numpy(), which always returns an owning NumPy copy.");
 
     nb::class_<EigenBlockBackend::Block, BlockBackend::Block>(
       eigen_block_backend, "BlockCls", "Block that owns a contiguous C-order buffer.")
@@ -66,15 +68,15 @@ bind_block_backend_eigen(nb::module_& m)
            "EigenBlockBackend.block_from_ndarray for Torch/DLPack/buffer inputs.")
       .def(
         "to_ndarray",
-        [](nb::object self, bool writable) -> nb::object {
+        [](nb::object self, bool writable, std::optional<std::string> framework) -> nb::object {
             auto& b = nb::cast<EigenBlockBackend::Block&>(self);
-            if (writable) {
-                return nb::cast(eigen_ndarray::block_to_ndarray(b, self));
-            }
-            return nb::cast(eigen_ndarray::block_to_ndarray_readonly(b, self));
+            auto const fw =
+              eigen_ndarray::parse_nd_framework(framework, eigen_ndarray::NdFramework::Numpy);
+            return eigen_ndarray::block_to_ndarray_framework(b, self, writable, fw);
         },
         nb::arg("writable") = true,
-        "Zero-copy NumPy view of the block's buffer (keeps the block alive). "
+        nb::arg("framework") = nb::none(),
+        "Zero-copy array view (framework tag: numpy/torch/jax/tensorflow). "
         "writable=False returns a read-only view. to_numpy() always copies.")
       .def("to_numpy",
            nb::overload_cast<>(&EigenBlockBackend::Block::to_numpy, nb::const_),

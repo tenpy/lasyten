@@ -625,15 +625,16 @@ bind_block_backend(nb::module_& m)
            "Owning NumPy copy converted to dtype (never aliases block storage).")
       .def(
         "to_ndarray",
-        [](nb::object self, bool writable) {
+        [](nb::object self, bool writable, std::optional<std::string> framework) {
             auto& b = nb::cast<BlockBackend::Block&>(self);
-            return ndarray_dispatch::export_to_python(
-              ndarray_dispatch::block_to_ndarray(*b.get_backend(), b, self, writable));
+            return ndarray_dispatch::export_to_python(ndarray_dispatch::block_to_ndarray(
+              *b.get_backend(), b, self, writable, std::move(framework)));
         },
         nb::arg("writable") = true,
-        "Array interchange view of the block. Eigen/Numpy: zero-copy NumPy "
-        "(writable aliases storage; writable=False is read-only). Torch: zero-copy "
-        "torch.Tensor (CPU/CUDA). Other backends: owning NumPy copy via to_numpy().")
+        nb::arg("framework") = nb::none(),
+        "Array interchange view of the block. framework=None|'numpy'|'torch'|'jax'|'tensorflow' "
+        "selects the DLPack consumer tag (defaults: numpy for Eigen/Numpy, torch for Torch). "
+        "writable=False is read-only where supported.")
       .def("_item_as_complex128",
            &BlockBackend::Block::_item_as_complex128,
            "Return the element of a zero-dimensional block as a complex128.")
@@ -880,16 +881,19 @@ bind_block_backend(nb::module_& m)
         "Eigen/Numpy/Torch use native paths; others route through block_from_numpy.")
       .def(
         "to_ndarray",
-        [](BlockBackend& self, nb::object block, bool writable) {
+        [](BlockBackend& self,
+           nb::object block,
+           bool writable,
+           std::optional<std::string> framework) {
             auto& b = nb::cast<BlockBackend::Block&>(block);
             return ndarray_dispatch::export_to_python(
-              ndarray_dispatch::block_to_ndarray(self, b, block, writable));
+              ndarray_dispatch::block_to_ndarray(self, b, block, writable, std::move(framework)));
         },
         nb::arg("block"),
         nb::arg("writable") = true,
-        "Export a block as an array. Eigen/Numpy: zero-copy NumPy "
-        "(writable=False for read-only). Torch: zero-copy torch.Tensor. "
-        "Other backends: owning NumPy copy. Contrast with to_numpy().")
+        nb::arg("framework") = nb::none(),
+        "Export a block as an array. framework selects numpy/torch/jax/tensorflow tagging. "
+        "Contrast with to_numpy(), which always returns an owning NumPy copy.")
       .def("get_device", &BlockBackend::get_device, nb::arg("a"))
       .def("get_diagonal",
            &BlockBackend::get_diagonal,

@@ -121,6 +121,84 @@ from_dlpack_dtype(nb::dlpack::dtype const& dt)
         .c_str());
 }
 
+/// Target framework tag for ``to_ndarray`` exports (nanobind DLPack consumer).
+enum class NdFramework
+{
+    Numpy,
+    Pytorch,
+    Jax,
+    Tensorflow,
+};
+
+[[nodiscard]] inline NdFramework
+parse_nd_framework(std::optional<std::string> const& name, NdFramework fallback)
+{
+    if (!name.has_value()) {
+        return fallback;
+    }
+    auto const& s = *name;
+    if (s == "numpy" || s == "np") {
+        return NdFramework::Numpy;
+    }
+    if (s == "torch" || s == "pytorch") {
+        return NdFramework::Pytorch;
+    }
+    if (s == "jax") {
+        return NdFramework::Jax;
+    }
+    if (s == "tensorflow" || s == "tf") {
+        return NdFramework::Tensorflow;
+    }
+    throw nb::type_error("framework must be one of: 'numpy', 'torch', 'jax', 'tensorflow' "
+                         "(aliases: np, pytorch, tf)");
+}
+
+/// Zero-copy export of a host buffer with the requested framework tag.
+[[nodiscard]] inline nb::object
+export_cpu_buffer(void* data,
+                  std::vector<std::size_t> const& shape,
+                  nb::handle owner,
+                  nb::dlpack::dtype dt,
+                  bool writable,
+                  NdFramework framework,
+                  int device_type = nb::device::cpu::value,
+                  int device_id = 0)
+{
+    auto pack = [&](auto writable_tensor, auto readonly_tensor) -> nb::object {
+        if (writable) {
+            return nb::cast(writable_tensor);
+        }
+        return nb::cast(readonly_tensor);
+    };
+    switch (framework) {
+        case NdFramework::Numpy:
+            return pack(
+              nb::ndarray<nb::numpy>(
+                data, shape.size(), shape.data(), owner, nullptr, dt, device_type, device_id),
+              nb::ndarray<nb::numpy, nb::ro>(
+                data, shape.size(), shape.data(), owner, nullptr, dt, device_type, device_id));
+        case NdFramework::Pytorch:
+            return pack(
+              nb::ndarray<nb::pytorch>(
+                data, shape.size(), shape.data(), owner, nullptr, dt, device_type, device_id),
+              nb::ndarray<nb::pytorch, nb::ro>(
+                data, shape.size(), shape.data(), owner, nullptr, dt, device_type, device_id));
+        case NdFramework::Jax:
+            return pack(
+              nb::ndarray<nb::jax>(
+                data, shape.size(), shape.data(), owner, nullptr, dt, device_type, device_id),
+              nb::ndarray<nb::jax, nb::ro>(
+                data, shape.size(), shape.data(), owner, nullptr, dt, device_type, device_id));
+        case NdFramework::Tensorflow:
+            return pack(
+              nb::ndarray<nb::tensorflow>(
+                data, shape.size(), shape.data(), owner, nullptr, dt, device_type, device_id),
+              nb::ndarray<nb::tensorflow, nb::ro>(
+                data, shape.size(), shape.data(), owner, nullptr, dt, device_type, device_id));
+    }
+    throw nb::type_error("unknown ndarray framework");
+}
+
 /// Zero-copy NumPy view of the block's buffer. ``owner`` must be the Python object wrapping
 /// ``block``; the view keeps it alive. Writable alias of the block's memory.
 [[nodiscard]] inline NumpyArray
@@ -149,6 +227,19 @@ block_to_ndarray_readonly(EigenBlockBackend::Block const& block, nb::handle owne
                         owner,
                         nullptr,
                         to_dlpack_dtype(block.dtype()));
+}
+
+/// Zero-copy export with an explicit framework tag (numpy / torch / jax / tensorflow).
+[[nodiscard]] inline nb::object
+block_to_ndarray_framework(EigenBlockBackend::Block& block,
+                           nb::handle owner,
+                           bool writable,
+                           NdFramework framework)
+{
+    auto const shape_i = block.shape();
+    std::vector<std::size_t> shape(shape_i.begin(), shape_i.end());
+    return export_cpu_buffer(
+      block.bytes().data(), shape, owner, to_dlpack_dtype(block.dtype()), writable, framework);
 }
 
 /// Copy any CPU array into a new Eigen block, optionally converting to ``dtype``.

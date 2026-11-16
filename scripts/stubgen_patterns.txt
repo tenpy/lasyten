@@ -36,13 +36,13 @@ lasyten\._core\.BlockBackend\.block_from_ndarray:
 lasyten\._core\.BlockBackend\.to_ndarray:
     \from typing import Any
     \from numpy.typing import NDArray
-    def to_ndarray(self, block: BlockBackend.Block, writable: bool = True) -> NDArray[Any]:
+    def to_ndarray(self, block: BlockBackend.Block, writable: bool = True, framework: str | None = None) -> NDArray[Any] | Any:
         \doc
 
 lasyten\._core\.BlockBackend\.Block\.to_ndarray:
     \from typing import Any
     \from numpy.typing import NDArray
-    def to_ndarray(self, writable: bool = True) -> NDArray[Any]:
+    def to_ndarray(self, writable: bool = True, framework: str | None = None) -> NDArray[Any] | Any:
         \doc
 
 lasyten\._core\.EigenBlockBackend\.block_from_ndarray:
@@ -54,11 +54,11 @@ lasyten\._core\.EigenBlockBackend\.block_from_ndarray:
 lasyten\._core\.EigenBlockBackend\.to_ndarray:
     \from typing import Any
     \from numpy.typing import NDArray
-    def to_ndarray(self, block: EigenBlockBackend.BlockCls, writable: bool = True) -> NDArray[Any]:
+    def to_ndarray(self, block: EigenBlockBackend.BlockCls, writable: bool = True, framework: str | None = None) -> NDArray[Any] | Any:
         \doc
 
 lasyten\._core\.EigenBlockBackend\.BlockCls\.to_ndarray:
     \from typing import Any
     \from numpy.typing import NDArray
-    def to_ndarray(self, writable: bool = True) -> NDArray[Any]:
+    def to_ndarray(self, writable: bool = True, framework: str | None = None) -> NDArray[Any] | Any:
         \doc
