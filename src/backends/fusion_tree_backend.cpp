@@ -4125,15 +4125,20 @@ FusionTreeBackend::diagonal_to_mask(DiagonalTensorCPtr tens)
         Sector const coupled = codom_secs[static_cast<std::size_t>(bii)];
         Sector const defining = is_dual ? sym->dual_sector(coupled) : coupled;
         int64 const mult = block_backend->sum_all(diag_block).as_int64();
-        std::size_t slice_bi = static_cast<std::size_t>(bii);
-        if (is_dual) {
-            auto j = large.sector_decomposition_where(coupled);
-            if (!j.has_value())
-                throw std::runtime_error("diagonal_to_mask: coupled sector not in large_leg");
-            slice_bi = static_cast<std::size_t>(*j);
-        }
-        auto const& slc = large.slices->at(slice_bi);
         if (basis_perm) {
+            // ``slices`` exist only when ``can_be_dropped``; basis_perm is meaningless otherwise.
+            if (!large.slices) {
+                throw std::invalid_argument(
+                  "diagonal_to_mask: basis_perm requires large_leg.slices");
+            }
+            std::size_t slice_bi = static_cast<std::size_t>(bii);
+            if (is_dual) {
+                auto j = large.sector_decomposition_where(coupled);
+                if (!j.has_value())
+                    throw std::runtime_error("diagonal_to_mask: coupled sector not in large_leg");
+                slice_bi = static_cast<std::size_t>(*j);
+            }
+            auto const& slc = large.slices->at(slice_bi);
             std::vector<int64> kept;
             int64 dim = sym->sector_dim(defining);
             auto tiled = block_backend->tile(diag_block, dim);
@@ -4198,14 +4203,22 @@ FusionTreeBackend::mask_binary_operand(MaskCPtr mask1, MaskCPtr mask2, BlockBina
         int64 mult = block_backend->sum_all(new_block).as_int64();
         if (mult == 0)
             continue;
-        auto const& slc = large.slices->at(si);
+        // ``slices`` only needed when applying basis_perm (and only exist if can_be_dropped).
+        std::array<int64, 2> slc{ 0, 0 };
+        if (basis_perm) {
+            if (!large.slices) {
+                throw std::invalid_argument(
+                  "mask_binary_operand: basis_perm requires large_leg.slices");
+            }
+            slc = large.slices->at(si);
+        }
         m.add(*block_backend,
               std::move(new_block),
               mult,
               static_cast<int64>(si),
               defining[si],
               basis_perm,
-              { slc[0], slc[1] });
+              slc);
     }
     auto [data, small_leg] = finish_mask(
       std::move(m), mask1->symmetry, space_is_dual(large), basis_perm.has_value(), mask1->device);
@@ -4253,8 +4266,12 @@ FusionTreeBackend::mask_from_block(BlockBackend::BlockPtr a, Space::Ptr large_le
         int64 dim = large_leg->symmetry->sector_dim(sector);
         int64 stop = block_backend->get_shape(block)[0] / dim;
         auto mask_block = b_get(block, BlockIndexVec{ AxisSlice{ 0, stop, std::nullopt } });
-        auto const& slc = large_leg->slices->at(bi_large);
         if (basis_perm) {
+            if (!large_leg->slices) {
+                throw std::invalid_argument(
+                  "mask_from_block: basis_perm requires large_leg.slices");
+            }
+            auto const& slc = large_leg->slices->at(bi_large);
             std::vector<int64> kept;
             append_basis_perm_kept_from_tile(
               kept, *basis_perm, { slc[0], slc[1] }, *block_backend, block);
@@ -4369,14 +4386,21 @@ FusionTreeBackend::mask_unary_operand(MaskCPtr mask, BlockUnaryFn func)
         int64 mult = block_backend->sum_all(new_block).as_int64();
         if (mult == 0)
             continue;
-        auto const& slc = large.slices->at(si);
+        std::array<int64, 2> slc{ 0, 0 };
+        if (basis_perm) {
+            if (!large.slices) {
+                throw std::invalid_argument(
+                  "mask_unary_operand: basis_perm requires large_leg.slices");
+            }
+            slc = large.slices->at(si);
+        }
         m.add(*block_backend,
               std::move(new_block),
               mult,
               static_cast<int64>(si),
               defining[si],
               basis_perm,
-              { slc[0], slc[1] });
+              slc);
     }
     auto [data, small_leg] = finish_mask(std::move(m),
                                          mask->symmetry,
