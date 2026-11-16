@@ -36,7 +36,7 @@ bind_block_backend_eigen(nb::module_& m)
     // Prefer these over to_numpy / block_from_numpy at new call sites (leftover #10).
     eigen_block_backend.def(
       "block_from_ndarray",
-      [](EigenBlockBackend& self, eigen_ndarray::AnyCpuArray arr, std::optional<Dtype> dtype) {
+      [](EigenBlockBackend& self, eigen_ndarray::AnyDeviceArray arr, std::optional<Dtype> dtype) {
           return eigen_ndarray::block_from_ndarray(self, arr, dtype);
       },
       nb::arg("arr"),

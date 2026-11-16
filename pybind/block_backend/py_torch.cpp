@@ -28,7 +28,7 @@ bind_block_backend_torch(nb::module_& m)
     torch_block_backend.def(
       "block_from_ndarray",
       [](TorchBlockBackend& self,
-         eigen_ndarray::AnyCpuArray arr,
+         eigen_ndarray::AnyDeviceArray arr,
          std::optional<Dtype> dtype,
          std::optional<std::string> device) {
           return ndarray_dispatch::block_from_ndarray(self, arr, dtype, std::move(device));
@@ -36,7 +36,8 @@ bind_block_backend_torch(nb::module_& m)
       nb::arg("arr"),
       nb::arg("dtype") = nb::none(),
       nb::arg("device") = nb::none(),
-      "Copy a CPU array into a new Torch block on the backend device.");
+      "Copy a CPU or CUDA array into a new Torch block on the backend device "
+      "(CUDA sources stay on device; no host round-trip).");
     torch_block_backend.def(
       "to_ndarray",
       [](TorchBlockBackend& /*self*/, nb::object block, bool writable) {

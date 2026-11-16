@@ -40,10 +40,32 @@ namespace nb = nanobind;
 
 /// Any CPU array, C-contiguous (non-contiguous inputs are made contiguous by nanobind).
 using AnyCpuArray = nb::ndarray<nb::c_contig, nb::device::cpu>;
+/// C-contiguous array on any DLPack device (CPU, CUDA, …).
+using AnyDeviceArray = nb::ndarray<nb::c_contig>;
 /// Writable NumPy array handed back to Python.
 using NumpyArray = nb::ndarray<nb::numpy>;
 /// Read-only NumPy view (``flags.writeable == False``).
 using NumpyArrayRo = nb::ndarray<nb::numpy, nb::ro>;
+
+[[nodiscard]] inline bool
+is_cpu_device(int device_type)
+{
+    return device_type == nb::device::cpu::value;
+}
+
+/// Eigen / Numpy imports only support host memory; Torch may keep CUDA pointers.
+inline void
+require_cpu_device(int device_type, char const* backend_name)
+{
+    if (!is_cpu_device(device_type)) {
+        throw nb::type_error(std::format("{}: block_from_ndarray requires a CPU array "
+                                         "(got DLPack device_type={}); move to host first "
+                                         "(e.g. tensor.cpu() / cupy.asnumpy).",
+                                         backend_name,
+                                         device_type)
+                               .c_str());
+    }
+}
 
 [[nodiscard]] inline nb::dlpack::dtype
 to_dlpack_dtype(Dtype dt)
@@ -130,11 +152,13 @@ block_to_ndarray_readonly(EigenBlockBackend::Block const& block, nb::handle owne
 }
 
 /// Copy any CPU array into a new Eigen block, optionally converting to ``dtype``.
+/// Non-CPU DLPack devices raise ``TypeError`` (Eigen storage is host-only).
 [[nodiscard]] inline EigenBlockBackend::BlockPtr
 block_from_ndarray(EigenBlockBackend& backend,
-                   AnyCpuArray const& arr,
+                   AnyDeviceArray const& arr,
                    std::optional<Dtype> dtype = std::nullopt)
 {
+    require_cpu_device(arr.device_type(), "EigenBlockBackend");
     Dtype const src_dtype = from_dlpack_dtype(arr.dtype());
     std::vector<int64> shape(arr.ndim());
     std::size_t numel = 1;

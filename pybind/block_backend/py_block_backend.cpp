@@ -868,7 +868,7 @@ bind_block_backend(nb::module_& m)
       .def(
         "block_from_ndarray",
         [](BlockBackend& self,
-           eigen_ndarray::AnyCpuArray arr,
+           eigen_ndarray::AnyDeviceArray arr,
            std::optional<Dtype> dtype,
            std::optional<std::string> device) {
             return ndarray_dispatch::block_from_ndarray(self, arr, dtype, std::move(device));

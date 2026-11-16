@@ -70,7 +70,7 @@ torch_tensor_as_ndarray(torch::Tensor t, nb::handle owner, bool writable)
 
 [[nodiscard]] inline BlockBackend::BlockPtr
 block_from_ndarray(BlockBackend& backend,
-                   eigen_ndarray::AnyCpuArray const& arr,
+                   eigen_ndarray::AnyDeviceArray const& arr,
                    std::optional<Dtype> dtype = std::nullopt,
                    std::optional<std::string> device = std::nullopt)
 {
@@ -80,6 +80,7 @@ block_from_ndarray(BlockBackend& backend,
     }
 #if defined(LASYTEN_WITH_NUMPY_BACKEND) && LASYTEN_WITH_NUMPY_BACKEND
     if (dynamic_cast<NumpyBlockBackend*>(&backend) != nullptr) {
+        eigen_ndarray::require_cpu_device(arr.device_type(), "NumpyBlockBackend");
         nb::object py_obj = nb::cast(arr);
         py::array a = py::array::ensure(py_obj);
         if (!a) {
@@ -94,7 +95,9 @@ block_from_ndarray(BlockBackend& backend,
 #endif
 #if defined(LASYTEN_WITH_TORCH_BACKEND) && LASYTEN_WITH_TORCH_BACKEND
     if (dynamic_cast<TorchBlockBackend*>(&backend) != nullptr) {
-        // Copy CPU ndarray bytes into a new torch tensor on the backend device.
+        // Copy into a new torch tensor. CPU sources use host memcpy then optional
+        // ``.to(device)``; CUDA (or other) sources use ``from_blob`` on that device
+        // so non-CPU buffers never bounce through host memory.
         Dtype const src_dtype = eigen_ndarray::from_dlpack_dtype(arr.dtype());
         Dtype const out_dtype = dtype.value_or(src_dtype);
         std::vector<int64_t> sizes(arr.ndim());
@@ -104,11 +107,23 @@ block_from_ndarray(BlockBackend& backend,
             numel *= arr.shape(i);
         }
         std::string const dev = backend.as_device(device);
-        auto cpu_opts =
-          torch::TensorOptions().dtype(dtype::to_torch_dtype(src_dtype)).device(torch::kCPU);
-        torch::Tensor t = torch::empty(sizes, cpu_opts);
-        if (numel > 0) {
-            std::memcpy(t.data_ptr(), arr.data(), numel * dtype::itemsize(src_dtype));
+        torch::Tensor t;
+        if (eigen_ndarray::is_cpu_device(arr.device_type())) {
+            auto cpu_opts =
+              torch::TensorOptions().dtype(dtype::to_torch_dtype(src_dtype)).device(torch::kCPU);
+            t = torch::empty(sizes, cpu_opts);
+            if (numel > 0) {
+                std::memcpy(t.data_ptr(), arr.data(), numel * dtype::itemsize(src_dtype));
+            }
+        } else {
+            torch::Device src_dev =
+              (arr.device_type() == nb::device::cuda::value)
+                ? torch::Device(torch::kCUDA, static_cast<torch::DeviceIndex>(arr.device_id()))
+                : torch::Device(dev);
+            auto opts =
+              torch::TensorOptions().dtype(dtype::to_torch_dtype(src_dtype)).device(src_dev);
+            // Clone so the block owns the storage (from_blob aliases the ndarray).
+            t = torch::from_blob(const_cast<void*>(arr.data()), sizes, opts).clone();
         }
         if (out_dtype != src_dtype) {
             t = t.to(dtype::to_torch_dtype(out_dtype));
@@ -117,6 +132,7 @@ block_from_ndarray(BlockBackend& backend,
         return std::make_shared<TorchBlockBackend::Block>(std::move(t));
     }
 #endif
+    eigen_ndarray::require_cpu_device(arr.device_type(), backend.get_backend_name().c_str());
     nb::object py_obj = nb::cast(arr);
     return backend.block_from_numpy(py::array::ensure(py_obj), dtype, std::move(device));
 }

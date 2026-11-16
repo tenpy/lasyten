@@ -15,7 +15,7 @@ buffer/DLPack). Master port note: [convert_nanobind.md](convert_nanobind.md).
 | `src/block_backend/eigen.cpp` | Done (all pure virtuals; no NumPy calls for compute) |
 | CMake: Eigen + LAPACK(E) | Done |
 | Python I/O (`py::array`) | Copy-based (`to_numpy` / `block_from_numpy`), kept for liblasyten-internal callers; compiled out without Python |
-| Python I/O (`nb::ndarray`) | Done: `block_from_ndarray` (copying import, any CPU DLPack / buffer-protocol array, dtypes bool / int64 / float32/64 / complex64/128), `to_ndarray(writable=True|False)` (zero-copy NumPy view; writable aliases storage, `False` is read-only) on Eigen backend/`BlockCls` and via `BlockBackend` dispatch; `pybind/block_backend/eigen_ndarray.h` + `ndarray_dispatch.h`. `to_numpy()` remains an owning copy. |
+| Python I/O (`nb::ndarray`) | Done: `block_from_ndarray` (copying import, any **CPU** DLPack / buffer-protocol array; non-CPU raises `TypeError`; dtypes bool / int64 / float32/64 / complex64/128), `to_ndarray(writable=True|False)` (zero-copy NumPy view; writable aliases storage, `False` is read-only) on Eigen backend/`BlockCls` and via `BlockBackend` dispatch; `pybind/block_backend/eigen_ndarray.h` + `ndarray_dispatch.h`. `to_numpy()` remains an owning copy. GPU arrays: use `TorchBlockBackend`. |
 | Python-free operation | Done for `LASYTEN_WITH_PYTHON=OFF`: native HDF5 save/load (`hdf5_io::Hdf5Buffer`), `apply_axis_permutations`, repr; ctest `test_eigen_block_backend_no_python` |
 | Bindings (`pybind/block_backend/py_eigen.cpp`) | Done |
 | BlockBackend-contract tests | Basic ops + SVD/QR/eigh/tdot (`tests/ctest/test_eigen_block_backend.cpp`, `tests/python_tests/backends/test_eigen_block_backend.py`) |

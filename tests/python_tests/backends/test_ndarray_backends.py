@@ -62,3 +62,37 @@ def test_torch_ndarray_cuda_export_if_available():
     assert isinstance(view, torch.Tensor)
     assert view.device.type == 'cuda'
     npt.assert_allclose(view.detach().cpu().numpy(), arr)
+
+
+@pytest.mark.skipif(importlib.util.find_spec('torch') is None, reason='torch not installed')
+def test_torch_ndarray_cuda_import_keeps_device():
+    """CUDA torch tensors import without bouncing through host memory."""
+    import torch
+
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA not available')
+
+    from lasyten.block_backends import TorchBlockBackend
+
+    bb = TorchBlockBackend.from_factory('cuda:0')
+    src = torch.arange(6.0, device='cuda:0').reshape(2, 3)
+    block = bb.block_from_ndarray(src)
+    view = bb.to_ndarray(block)
+    assert view.device.type == 'cuda'
+    npt.assert_allclose(view.detach().cpu().numpy(), src.detach().cpu().numpy())
+
+
+@pytest.mark.skipif(importlib.util.find_spec('torch') is None, reason='torch not installed')
+def test_eigen_rejects_cuda_ndarray():
+    """Eigen/Numpy are host-only; CUDA inputs raise TypeError."""
+    import torch
+
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA not available')
+
+    from lasyten.block_backends import EigenBlockBackend
+
+    bb = EigenBlockBackend.from_factory('cpu')
+    src = torch.zeros(2, 2, dtype=torch.float64, device='cuda:0')
+    with pytest.raises(TypeError, match='CPU array'):
+        bb.block_from_ndarray(src)
