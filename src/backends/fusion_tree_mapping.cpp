@@ -1,13 +1,14 @@
 #include <lasyten/backends/fusion_tree_mapping.h>
 
-#include <lasyten/backends/block_inds_numpy.h>
 #include <lasyten/block_backend/dtypes.h>
 #include <lasyten/tools.h>
 
 #include <algorithm>
 #include <cassert>
+#include <initializer_list>
 #include <numeric>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -15,43 +16,30 @@ namespace lasyten {
 
 namespace {
 
-BlockInds
-as_block_inds(py::object obj)
+BlockBackend::AxisSlice
+axis_slice_from_index_slice(IndexSlice slc)
 {
-    if (py::isinstance<BlockInds>(obj)) {
-        return py::cast<BlockInds>(obj);
-    }
-    return block_inds_from_numpy(obj);
-}
-
-py::slice
-slice_from_index_slice(IndexSlice slc)
-{
-    return py::slice(slc.start, slc.stop, 1);
+    return BlockBackend::AxisSlice{ slc.start, slc.stop, std::nullopt };
 }
 
 BlockBackend::BlockPtr
-b_get(BlockBackend::BlockPtr const& b, py::object key)
+b_get(BlockBackend::BlockPtr const& b, std::initializer_list<BlockBackend::BlockIndex> key)
 {
-    return b->get_item(key);
+    return b->get_item(std::span<BlockBackend::BlockIndex const>(key.begin(), key.end()));
 }
 
 void
-b_set(BlockBackend::BlockPtr const& b, py::object key, BlockBackend::BlockPtr const& v)
+b_set(BlockBackend::BlockPtr const& b,
+      std::initializer_list<BlockBackend::BlockIndex> key,
+      BlockBackend::BlockPtr const& v)
 {
-    b->set_item(key, py::cast(v));
-}
-
-void
-b_set_add(BlockBackend::BlockPtr const& b, py::object key, BlockBackend::BlockPtr const& v)
-{
-    b_set(b, key, (*b_get(b, key)) + (*v));
+    b->set_item(std::span<BlockBackend::BlockIndex const>(key.begin(), key.end()), *v);
 }
 
 void
 collect_tree_pair_keys(TensorProduct::Ptr codomain,
                        TensorProduct::Ptr domain,
-                       py::object block_inds,
+                       std::optional<BlockInds> const& block_inds,
                        std::vector<std::pair<FusionTree, FusionTree>>& keys)
 {
     auto process = [&](int64 i) {
@@ -64,7 +52,7 @@ collect_tree_pair_keys(TensorProduct::Ptr codomain,
         }
     };
 
-    if (block_inds.is_none()) {
+    if (!block_inds.has_value()) {
         SectorArray::iter_common_sorted(
           codomain->sector_decomposition,
           domain->sector_decomposition,
@@ -72,7 +60,7 @@ collect_tree_pair_keys(TensorProduct::Ptr codomain,
           true,
           [&](std::ptrdiff_t i, std::ptrdiff_t) { process(static_cast<int64>(i)); });
     } else {
-        BlockInds bi = as_block_inds(block_inds);
+        BlockInds const& bi = *block_inds;
         for (std::size_t row = 0; row < bi.nrows(); ++row) {
             process(bi(row, 0));
         }
@@ -82,7 +70,7 @@ collect_tree_pair_keys(TensorProduct::Ptr codomain,
 void
 collect_splitting_and_fusion_trees(TensorProduct::Ptr codomain,
                                    TensorProduct::Ptr domain,
-                                   py::object block_inds,
+                                   std::optional<BlockInds> const& block_inds,
                                    std::vector<FusionTree>& splitting_trees,
                                    std::vector<FusionTree>& fusion_trees)
 {
@@ -97,7 +85,7 @@ collect_splitting_and_fusion_trees(TensorProduct::Ptr codomain,
         }
     };
 
-    if (block_inds.is_none()) {
+    if (!block_inds.has_value()) {
         SectorArray::iter_common_sorted(
           codomain->sector_decomposition,
           domain->sector_decomposition,
@@ -105,7 +93,7 @@ collect_splitting_and_fusion_trees(TensorProduct::Ptr codomain,
           true,
           [&](std::ptrdiff_t i, std::ptrdiff_t) { process(static_cast<int64>(i)); });
     } else {
-        BlockInds bi = as_block_inds(block_inds);
+        BlockInds const& bi = *block_inds;
         for (std::size_t row = 0; row < bi.nrows(); ++row) {
             process(bi(row, 0));
         }
@@ -156,6 +144,7 @@ to_inner_pair(FusionTreePairLinearCombination const& lc)
     return inner;
 }
 
+#if LASYTEN_HAS_PYTHON
 std::vector<Instruction>
 instructions_from_python(py::object instructions)
 {
@@ -177,6 +166,7 @@ instructions_from_python(py::object instructions)
     }
     return out;
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::unique_ptr<TensorMapping>
 TensorMapping::pre_compose_instruction(Instruction const& instruction,
@@ -214,7 +204,7 @@ TreePairMapping::TreePairMapping(SparseMappingFusionTreePair mapping_, bool is_r
 std::unique_ptr<TreePairMapping>
 TreePairMapping::from_identity(TensorProduct::Ptr codomain,
                                TensorProduct::Ptr domain,
-                               py::object block_inds)
+                               std::optional<BlockInds> block_inds)
 {
     std::vector<std::pair<FusionTree, FusionTree>> keys;
     collect_tree_pair_keys(codomain, domain, block_inds, keys);
@@ -226,7 +216,7 @@ std::unique_ptr<TreePairMapping>
 TreePairMapping::from_instructions(std::vector<Instruction> const& instructions,
                                    TensorProduct::Ptr codomain,
                                    TensorProduct::Ptr domain,
-                                   py::object block_inds)
+                                   std::optional<BlockInds> block_inds)
 {
     auto res = from_identity(codomain, domain, block_inds);
     bool const instruction_is_real = !codomain->symmetry->has_complex_topological_data;
@@ -456,7 +446,7 @@ TreePairMapping::transform_tensor(FusionTreeData const& data,
                       auto i2 = domain->tree_block_slice(pair_I.second);
                       auto sub = b_get(
                         old_block,
-                        py::make_tuple(slice_from_index_slice(i1), slice_from_index_slice(i2)));
+                        { axis_slice_from_index_slice(i1), axis_slice_from_index_slice(i2) });
                       auto add_block =
                         block_backend->mul(block_backend->as_scalar(it->second, dtype), sub);
                       if (!tree_block) {
@@ -493,8 +483,8 @@ TreePairMapping::transform_tensor(FusionTreeData const& data,
                                                                          old_mults_dom,
                                                                          tree_block_axes_2);
                   b_set(block,
-                        py::make_tuple(slice_from_index_slice(xb.slice),
-                                       slice_from_index_slice(yb.slice)),
+                        { axis_slice_from_index_slice(xb.slice),
+                          axis_slice_from_index_slice(yb.slice) },
                         permuted);
               }
           }
@@ -523,7 +513,7 @@ FactorizedTreeMapping::FactorizedTreeMapping(FusionTreeMappingVariant splitting_
 std::unique_ptr<FactorizedTreeMapping>
 FactorizedTreeMapping::from_identity(TensorProduct::Ptr codomain,
                                      TensorProduct::Ptr domain,
-                                     py::object block_inds)
+                                     std::optional<BlockInds> block_inds)
 {
     std::vector<FusionTree> splitting_trees;
     std::vector<FusionTree> fusion_trees;
@@ -537,7 +527,7 @@ std::unique_ptr<FactorizedTreeMapping>
 FactorizedTreeMapping::from_instructions(std::vector<Instruction> const& instructions,
                                          TensorProduct::Ptr codomain,
                                          TensorProduct::Ptr domain,
-                                         py::object block_inds)
+                                         std::optional<BlockInds> block_inds)
 {
     auto res = from_identity(codomain, domain, block_inds);
     bool const instruction_is_real = !codomain->symmetry->has_complex_topological_data;
@@ -639,7 +629,8 @@ FactorizedTreeMapping::transform_splitting_trees(BlockBackend::BlockPtr const& o
                 continue;
             }
             auto i1 = codomain->tree_block_slice(X);
-            auto part = b_get(old_block, py::make_tuple(slice_from_index_slice(i1), py::slice()));
+            auto part = b_get(old_block,
+                              { axis_slice_from_index_slice(i1), BlockBackend::AxisSlice::all() });
             auto scaled = block_backend->mul(
               block_backend->as_scalar(it->second, block_backend->get_dtype(old_block)), part);
             if (!tree_row) {
@@ -660,7 +651,9 @@ FactorizedTreeMapping::transform_splitting_trees(BlockBackend::BlockPtr const& o
         }
         auto permuted =
           block_backend->permute_combined_idx(tree_row, 0, mults_old_order, tree_block_axes_1);
-        b_set(out, py::make_tuple(slice_from_index_slice(x2.slice), py::slice()), permuted);
+        b_set(out,
+              { axis_slice_from_index_slice(x2.slice), BlockBackend::AxisSlice::all() },
+              permuted);
     }
     return { out, is_zero };
 }
@@ -689,7 +682,8 @@ FactorizedTreeMapping::transform_fusion_trees(BlockBackend::BlockPtr const& old_
                 continue;
             }
             auto i2 = domain->tree_block_slice(Y);
-            auto part = b_get(old_block, py::make_tuple(py::slice(), slice_from_index_slice(i2)));
+            auto part = b_get(old_block,
+                              { BlockBackend::AxisSlice::all(), axis_slice_from_index_slice(i2) });
             auto scaled = block_backend->mul(
               block_backend->as_scalar(it->second, block_backend->get_dtype(old_block)), part);
             if (is_zero_tree_col) {
@@ -711,7 +705,9 @@ FactorizedTreeMapping::transform_fusion_trees(BlockBackend::BlockPtr const& old_
         }
         auto permuted =
           block_backend->permute_combined_idx(tree_col, 1, mults_old_order, tree_block_axes_2);
-        b_set(out, py::make_tuple(py::slice(), slice_from_index_slice(y2.slice)), permuted);
+        b_set(out,
+              { BlockBackend::AxisSlice::all(), axis_slice_from_index_slice(y2.slice) },
+              permuted);
     }
     return { out, is_zero_block };
 }

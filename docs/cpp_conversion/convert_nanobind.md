@@ -23,7 +23,7 @@ TeNPy downstream: [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md).
 | Phase 4 cleanup (gating, `nb::ndarray` boundary, `py::` inventory) | Done for first port (Numpy gate + Eigen `to_ndarray` / `block_from_ndarray`; default `"cpu"` switch is leftover) |
 | pybind11 removed from liblasyten | Done: `include/` / `src/` use nanobind only, through the thin `lasyten::py` layer (`detail/python_api.h`, `detail/py_array.h`); no `find_package(pybind11)` |
 | Stable ABI (abi3) | Done: `LASYTEN_STABLE_ABI` (default ON, Python >= 3.12), `_core.abi3.so`, `wheel.py-api = "cp312"` (leftover #2) |
-| `LASYTEN_WITH_PYTHON=OFF` Python-free | Partial: Eigen block backend, symmetry stack, Space / Leg, the Tensor classes and the `NoSymmetryBackend` (SymmetricTensor, tdot / compose, svd / qr / lq / truncated_svd) build and are tested without libpython (three ctests); Abelian / FusionTree backends, krylov, models and the `eigh` / `eig` / `entropy` decompositions still need Python (leftover #1) |
+| `LASYTEN_WITH_PYTHON=OFF` Python-free | Partial: Eigen + Space/Leg/Tensors, `NoSymmetryBackend`, **`AbelianBackend`**, **`FusionTreeBackend`** (core paths; heavy mask / truncate / partial_trace still `NotImplemented` without Python), `fusion_tree_mapping`, krylov, and native `svd`/`qr`/`lq`/`eigh`/`eig*`/`entropy` (incl. Charged/HiddenLeg factors) build without libpython (`ctest -R no_python`); models and Numpy/ArrayApi/Torch still Python-gated (leftover #1 remainder) |
 
 ## Motivations
 
@@ -207,7 +207,7 @@ block the OFF build.)
   - [x] Root CMake OFF: no Python Development.Embed / pybind11 / nanobind / Torch, Eigen + LAPACK + HDF5, clear STATUS of the blockers
   - [x] Python-free pieces: Eigen block HDF5 save/load, `apply_axis_permutations`, `block_from_fusion_symbol` / `fusion_symbol_from_block` for Eigen, native repr, `warn`, `OptionValue`
   - [x] Python-free ctests (`test_eigen_block_backend_no_python`, `test_symmetric_blocks_no_python`, `hdf5_io_core_roundtrip`); Symmetry / Sector stack and their HDF5 I/O compile without Python
-  - [ ] Space / Leg, Tensors, TensorBackends, models without `py::` (blockers above — leftover #1)
+  - [x] Abelian + FusionTree backends without `py::` in the OFF lib (models / Numpy / Torch still gated; leftover #1 remainder)
   - [ ] Full ctest suite without embedded Python
 
 ## Status of the nanobind port
@@ -279,33 +279,19 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
 
 ## Open points / leftover todos
 
-1. **`LASYTEN_WITH_PYTHON=OFF` truly Python-free** — **mostly done for the NoSymmetry + Eigen path.**
-   With OFF, liblasyten now contains Space / Leg (`spaces.cpp`), `TensorBackend` / `NoSymmetryBackend`,
-   `Tensor`, `SymmetricTensor`, `DiagonalTensor`, `Mask`, `ChargedTensor`, the helpers / constructors,
-   `decompositions.cpp` and `backend_factory.cpp` (moved from `LASYTEN_PYTHON_API_SOURCES` to
-   `LASYTEN_PYTHON_FREE_SOURCES`), on top of the symmetry stack and the Eigen block backend. A C++ program
-   can create a NoSymmetry `ElementarySpace` / `TensorProduct`, build a `SymmetricTensor` on
-   `NoSymmetryBackend` + `EigenBlockBackend`, and run `tdot` / `compose` / `norm` / `svd` / `qr` / `lq`.
-   The new ctest `test_tensor_no_python` checks these against dense references
-   (`ctest -R no_python` in an OFF build dir, e.g.
-   `cmake -S . -B build_off -G Ninja -DLASYTEN_WITH_PYTHON=OFF && ninja -C build_off && ctest --test-dir build_off -R no_python`).
-   The Python-boundary parts of these files are under `#if LASYTEN_HAS_PYTHON` (`vector_to_array`,
-   `apply_basis_perm`, `to_numpy`, `parse_tensor_init*`, `Mask::from_indices`, `from_random(np_random)`,
-   `get_same_backend(py::object)`, ...); where the C++ stack needs the functionality, a typed replacement
-   exists instead (`BlockBackend::convert_block` / `block_from_bool_vector` / `block_to_*_vector`,
-   `apply_axis_permutations`, `take_slice(std::vector<bool>)`, `format_like_list(vector<...>)`,
-   `TensorBackend::from_grid` on `TensorCPtr` grids, a `vector<float64>` core of
-   `_truncate_singular_values_selection`, typed `svd` / `qr` / `lq` / `truncated_svd` /
-   `truncate_singular_values` / `svd_apply_mask` / `apply_mask_DiagonalTensor` in `decompositions.cpp`).
-   **Still blocked without Python**, in `LASYTEN_PYTHON_API_SOURCES` (errors per TU against the OFF stubs):
-   `abelian.cpp` (~720) and `fusion_tree_backend.cpp` (~1030), hence also `fusion_tree_mapping.cpp` (43) and
-   `block_inds_numpy.cpp` (27) — `backend_factory` throws `NotImplemented` for `"abelian"` / `"fusion_tree"` and
-   the Abelian <-> FusionTree conversions, FusionTree pipe flattening and their HDF5 hooks are gated;
-   `krylov_based.cpp` (28); the models; Numpy / ArrayApi / Torch block backends. Within the free TUs, OFF
-   `decompositions.cpp` only provides `svd`, `qr`, `lq`, `truncated_svd`, `truncate_singular_values`,
-   `svd_apply_mask`, `apply_mask_DiagonalTensor`; `eigh` / `eig` / `eigvals(h)` / `entropy` still need the
-   Python implementation, and `svd` / `qr` / `lq` reject `ChargedTensor` / `HiddenLegTensor` inputs
-   (`NotImplemented`), as does `ChargedTensor::from_two_charge_legs`.
+1. **`LASYTEN_WITH_PYTHON=OFF` truly Python-free** — **NoSymmetry + Abelian + FusionTree (partial) on Eigen work without libpython.**
+   With OFF, liblasyten includes Space / Leg, the Tensor classes (`Symmetric` / `Diagonal` / `Mask` /
+   `Charged`), `NoSymmetryBackend`, **`AbelianBackend`**, **`FusionTreeBackend`** (in
+   `LASYTEN_PYTHON_FREE_SOURCES`; native helpers + `apply_instructions` / `permute_legs` / dense
+   block I/O; several mask/truncate/partial paths still throw `NotImplemented` when OFF),
+   **`fusion_tree_mapping`**, **`krylov_based`** (typed `KrylovOptions`), `decompositions` (native
+   `svd` / `qr` / `lq` / `eigh` / `eig*` / `entropy`, including Charged/HiddenLeg factors for
+   svd/qr/lq), and `backend_factory` (`"no_symmetry"`, `"abelian"`, and `"fusion_tree"` + Eigen).
+   `ctest -R no_python` passes in an OFF build (`cmake -S . -B build_off -G Ninja
+   -DLASYTEN_WITH_PYTHON=OFF && ninja -C build_off && ctest --test-dir build_off -R no_python`).
+   **Still in `LASYTEN_PYTHON_API_SOURCES`:** `block_inds_numpy.cpp` only (NumPy casting for
+   `BlockInds`); models / `su2.cpp` and Numpy / ArrayApi / Torch block backends stay Python-gated
+   (models optional for leftover #1).
 2. **Stable ABI / abi3 wheels** — **done** (`LASYTEN_STABLE_ABI`, `_core.abi3.so`, `wheel.py-api = "cp312"`). Open: CI wheel jobs (cibuildwheel) for `cp312-abi3`, and checking the `Py_LIMITED_API` build on macOS.
 3. **Restore trampolines** (optional) for `Tensor`, `BlockBackend`, `TensorBackend`, `Symmetry`, `Site`, … if downstream needs Python subclassing again.
 4. **`unique_ptr` where ownership is unique** — audit `shared_ptr`-everywhere; migrate carefully without breaking `shared_from_this`.

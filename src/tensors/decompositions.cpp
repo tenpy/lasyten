@@ -29,8 +29,9 @@
 #include <variant>
 
 // With LASYTEN_WITH_PYTHON=ON this file implements the decompositions through the py-object port
-// (Python tensors / duck typing, all variants). Without Python only the native subset below is
-// built: `svd`, `qr`, `lq` on plain (Symmetric)Tensors.
+// (Python tensors / duck typing, all variants). Without Python the native subset below is built:
+// `svd`, `qr`, `lq`, `eigh`, `eig`, `eigvalsh`, `eigvals`, `entropy` on SymmetricTensor /
+// ChargedTensor / HiddenLegTensor (native C++ path).
 #if LASYTEN_HAS_PYTHON
 
 namespace lasyten {
@@ -1226,18 +1227,70 @@ namespace lasyten {
 
 namespace {
 
-/// The native (Python-free) decompositions do not handle ChargedTensor / HiddenLegTensor inputs.
-void
-reject_unsupported_decomposition_input(TensorCPtr const& tensor, char const* name)
+std::string
+charge_leg_label_cpp()
 {
-    if (std::dynamic_pointer_cast<ChargedTensor const>(tensor)) {
-        throw NotImplemented(std::string(name) + " for ChargedTensor without Python");
+    return ChargedTensor::_CHARGE_LEG_LABEL;
+}
+
+TensorPtr
+move_charge_leg_cpp(TensorCPtr tensor_part,
+                    std::string const& which,
+                    std::optional<int64> cpos,
+                    std::optional<int64> dpos)
+{
+    return move_leg(std::move(tensor_part), which, cpos, dpos, std::nullopt, BendRight{ false });
+}
+
+TensorPtr
+make_charged_cpp(TensorPtr inv_part, BlockBackend::BlockPtr charged_state)
+{
+    auto inv = std::dynamic_pointer_cast<SymmetricTensor>(inv_part);
+    if (!inv) {
+        throw std::logic_error("decompositions: expected SymmetricTensor invariant_part");
     }
+    return std::make_shared<ChargedTensor>(std::move(inv), std::move(charged_state));
+}
+
+/// Labels of the hidden legs of `tensor`, without the ``!`` prefix.
+std::vector<std::string>
+stripped_hidden_labels_cpp(TensorCPtr const& tensor)
+{
+    std::vector<std::string> res;
     for (auto const& lab : tensor->labels.as_list()) {
         if (HiddenLegTensor::is_hidden_leg_label(lab)) {
-            throw NotImplemented(std::string(name) + " for HiddenLegTensor without Python");
+            res.push_back(HiddenLegTensor::strip_hidden_prefix(lab));
         }
     }
+    return res;
+}
+
+/// Hide legs that were hidden on the decomposed tensor (see ON ``rehide_factor``).
+TensorPtr
+rehide_factor_cpp(TensorPtr factor, std::vector<std::string> const& hidden, int64 new_leg_idx)
+{
+    if (hidden.empty()) {
+        return factor;
+    }
+    auto labs = factor->labels.as_list();
+    auto num_legs = static_cast<int64>(labs.size());
+    if (new_leg_idx < 0) {
+        new_leg_idx += num_legs;
+    }
+    std::vector<std::variant<int64, std::string>> which;
+    for (int64 i = 0; i < num_legs; ++i) {
+        auto const& lab = labs[static_cast<std::size_t>(i)];
+        if (i == new_leg_idx || lab.empty()) {
+            continue;
+        }
+        if (std::find(hidden.begin(), hidden.end(), lab) != hidden.end()) {
+            which.emplace_back(i);
+        }
+    }
+    if (which.empty()) {
+        return factor;
+    }
+    return HiddenLegTensor::from_tensor(std::move(factor), std::move(which));
 }
 
 /// Labels ``[*codomain_labels, new_label]`` of a factor with one new domain leg.
@@ -1286,16 +1339,271 @@ split_one_leg(TensorPtr const& tensor, int64 idx)
     return split_legs(tensor, std::vector<LegRef>{ idx });
 }
 
+/// Parse ``eigh`` / ``eig`` labels: 1 → ``[a, a*, a]``, 2 → ``[a, b, a]``, 3 → ``[a, b, c]``.
+std::tuple<std::string, std::string, std::string>
+parse_eigh_labels(LegLabelList const& new_labels)
+{
+    if (new_labels.size() == 1) {
+        std::string a = new_labels[0];
+        return { a, _dual_leg_label(a), a };
+    }
+    if (new_labels.size() == 2) {
+        return { new_labels[0], new_labels[1], new_labels[0] };
+    }
+    if (new_labels.size() == 3) {
+        return { new_labels[0], new_labels[1], new_labels[2] };
+    }
+    throw std::invalid_argument(
+      std::format("Expected 1, 2 or 3 new_labels. Got {}.", new_labels.size()));
+}
+
+/// Parse ``eigvalsh`` / ``eigvals`` labels: 0/empty → ``["", ""]``, 1 → ``[a, a*]``, 2 → ``[b,
+/// c]``.
+std::pair<std::string, std::string>
+parse_eigenvalue_labels_cpp(LegLabelList const& new_labels)
+{
+    if (new_labels.empty()) {
+        return { "", "" };
+    }
+    if (new_labels.size() == 1) {
+        return { new_labels[0], _dual_leg_label(new_labels[0]) };
+    }
+    if (new_labels.size() == 2) {
+        return { new_labels[0], new_labels[1] };
+    }
+    throw std::invalid_argument(
+      std::format("Expected 0, 1 or 2 new_labels for eigenvalues. Got {}.", new_labels.size()));
+}
+
+struct SquareEigenPrepared
+{
+    SymmetricTensorPtr tensor;
+    TensorBackend::Ptr backend;
+    bool combined = false;
+};
+
+/// Match Python ``prepare_square_eigen``: require square legs, optionally combine.
+SquareEigenPrepared
+prepare_square_eigen_cpp(TensorCPtr tensor, bool new_leg_dual, char const* name)
+{
+    if (std::dynamic_pointer_cast<ChargedTensor const>(tensor)) {
+        throw NotImplemented(std::string(name) + " for ChargedTensor");
+    }
+    {
+        Space const& dom = *tensor->domain;
+        Space const& cod = *tensor->codomain;
+        if (!(dom == cod)) {
+            throw std::invalid_argument(std::string(name) +
+                                        " requires matching domain and codomain");
+        }
+    }
+    auto tens = std::const_pointer_cast<Tensor>(tensor)->as_SymmetricTensor();
+    auto backend = tens->backend;
+    bool combined = false;
+    if (!backend->can_decompose_tensors()) {
+        int64 n_cod = tens->num_codomain_legs();
+        int64 n_legs = tens->num_legs;
+        std::vector<LegRef> cod_idcs;
+        std::vector<LegRef> dom_idcs;
+        for (int64 i = 0; i < n_cod; ++i) {
+            cod_idcs.emplace_back(i);
+        }
+        for (int64 i = n_cod; i < n_legs; ++i) {
+            dom_idcs.emplace_back(i);
+        }
+        auto combined_t =
+          combine_legs(tens,
+                       { std::move(cod_idcs), std::move(dom_idcs) },
+                       PipeDualities{ std::vector<bool>{ new_leg_dual, !new_leg_dual } });
+        tens = std::dynamic_pointer_cast<SymmetricTensor>(combined_t);
+        if (!tens) {
+            throw std::logic_error(std::string(name) +
+                                   ": combine_legs did not return SymmetricTensor");
+        }
+        backend = tens->backend;
+        combined = true;
+    }
+    return { std::move(tens), std::move(backend), combined };
+}
+
+DiagonalTensorPtr
+diagonal_eigen_copy(DiagonalTensorCPtr diag, std::string const& b, std::string const& c)
+{
+    auto W = std::const_pointer_cast<DiagonalTensor>(diag)->as_DiagonalTensor(
+      /*guarantee_copy=*/true);
+    W->labels.set(LegLabelList{ b, c });
+    return W;
+}
+
+std::tuple<DiagonalTensorPtr, TensorPtr>
+eigh_of_diagonal(DiagonalTensorCPtr diag,
+                 std::string const& a,
+                 std::string const& b,
+                 std::string const& c)
+{
+    auto leg = diag->leg();
+    auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
+    if (!es) {
+        throw std::invalid_argument("eigh of DiagonalTensor requires an ElementarySpace leg");
+    }
+    auto V = SymmetricTensor::from_eye(
+      std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ Leg{ es } }),
+      diag->backend,
+      LegLabelList{ diag->codomain_labels().at(0), a },
+      diag->dtype,
+      diag->device);
+    return { diagonal_eigen_copy(diag, b, c), std::move(V) };
+}
+
 } // namespace
+
+std::tuple<DiagonalTensorPtr, TensorPtr>
+eigh(TensorCPtr tensor,
+     LegLabelList new_labels,
+     bool new_leg_dual,
+     std::optional<std::string> sort)
+{
+    auto const [a, b, c] = parse_eigh_labels(new_labels);
+    if (auto diag = std::dynamic_pointer_cast<DiagonalTensor const>(tensor)) {
+        return eigh_of_diagonal(diag, a, b, c);
+    }
+    auto prep = prepare_square_eigen_cpp(tensor, new_leg_dual, "eigh");
+    auto [w_data, v_data, new_leg] = prep.backend->eigh(prep.tensor, new_leg_dual, sort);
+    if (new_leg_dual != new_leg->is_dual) {
+        throw NotImplemented("eigh flip new_leg duality");
+    }
+    auto W = std::make_shared<DiagonalTensor>(
+      std::move(w_data), new_leg, prep.backend, prep.tensor->symmetry, LegLabelList{ b, c });
+    TensorPtr V =
+      make_decomposition_factor(std::move(v_data),
+                                prep.tensor->codomain,
+                                std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ new_leg }),
+                                prep.backend,
+                                prep.tensor->symmetry,
+                                labels_with_new_domain_leg(prep.tensor->codomain_labels(), a));
+    if (prep.combined) {
+        V = split_one_leg(V, 0);
+    }
+    return { std::move(W), std::move(V) };
+}
+
+std::tuple<DiagonalTensorPtr, TensorPtr>
+eig(TensorCPtr tensor, LegLabelList new_labels, bool new_leg_dual, std::optional<std::string> sort)
+{
+    auto const [a, b, c] = parse_eigh_labels(new_labels);
+    if (auto diag = std::dynamic_pointer_cast<DiagonalTensor const>(tensor)) {
+        return eigh_of_diagonal(diag, a, b, c);
+    }
+    auto prep = prepare_square_eigen_cpp(tensor, new_leg_dual, "eig");
+    auto [w_data, v_data, new_leg] = prep.backend->eig(prep.tensor, new_leg_dual, sort);
+    if (new_leg_dual != new_leg->is_dual) {
+        throw NotImplemented("eig flip new_leg duality");
+    }
+    auto W = std::make_shared<DiagonalTensor>(
+      std::move(w_data), new_leg, prep.backend, prep.tensor->symmetry, LegLabelList{ b, c });
+    TensorPtr V =
+      make_decomposition_factor(std::move(v_data),
+                                prep.tensor->codomain,
+                                std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ new_leg }),
+                                prep.backend,
+                                prep.tensor->symmetry,
+                                labels_with_new_domain_leg(prep.tensor->codomain_labels(), a));
+    if (prep.combined) {
+        V = split_one_leg(V, 0);
+    }
+    return { std::move(W), std::move(V) };
+}
+
+DiagonalTensorPtr
+eigvalsh(TensorCPtr tensor,
+         LegLabelList new_labels,
+         bool new_leg_dual,
+         std::optional<std::string> sort)
+{
+    auto const [b, c] = parse_eigenvalue_labels_cpp(new_labels);
+    if (auto diag = std::dynamic_pointer_cast<DiagonalTensor const>(tensor)) {
+        return diagonal_eigen_copy(diag, b, c);
+    }
+    auto prep = prepare_square_eigen_cpp(tensor, new_leg_dual, "eigvalsh");
+    auto [w_data, new_leg] = prep.backend->eigvalsh(prep.tensor, new_leg_dual, sort);
+    if (new_leg_dual != new_leg->is_dual) {
+        throw NotImplemented("eigvalsh flip new_leg duality");
+    }
+    return std::make_shared<DiagonalTensor>(
+      std::move(w_data), new_leg, prep.backend, prep.tensor->symmetry, LegLabelList{ b, c });
+}
+
+DiagonalTensorPtr
+eigvals(TensorCPtr tensor,
+        LegLabelList new_labels,
+        bool new_leg_dual,
+        std::optional<std::string> sort)
+{
+    auto const [b, c] = parse_eigenvalue_labels_cpp(new_labels);
+    if (auto diag = std::dynamic_pointer_cast<DiagonalTensor const>(tensor)) {
+        return diagonal_eigen_copy(diag, b, c);
+    }
+    auto prep = prepare_square_eigen_cpp(tensor, new_leg_dual, "eigvals");
+    auto [w_data, new_leg] = prep.backend->eigvals(prep.tensor, new_leg_dual, sort);
+    if (new_leg_dual != new_leg->is_dual) {
+        throw NotImplemented("eigvals flip new_leg duality");
+    }
+    return std::make_shared<DiagonalTensor>(
+      std::move(w_data), new_leg, prep.backend, prep.tensor->symmetry, LegLabelList{ b, c });
+}
+
+BlockBackend::Scalar
+entropy(DiagonalTensorCPtr p, float64 n)
+{
+    if (std::dynamic_pointer_cast<Identity const>(p)) {
+        throw std::invalid_argument(
+          "entropy does not support Identity. It is never a normalized distribution.");
+    }
+    if (!dtype::is_real(p->dtype)) {
+        throw std::invalid_argument("entropy requires a real dtype");
+    }
+    auto mut = std::const_pointer_cast<DiagonalTensor>(p);
+    auto mul = [](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
+        return (*a) * (*b);
+    };
+    auto pow = [](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
+        return a->pow(*b);
+    };
+    if (n == 1.0) {
+        auto logged = stable_log(p, 1e-30);
+        auto prod = mut->_binary_operand(DiagonalTensorCPtr(logged), mul, "mul");
+        return -trace(prod);
+    }
+    if (std::isinf(n)) {
+        return -p->max().log();
+    }
+    auto powered = mut->_binary_operand(p->backend->block_backend->as_scalar(n), pow, "pow");
+    return trace(powered).log() / (1.0 - n);
+}
 
 std::tuple<TensorPtr, TensorPtr>
 qr(TensorCPtr tensor,
    std::optional<LegLabelList> new_labels,
    bool new_leg_dual,
-   bool /*charge_leg_top*/)
+   bool charge_leg_top)
 {
-    reject_unsupported_decomposition_input(tensor, "qr");
+    if (auto charged = std::dynamic_pointer_cast<ChargedTensor const>(tensor)) {
+        TensorPtr inv_part = charged->invariant_part;
+        if (!charge_leg_top) {
+            inv_part = move_charge_leg_cpp(inv_part, charge_leg_label_cpp(), 0, std::nullopt);
+        }
+        auto [Q, R] = qr(inv_part, new_labels, new_leg_dual, true);
+        if (charge_leg_top) {
+            R = make_charged_cpp(std::move(R), charged->charged_state);
+        } else {
+            Q = move_charge_leg_cpp(Q, charge_leg_label_cpp(), std::nullopt, 0);
+            Q = make_charged_cpp(std::move(Q), charged->charged_state);
+        }
+        return { std::move(Q), std::move(R) };
+    }
+
     auto const [a, b] = parse_two_decomposition_labels(new_labels);
+    auto hidden = stripped_hidden_labels_cpp(tensor);
     auto [tens, new_co_domain, combine_codomain, combine_domain] =
       _decomposition_prepare(tensor, new_leg_dual);
     auto backend = tens->backend;
@@ -1320,6 +1628,8 @@ qr(TensorCPtr tensor,
     if (combine_domain) {
         R = split_one_leg(R, -1);
     }
+    Q = rehide_factor_cpp(std::move(Q), hidden, -1);
+    R = rehide_factor_cpp(std::move(R), hidden, 0);
     return { std::move(Q), std::move(R) };
 }
 
@@ -1327,10 +1637,25 @@ std::tuple<TensorPtr, TensorPtr>
 lq(TensorCPtr tensor,
    std::optional<LegLabelList> new_labels,
    bool new_leg_dual,
-   bool /*charge_leg_top*/)
+   bool charge_leg_top)
 {
-    reject_unsupported_decomposition_input(tensor, "lq");
+    if (auto charged = std::dynamic_pointer_cast<ChargedTensor const>(tensor)) {
+        TensorPtr inv_part = charged->invariant_part;
+        if (!charge_leg_top) {
+            inv_part = move_charge_leg_cpp(inv_part, charge_leg_label_cpp(), 0, std::nullopt);
+        }
+        auto [L, Q] = lq(inv_part, new_labels, new_leg_dual, true);
+        if (charge_leg_top) {
+            Q = make_charged_cpp(std::move(Q), charged->charged_state);
+        } else {
+            L = move_charge_leg_cpp(L, charge_leg_label_cpp(), std::nullopt, 0);
+            L = make_charged_cpp(std::move(L), charged->charged_state);
+        }
+        return { std::move(L), std::move(Q) };
+    }
+
     auto const [a, b] = parse_two_decomposition_labels(new_labels);
+    auto hidden = stripped_hidden_labels_cpp(tensor);
     auto [tens, new_co_domain, combine_codomain, combine_domain] =
       _decomposition_prepare(tensor, new_leg_dual);
     auto backend = tens->backend;
@@ -1355,6 +1680,8 @@ lq(TensorCPtr tensor,
     if (combine_domain) {
         Q = split_one_leg(Q, -1);
     }
+    L = rehide_factor_cpp(std::move(L), hidden, -1);
+    Q = rehide_factor_cpp(std::move(Q), hidden, 0);
     return { std::move(L), std::move(Q) };
 }
 
@@ -1362,11 +1689,26 @@ std::tuple<TensorPtr, DiagonalTensorPtr, TensorPtr>
 svd(TensorCPtr tensor,
     std::optional<LegLabelList> new_labels,
     bool new_leg_dual,
-    bool /*charge_leg_top*/,
+    bool charge_leg_top,
     std::optional<std::string> algorithm)
 {
-    reject_unsupported_decomposition_input(tensor, "svd");
+    if (auto charged = std::dynamic_pointer_cast<ChargedTensor const>(tensor)) {
+        TensorPtr inv_part = charged->invariant_part;
+        if (!charge_leg_top) {
+            inv_part = move_charge_leg_cpp(inv_part, charge_leg_label_cpp(), 0, std::nullopt);
+        }
+        auto [U, S, Vh] = svd(inv_part, new_labels, new_leg_dual, true, std::move(algorithm));
+        if (charge_leg_top) {
+            Vh = make_charged_cpp(std::move(Vh), charged->charged_state);
+        } else {
+            U = move_charge_leg_cpp(U, charge_leg_label_cpp(), std::nullopt, 0);
+            U = make_charged_cpp(std::move(U), charged->charged_state);
+        }
+        return { std::move(U), std::move(S), std::move(Vh) };
+    }
+
     auto const [a, b, c, d] = _svd_new_labels(new_labels);
+    auto hidden = stripped_hidden_labels_cpp(tensor);
     auto [tens, new_co_domain, combine_codomain, combine_domain] =
       _decomposition_prepare(tensor, new_leg_dual);
     auto backend = tens->backend;
@@ -1396,6 +1738,8 @@ svd(TensorCPtr tensor,
     if (combine_domain) {
         Vh = split_one_leg(Vh, -1);
     }
+    U = rehide_factor_cpp(std::move(U), hidden, -1);
+    Vh = rehide_factor_cpp(std::move(Vh), hidden, 0);
     return { std::move(U), std::move(S), std::move(Vh) };
 }
 

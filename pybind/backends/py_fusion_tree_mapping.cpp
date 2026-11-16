@@ -1,3 +1,4 @@
+#include <lasyten/backends/block_inds_numpy.h>
 #include <lasyten/backends/fusion_tree_mapping.h>
 #include <lasyten/backends/fusion_tree_permute.h>
 
@@ -12,6 +13,22 @@
 #include <vector>
 
 namespace lasyten {
+
+namespace {
+
+std::optional<BlockInds>
+optional_block_inds_from_py(py::object obj)
+{
+    if (obj.is_none()) {
+        return std::nullopt;
+    }
+    if (py::isinstance<BlockInds>(obj)) {
+        return py::cast<BlockInds>(obj);
+    }
+    return block_inds_from_numpy(obj);
+}
+
+} // namespace
 
 void
 bind_fusion_tree_mapping(nb::module_& m)
@@ -82,18 +99,31 @@ bind_fusion_tree_mapping(nb::module_& m)
            nb::arg("is_real"))
       .def_rw("is_real", &TreePairMapping::is_real)
       .def_rw("mapping", &TreePairMapping::mapping)
-      .def_static("from_identity",
-                  &TreePairMapping::from_identity,
-                  nb::arg("codomain"),
-                  nb::arg("domain"),
-                  nb::arg("block_inds").none() = nb::none(),
-                  DOC(lasyten, TreePairMapping, from_identity))
-      .def_static("from_instructions",
-                  &TreePairMapping::from_instructions,
-                  nb::arg("instructions"),
-                  nb::arg("codomain"),
-                  nb::arg("domain"),
-                  nb::arg("block_inds").none() = nb::none())
+      .def_static(
+        "from_identity",
+        [](TensorProduct::Ptr codomain, TensorProduct::Ptr domain, py::object block_inds) {
+            return TreePairMapping::from_identity(
+              std::move(codomain), std::move(domain), optional_block_inds_from_py(block_inds));
+        },
+        nb::arg("codomain"),
+        nb::arg("domain"),
+        nb::arg("block_inds").none() = nb::none(),
+        DOC(lasyten, TreePairMapping, from_identity))
+      .def_static(
+        "from_instructions",
+        [](std::vector<Instruction> const& instructions,
+           TensorProduct::Ptr codomain,
+           TensorProduct::Ptr domain,
+           py::object block_inds) {
+            return TreePairMapping::from_instructions(instructions,
+                                                      std::move(codomain),
+                                                      std::move(domain),
+                                                      optional_block_inds_from_py(block_inds));
+        },
+        nb::arg("instructions"),
+        nb::arg("codomain"),
+        nb::arg("domain"),
+        nb::arg("block_inds").none() = nb::none())
       .def("prune",
            &TreePairMapping::prune,
            nb::arg("tol") = 1e-15,
@@ -142,19 +172,33 @@ bind_fusion_tree_mapping(nb::module_& m)
       .def_rw("is_real", &FactorizedTreeMapping::is_real)
       .def_rw("splitting_tree_mapping", &FactorizedTreeMapping::splitting_tree_mapping)
       .def_rw("fusion_tree_mapping", &FactorizedTreeMapping::fusion_tree_mapping)
-      .def_static("from_identity",
-                  &FactorizedTreeMapping::from_identity,
-                  nb::arg("codomain"),
-                  nb::arg("domain"),
-                  nb::arg("block_inds").none() = nb::none(),
-                  doc_cpp_ref(R"pydoc(from_identity)pydoc",
-                              "lasyten::FactorizedTreeMapping::from_identity()"))
-      .def_static("from_instructions",
-                  &FactorizedTreeMapping::from_instructions,
-                  nb::arg("instructions"),
-                  nb::arg("codomain"),
-                  nb::arg("domain"),
-                  nb::arg("block_inds").none() = nb::none())
+      .def_static(
+        "from_identity",
+        [](TensorProduct::Ptr codomain, TensorProduct::Ptr domain, py::object block_inds) {
+            return FactorizedTreeMapping::from_identity(
+              std::move(codomain), std::move(domain), optional_block_inds_from_py(block_inds));
+        },
+        nb::arg("codomain"),
+        nb::arg("domain"),
+        nb::arg("block_inds").none() = nb::none(),
+        doc_cpp_ref(R"pydoc(from_identity)pydoc",
+                    "lasyten::FactorizedTreeMapping::from_identity()"))
+      .def_static(
+        "from_instructions",
+        [](std::vector<Instruction> const& instructions,
+           TensorProduct::Ptr codomain,
+           TensorProduct::Ptr domain,
+           py::object block_inds) {
+            return FactorizedTreeMapping::from_instructions(
+              instructions,
+              std::move(codomain),
+              std::move(domain),
+              optional_block_inds_from_py(block_inds));
+        },
+        nb::arg("instructions"),
+        nb::arg("codomain"),
+        nb::arg("domain"),
+        nb::arg("block_inds").none() = nb::none())
       .def("prune",
            &FactorizedTreeMapping::prune,
            nb::arg("tol") = 1e-15,

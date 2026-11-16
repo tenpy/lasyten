@@ -58,7 +58,10 @@ bind_tensors_krylov_based(nb::module_& m)
         nb::arg("options").none() = nb::none())
       .def_rw("H", &KrylovBased::H)
       .def_rw("psi0", &KrylovBased::psi0)
-      .def_rw("options", &KrylovBased::options)
+      .def_prop_rw(
+        "options",
+        [](KrylovBased const& self) { return krylov_options_to_py(self.options); },
+        [](KrylovBased& self, py::object v) { self.options = krylov_options_from_py(v); })
       .def_rw("N_min", &KrylovBased::N_min)
       .def_rw("N_max", &KrylovBased::N_max)
       .def_rw("N_cache", &KrylovBased::N_cache)
@@ -99,7 +102,10 @@ bind_tensors_krylov_based(nb::module_& m)
       .def_rw("A", &GMRES::A)
       .def_rw("x", &GMRES::x)
       .def_rw("b", &GMRES::b)
-      .def_rw("options", &GMRES::options)
+      .def_prop_rw(
+        "options",
+        [](GMRES const& self) { return krylov_options_to_py(self.options); },
+        [](GMRES& self, py::object v) { self.options = krylov_options_from_py(v); })
       .def_rw("N_min", &GMRES::N_min)
       .def_rw("N_max", &GMRES::N_max)
       .def_rw("restart", &GMRES::restart)
@@ -196,7 +202,8 @@ bind_tensors_krylov_based(nb::module_& m)
            DOC(lasyten, LanczosEvolution, run));
 
     m.def("lanczos",
-          &lanczos,
+          static_cast<std::tuple<float64, VectorLike::Ptr, int64> (*)(
+            LinearOperator::Ptr, VectorLike::Ptr, py::object)>(&lanczos),
           nb::arg("H"),
           nb::arg("psi"),
           nb::arg("options").none() = nb::none(),

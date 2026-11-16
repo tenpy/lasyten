@@ -70,22 +70,22 @@ CMake options for the block backends and a Python-free build
 
 ``LASYTEN_WITH_PYTHON`` (default ON)
     The long-term goal is to be able to use the C++ library without any Python interpreter.
-    This is still **partial**: with ``-DLASYTEN_WITH_PYTHON=OFF`` CMake does not look for Python, nanobind,
-    numpy or PyTorch, and builds the subset of ``liblasyten`` that does not need Python: the native
-    ``EigenBlockBackend`` (Eigen + LAPACK: products, tensor contractions ``tdot``, SVD, QR, eigh, ...),
-    dtypes, config, the symmetry stack (``Sector``, ``Symmetry`` and all factors, fusion trees) and HDF5 I/O
-    of these -- but not yet ``Space`` / ``Leg``, the ``Tensor`` classes and the ``TensorBackend``\ s, and no ``_core``.
-    Two CTests exercise this without an interpreter (``ldd`` shows no ``libpython``):
-    ``test_eigen_block_backend_no_python`` (block operations, contraction, SVD, HDF5 round trip) and
-    ``test_symmetric_blocks_no_python`` (``U(1) x Z_3`` charge bookkeeping and a sector-wise block contraction + SVD).
-    Needs only a C++ compiler, CMake, Eigen3, LAPACK/LAPACKE and HDF5 (e.g. from the conda env)::
+    With ``-DLASYTEN_WITH_PYTHON=OFF`` CMake does not look for Python, nanobind, numpy or PyTorch, and
+    builds ``liblasyten`` from the Python-free sources: ``EigenBlockBackend``, the symmetry stack,
+    ``Space`` / ``Leg``, the Tensor classes, ``NoSymmetryBackend`` / ``AbelianBackend`` /
+    ``FusionTreeBackend`` (some FusionTree mask/truncate paths still ``NotImplemented`` without
+    Python), krylov, and native decompositions -- but no ``_core`` extension and no models /
+    Numpy/ArrayApi/Torch backends. CTests ``test_eigen_block_backend_no_python``,
+    ``test_symmetric_blocks_no_python``, and ``test_tensor_no_python`` run without an interpreter
+    (``ldd`` shows no ``libpython``). Needs only a C++ compiler, CMake, Eigen3, LAPACK/LAPACKE and
+    HDF5 (e.g. from the conda env)::
 
         cmake -S . -B /tmp/lasyten_off -G Ninja -DLASYTEN_WITH_PYTHON=OFF
         cmake --build /tmp/lasyten_off
         ctest --test-dir /tmp/lasyten_off --output-on-failure
 
     The configure step prints which parts are skipped.
-    See ``docs/cpp_conversion/convert_nanobind.md`` (Phase 5) for the status.
+    See ``docs/cpp_conversion/convert_nanobind.md`` (Phase 5 / leftover #1) for the status.
 
 ``LASYTEN_STABLE_ABI`` (default ON)
     Build ``lasyten._core`` (and liblasyten) against the Python Stable ABI: nanobind's ``STABLE_ABI`` mode with

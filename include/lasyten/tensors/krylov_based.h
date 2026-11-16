@@ -6,13 +6,24 @@
 #include <lasyten/tensors/vector_like.h>
 
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <tuple>
+#include <variant>
 #include <vector>
 
 namespace lasyten {
+
+/// Typed Krylov / GMRES options (replaces the old ``py::dict`` member for Python-free builds).
+using KrylovOptionValue = std::variant<bool, int64, float64, std::string>;
+using KrylovOptions = std::map<std::string, KrylovOptionValue>;
+
+#if LASYTEN_HAS_PYTHON
+[[nodiscard]] KrylovOptions krylov_options_from_py(py::object options);
+[[nodiscard]] py::dict krylov_options_to_py(KrylovOptions const& options);
+#endif
 
 /// Base class for iterative algorithms building a Krylov basis with lasyten tensors.
 ///
@@ -102,7 +113,7 @@ class KrylovBased
 
     LinearOperator::Ptr H;
     VectorLike::Ptr psi0;
-    py::dict options;
+    KrylovOptions options;
     int64 N_min = 2;
     int64 N_max = 20;
     int64 N_cache = 20;
@@ -126,9 +137,16 @@ class KrylovBased
 
     KrylovBased(LinearOperator::Ptr H,
                 VectorLike::Ptr psi0,
+                KrylovOptions options = {},
+                Dtype dtype_h_krylov = Dtype::Complex128,
+                Dtype dtype_E = Dtype::Complex128);
+#if LASYTEN_HAS_PYTHON
+    KrylovBased(LinearOperator::Ptr H,
+                VectorLike::Ptr psi0,
                 py::object options,
                 Dtype dtype_h_krylov = Dtype::Complex128,
                 Dtype dtype_E = Dtype::Complex128);
+#endif
     virtual ~KrylovBased() = default;
 
     [[nodiscard]] virtual int64 _build_krylov() = 0;
@@ -149,9 +167,11 @@ class KrylovBased
     void set_h_krylov(int64 i, int64 j, complex128 value);
     [[nodiscard]] complex128 Es_at(int64 i, int64 j) const;
     void set_Es(int64 i, int64 j, complex128 value);
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] py::array Es_numpy() const;
     [[nodiscard]] py::array h_krylov_numpy() const;
     [[nodiscard]] py::array result_krylov_numpy() const;
+#endif
 
   protected:
     [[nodiscard]] int64 h_stride() const { return N_max + 1; }
@@ -179,7 +199,7 @@ class GMRES
   public:
     using Ptr = std::shared_ptr<GMRES>;
 
-    py::dict options;
+    KrylovOptions options;
     int64 N_min = 5;
     int64 N_max = 20;
     int64 restart = 10;
@@ -199,7 +219,10 @@ class GMRES
     std::vector<complex128> H; // (N_max+1, N_max) row-major
     std::vector<complex128> y;
 
+    GMRES(LinearOperator::Ptr A, VectorLike::Ptr x, VectorLike::Ptr b, KrylovOptions options = {});
+#if LASYTEN_HAS_PYTHON
     GMRES(LinearOperator::Ptr A, VectorLike::Ptr x, VectorLike::Ptr b, py::object options);
+#endif
 
     void _init_hessenberg();
     /// Returns ``(x, rel_residual, total_error, total_iters)``.
@@ -211,7 +234,9 @@ class GMRES
     void backsolve(int64 k);
     void reset();
 
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] py::array H_numpy() const;
+#endif
 };
 
 /// Arnoldi method for diagonalizing square, non-hermitian/symmetric matrices.
@@ -239,7 +264,10 @@ class Arnoldi : public KrylovBased
     std::string which = "LM";
     int64 num_ev = 1;
 
+    Arnoldi(LinearOperator::Ptr H, VectorLike::Ptr psi0, KrylovOptions options = {});
+#if LASYTEN_HAS_PYTHON
     Arnoldi(LinearOperator::Ptr H, VectorLike::Ptr psi0, py::object options);
+#endif
 
     /// Find the ground state of self.H.
     ///
@@ -286,7 +314,10 @@ class ArnoldiEvolution : public Arnoldi
     float64 _result_norm = 1.;
     std::optional<complex128> delta;
 
+    ArnoldiEvolution(LinearOperator::Ptr H, VectorLike::Ptr psi0, KrylovOptions options = {});
+#if LASYTEN_HAS_PYTHON
     ArnoldiEvolution(LinearOperator::Ptr H, VectorLike::Ptr psi0, py::object options);
+#endif
 
     /// Compute ``expm(delta * H).dot(psi0)`` using Arnoldi.
     ///
@@ -329,7 +360,10 @@ class LanczosGroundState : public KrylovBased
 
     float64 E_tol = std::numeric_limits<float64>::infinity();
 
+    LanczosGroundState(LinearOperator::Ptr H, VectorLike::Ptr psi0, KrylovOptions options = {});
+#if LASYTEN_HAS_PYTHON
     LanczosGroundState(LinearOperator::Ptr H, VectorLike::Ptr psi0, py::object options);
+#endif
 
     /// Find the ground state of H.
     ///
@@ -378,7 +412,10 @@ class LanczosEvolution : public LanczosGroundState
     float64 _result_norm = 1.;
     std::optional<complex128> delta;
 
+    LanczosEvolution(LinearOperator::Ptr H, VectorLike::Ptr psi0, KrylovOptions options = {});
+#if LASYTEN_HAS_PYTHON
     LanczosEvolution(LinearOperator::Ptr H, VectorLike::Ptr psi0, py::object options);
+#endif
 
     /// Calculate ``expm(delta H).dot(psi0)`` using Lanczos.
     ///
@@ -402,6 +439,11 @@ class LanczosEvolution : public LanczosGroundState
 /// @returns E0, psi0, N : See `LanczosGroundState::run`.
 std::tuple<float64, VectorLike::Ptr, int64> lanczos(LinearOperator::Ptr H,
                                                     VectorLike::Ptr psi,
-                                                    py::object options = py::none());
+                                                    KrylovOptions options = {});
+#if LASYTEN_HAS_PYTHON
+std::tuple<float64, VectorLike::Ptr, int64> lanczos(LinearOperator::Ptr H,
+                                                    VectorLike::Ptr psi,
+                                                    py::object options);
+#endif
 
 } // namespace lasyten

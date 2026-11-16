@@ -5,6 +5,7 @@
 #include "backends/casters.hpp"
 
 #include <lasyten/backends/fusion_tree_backend.h>
+#include <lasyten/backends/fusion_tree_mapping.h>
 #if LASYTEN_WITH_NUMPY_BACKEND
 #include <lasyten/block_backend/numpy.h>
 #endif
@@ -139,16 +140,32 @@ bind_fusion_tree_backend(nb::module_& m)
       nb::arg("levels").none() = nb::none(),
       DOC(lasyten, FusionTreeBackend, partial_trace));
 
-    cls.def("apply_instructions",
-            &FusionTreeBackend::apply_instructions,
-            nb::arg("tensor"),
-            nb::arg("instructions"),
-            nb::arg("codomain_idcs"),
-            nb::arg("domain_idcs"),
-            nb::arg("new_codomain"),
-            nb::arg("new_domain"),
-            nb::arg("mixes_codomain_domain"),
-            DOC(lasyten, FusionTreeBackend, apply_instructions));
+    cls.def(
+      "apply_instructions",
+      [](FusionTreeBackend& self,
+         SymmetricTensorCPtr tensor,
+         py::object instructions,
+         std::vector<int64> codomain_idcs,
+         std::vector<int64> domain_idcs,
+         TensorProduct::Ptr new_codomain,
+         TensorProduct::Ptr new_domain,
+         bool mixes_codomain_domain) {
+          return self.apply_instructions(tensor,
+                                         instructions_from_python(instructions),
+                                         std::move(codomain_idcs),
+                                         std::move(domain_idcs),
+                                         std::move(new_codomain),
+                                         std::move(new_domain),
+                                         mixes_codomain_domain);
+      },
+      nb::arg("tensor"),
+      nb::arg("instructions"),
+      nb::arg("codomain_idcs"),
+      nb::arg("domain_idcs"),
+      nb::arg("new_codomain"),
+      nb::arg("new_domain"),
+      nb::arg("mixes_codomain_domain"),
+      DOC(lasyten, FusionTreeBackend, apply_instructions));
 }
 
 } // namespace lasyten

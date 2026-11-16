@@ -1,6 +1,7 @@
 #pragma once
 
 #include <lasyten/backends/block_inds.h>
+#include <lasyten/backends/fusion_tree_instructions.h>
 #include <lasyten/backends/tensor_backend.h>
 #include <lasyten/symmetries/spaces.h>
 #include <lasyten/symmetries/trees.h>
@@ -453,7 +454,7 @@ class FusionTreeBackend : public TensorBackend
 
     /// Apply a sequence of braid/bend/twist instructions (used by `permute_legs`).
     DataPtr apply_instructions(TensorCPtr tensor,
-                               py::object instructions,
+                               std::vector<Instruction> const& instructions,
                                std::vector<int64> codomain_idcs,
                                std::vector<int64> domain_idcs,
                                TensorProduct::Ptr new_codomain,
@@ -473,8 +474,8 @@ class FusionTreeBackend : public TensorBackend
       TensorProduct::Ptr codomain,
       TensorProduct::Ptr domain,
       Sector coupled,
-      py::object a_sectors,
-      py::object b_sectors,
+      SectorArray const& a_sectors,
+      SectorArray const& b_sectors,
       std::vector<int64> a_dims,
       std::vector<int64> b_dims,
       int64 tree_block_width,
@@ -494,8 +495,8 @@ class FusionTreeBackend : public TensorBackend
                                                        TensorProduct::Ptr domain,
                                                        Sector coupled,
                                                        float64 dim_c,
-                                                       py::object a_sectors,
-                                                       py::object b_sectors,
+                                                       SectorArray const& a_sectors,
+                                                       SectorArray const& b_sectors,
                                                        std::vector<int64> a_dims,
                                                        std::vector<int64> b_dims,
                                                        int64 tree_block_width,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <lasyten/backends/fusion_tree_backend.h>
+#include <lasyten/backends/fusion_tree_instructions.h>
 #include <lasyten/symmetries/exceptions.h>
 #include <lasyten/symmetries/spaces.h>
 #include <lasyten/symmetries/trees.h>
@@ -14,112 +15,10 @@
 
 namespace lasyten {
 
-/// Instruction to braid two neighboring legs.
-///
-/// Notes:
-///
-/// Examples for over-braids::
-///
-///     |    │    ╲ ╱    │                      │   │   │   │
-///     |    │     ╱     │                     ┏┷━━━┷━━━┷━━━┷┓
-///     |    │    ╱ ╲    │                     ┃             ┃
-///     |   ┏┷━━━┷━━━┷━━━┷┓                    ┗━━┯━━━┯━━━┯━━┛
-///     |   ┃             ┃         OR             ╲ ╱    │
-///     |   ┗━━┯━━━┯━━━┯━━┛                         ╱     │
-///     |      │   │   │                           ╱ ╲    │
-///
-/// Examples for under-braids::
-///
-///     |    │    ╲ ╱    │                      │   │   │   │
-///     |    │     ╲     │                     ┏┷━━━┷━━━┷━━━┷┓
-///     |    │    ╱ ╲    │                     ┃             ┃
-///     |   ┏┷━━━┷━━━┷━━━┷┓                    ┗━━┯━━━┯━━━┯━━┛
-///     |   ┃             ┃         OR             ╲ ╱    │
-///     |   ┗━━┯━━━┯━━━┯━━┛                         ╲     │
-///     |      │   │   │                           ╱ ╲    │
-struct BraidInstruction
-{
-    /// If the braid is in the codomain, otherwise in the domain.
-    bool codomain = false;
-    /// Which leg of the (co-)domain braids.
-    /// We braid ``(co)domain[idx]`` with ``(co)domain[idx + 1]``.
-    int64 idx = 0;
-    /// Chirality of the braid. An overbraid is a braid where the leg that goes
-    /// from bottom left to top right is on top, see notes below.
-    bool overbraid = false;
-
-    bool operator==(BraidInstruction const&) const = default;
-};
-
-/// Instruction to bend the rightmost leg of the codomain down (of the domain up).
-struct BendInstruction
-{
-    bool bend_down = false;
-
-    bool operator==(BendInstruction const&) const = default;
-};
-
-/// Instruction to apply a twist on one or more contiguous legs.
-///
-/// Notes:
-///
-/// Let us first illustrate how the chirality is given by `overtwist`.
-/// For simplicity, we always show ``idcs=[-1]``.
-/// Example for over-twists::
-///
-///     |    │   │   │   │   ╭─╮             │   │   │   │
-///     |    │   │   │    ╲ ╱  │            ┏┷━━━┷━━━┷━━━┷┓
-///     |    │   │   │     ╱   │            ┃             ┃
-///     |    │   │   │    ╱ ╲  │            ┗━━┯━━━┯━━━┯━━┛╭─╮
-///     |   ┏┷━━━┷━━━┷━━━┷┓  ╰─╯               │   │    ╲ ╱  │
-///     |   ┃             ┃         OR         │   │     ╱   │
-///     |   ┗━━┯━━━┯━━━┯━━┛                    │   │    ╱ ╲  │
-///     |      │   │   │                       │   │   │   ╰─╯
-///
-/// Examples for under-twists::
-///
-///     |    │   │   │   │   ╭─╮             │   │   │   │
-///     |    │   │   │    ╲ ╱  │            ┏┷━━━┷━━━┷━━━┷┓
-///     |    │   │   │     ╲   │            ┃             ┃
-///     |    │   │   │    ╱ ╲  │            ┗━━┯━━━┯━━━┯━━┛╭─╮
-///     |   ┏┷━━━┷━━━┷━━━┷┓  ╰─╯               │   │    ╲ ╱  │
-///     |   ┃             ┃         OR         │   │     ╲   │
-///     |   ┗━━┯━━━┯━━━┯━━┛                    │   │    ╱ ╲  │
-///     |      │   │   │                       │   │   │   ╰─╯
-///
-/// For multiple legs (``len(idcs) > 1``), we twist them together, e.g.::
-///
-///     |
-///     |    │   │   │   │   ╭──────╮
-///     |    │   │    ╲   ╲ ╱       │
-///     |    │   │     ╲   ╱   ╭─╮  │
-///     |    │   │      ╲ ╱ ╲ ╱  │  │
-///     |    │   │       ╱   ╱   │  │
-///     |    │   │      ╱ ╲ ╱ ╲  │  │
-///     |    │   │     ╱   ╱   ╰─╯  │
-///     |    │   │    ╱   ╱ ╲       │
-///     |   ┏┷━━━┷━━━┷━━━┷┓  ╰──────╯
-///     |   ┃             ┃
-///     |   ┗━━┯━━━┯━━━┯━━┛
-///     |      │   │   │
-struct TwistInstruction
-{
-    /// If the twist is in the codomain, otherwise in the domain.
-    bool codomain = false;
-    /// Which legs of the (co-)domain are twisted; we twist ``(co)domain[idcs]``.
-    /// Must be contiguous.
-    std::vector<int64> idcs;
-    /// Chirality of the twist.
-    // An overtwist (undertwist) has an overbraid (underbraid) at the center, and a cup and cap.
-    bool overtwist = false;
-
-    bool operator==(TwistInstruction const&) const = default;
-};
-
-using Instruction = std::variant<BraidInstruction, BendInstruction, TwistInstruction>;
-
+#if LASYTEN_HAS_PYTHON
 /// Parse a Python list of bound instruction objects into C++ ``Instruction`` values.
 [[nodiscard]] std::vector<Instruction> instructions_from_python(py::object instructions);
+#endif
 
 /// Convert linear combinations from fusion-tree operations to sparse mapping rows.
 [[nodiscard]] SparseMappingFusionTree::Inner to_inner(FusionTreeLinearCombination const& lc);
@@ -211,13 +110,13 @@ class TreePairMapping : public TensorMapping
     [[nodiscard]] static std::unique_ptr<TreePairMapping> from_identity(
       TensorProduct::Ptr codomain,
       TensorProduct::Ptr domain,
-      py::object block_inds = py::none());
+      std::optional<BlockInds> block_inds = std::nullopt);
 
     [[nodiscard]] static std::unique_ptr<TreePairMapping> from_instructions(
       std::vector<Instruction> const& instructions,
       TensorProduct::Ptr codomain,
       TensorProduct::Ptr domain,
-      py::object block_inds = py::none());
+      std::optional<BlockInds> block_inds = std::nullopt);
 
     [[nodiscard]] std::unique_ptr<TensorMapping> pre_compose_bend_instruction(
       BendInstruction const& instruction,
@@ -285,13 +184,13 @@ class FactorizedTreeMapping : public TensorMapping
     [[nodiscard]] static std::unique_ptr<FactorizedTreeMapping> from_identity(
       TensorProduct::Ptr codomain,
       TensorProduct::Ptr domain,
-      py::object block_inds = py::none());
+      std::optional<BlockInds> block_inds = std::nullopt);
 
     [[nodiscard]] static std::unique_ptr<FactorizedTreeMapping> from_instructions(
       std::vector<Instruction> const& instructions,
       TensorProduct::Ptr codomain,
       TensorProduct::Ptr domain,
-      py::object block_inds = py::none());
+      std::optional<BlockInds> block_inds = std::nullopt);
 
     [[nodiscard]] std::unique_ptr<TensorMapping> pre_compose_bend_instruction(
       BendInstruction const& instruction,

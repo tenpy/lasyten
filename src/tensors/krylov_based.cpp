@@ -15,6 +15,7 @@
 #include <numeric>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -38,27 +39,49 @@ krylov_log_debug(std::string const& msg)
     (void)msg;
 }
 
-py::dict
-parse_options(py::object options)
-{
-    if (options.is_none()) {
-        return py::dict();
-    }
-    if (py::isinstance<py::dict>(options)) {
-        return py::to_dict(options);
-    }
-    return py::to_dict(py::module_::import("builtins").attr("dict")(options));
-}
-
 template<typename T>
 T
-dict_get(py::dict const& d, char const* key, T const& def)
+opt_get(KrylovOptions const& d, char const* key, T const& def)
 {
-    if (d.contains(key) && !d[key].is_none()) {
-        return py::cast<T>(d[key]);
+    auto it = d.find(key);
+    if (it == d.end()) {
+        return def;
     }
-    return def;
+    if (auto const* p = std::get_if<T>(&it->second)) {
+        return *p;
+    }
+    // Allow int64 options to widen into float64 defaults when callers pass ints.
+    if constexpr (std::is_same_v<T, float64>) {
+        if (auto const* i = std::get_if<int64>(&it->second)) {
+            return static_cast<float64>(*i);
+        }
+    }
+    throw std::invalid_argument(std::format("krylov option '{}' has unexpected type", key));
 }
+
+std::optional<float64>
+opt_get_optional_float(KrylovOptions const& d, char const* key)
+{
+    auto it = d.find(key);
+    if (it == d.end()) {
+        return std::nullopt;
+    }
+    if (auto const* f = std::get_if<float64>(&it->second)) {
+        return *f;
+    }
+    if (auto const* i = std::get_if<int64>(&it->second)) {
+        return static_cast<float64>(*i);
+    }
+    throw std::invalid_argument(std::format("krylov option '{}' must be a float", key));
+}
+
+#if LASYTEN_HAS_PYTHON
+KrylovOptions
+parse_options(py::object options)
+{
+    return krylov_options_from_py(std::move(options));
+}
+#endif // LASYTEN_HAS_PYTHON
 
 float64
 abs_number(BlockBackend::Scalar const& s)
@@ -112,6 +135,7 @@ idx2(int64 i, int64 j, int64 cols)
     return static_cast<std::size_t>(i * cols + j);
 }
 
+#if LASYTEN_HAS_PYTHON
 py::array
 vector_to_numpy_2d(std::vector<complex128> const& data, int64 rows, int64 cols, Dtype dt)
 {
@@ -134,6 +158,7 @@ vector_to_numpy_2d(std::vector<complex128> const& data, int64 rows, int64 cols, 
     }
     return arr;
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::vector<complex128>
 extract_submatrix(std::vector<complex128> const& data, int64 stride, int64 n, bool as_real)
@@ -550,6 +575,50 @@ argsort_which(std::vector<complex128> const& values, std::string const& which)
 
 } // namespace
 
+#if LASYTEN_HAS_PYTHON
+KrylovOptions
+krylov_options_from_py(py::object options)
+{
+    KrylovOptions out;
+    if (options.is_none()) {
+        return out;
+    }
+    py::dict d = py::isinstance<py::dict>(options)
+                   ? py::to_dict(options)
+                   : py::to_dict(py::module_::import("builtins").attr("dict")(options));
+    for (auto item : d) {
+        std::string key = py::cast<std::string>(py::str(item.first));
+        py::handle val = item.second;
+        if (val.is_none()) {
+            continue;
+        }
+        if (py::isinstance<py::bool_>(val)) {
+            out.emplace(std::move(key), py::cast<bool>(val));
+        } else if (py::isinstance<py::int_>(val)) {
+            out.emplace(std::move(key), py::cast<int64>(val));
+        } else if (py::isinstance<py::float_>(val)) {
+            out.emplace(std::move(key), py::cast<float64>(val));
+        } else if (py::isinstance<py::str>(val)) {
+            out.emplace(std::move(key), py::cast<std::string>(val));
+        } else {
+            throw std::invalid_argument(
+              std::format("unsupported krylov option type for '{}'", key));
+        }
+    }
+    return out;
+}
+
+py::dict
+krylov_options_to_py(KrylovOptions const& options)
+{
+    py::dict d;
+    for (auto const& [key, val] : options) {
+        std::visit([&](auto const& v) { d[key.c_str()] = py::cast(v); }, val);
+    }
+    return d;
+}
+#endif // LASYTEN_HAS_PYTHON
+
 complex128
 KrylovBased::h_krylov(int64 i, int64 j) const
 {
@@ -574,6 +643,7 @@ KrylovBased::set_Es(int64 i, int64 j, complex128 value)
     Es[idx2(i, j, N_max)] = value;
 }
 
+#if LASYTEN_HAS_PYTHON
 py::array
 KrylovBased::Es_numpy() const
 {
@@ -609,14 +679,16 @@ KrylovBased::result_krylov_numpy() const
     return vector_to_numpy_2d(
       _result_krylov, _result_krylov_rows, _result_krylov_cols, _dtype_h_krylov);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 KrylovBased::KrylovBased(LinearOperator::Ptr H_,
                          VectorLike::Ptr psi0_,
-                         py::object options_,
+                         KrylovOptions options_,
                          Dtype dtype_h_krylov,
                          Dtype dtype_E)
   : H(std::move(H_))
   , psi0(psi0_ ? psi0_->clone() : nullptr)
+  , options(std::move(options_))
   , _dtype_h_krylov(dtype_h_krylov)
   , _dtype_E(dtype_E)
 {
@@ -626,20 +698,17 @@ KrylovBased::KrylovBased(LinearOperator::Ptr H_,
     if (!psi0) {
         throw std::invalid_argument("psi0 must not be null");
     }
-    options = parse_options(std::move(options_));
-    N_min = dict_get<int64>(options, "N_min", int64(2));
-    N_max = dict_get<int64>(options, "N_max", int64(20));
+    N_min = opt_get<int64>(options, "N_min", int64(2));
+    N_max = opt_get<int64>(options, "N_max", int64(20));
     N_cache = N_max;
-    P_tol = dict_get<float64>(options, "P_tol", 1.0e-14);
-    min_gap = dict_get<float64>(options, "min_gap", 1.0e-12);
-    reortho = dict_get<bool>(options, "reortho", false);
-    if (options.contains("E_shift") && !options["E_shift"].is_none()) {
-        E_shift = py::cast<float64>(options["E_shift"]);
-    }
+    P_tol = opt_get<float64>(options, "P_tol", 1.0e-14);
+    min_gap = opt_get<float64>(options, "min_gap", 1.0e-12);
+    reortho = opt_get<bool>(options, "reortho", false);
+    E_shift = opt_get_optional_float(options, "E_shift");
     if (N_min < 2) {
         throw std::invalid_argument("Should perform at least 2 steps.");
     }
-    _cutoff = dict_get<float64>(options, "cutoff", dtype::eps(psi0->vector_dtype()) * 100);
+    _cutoff = opt_get<float64>(options, "cutoff", dtype::eps(psi0->vector_dtype()) * 100);
     if (E_shift.has_value()) {
         if (auto proj = std::dynamic_pointer_cast<ProjectedLinearOperator>(H)) {
             proj->original_operator =
@@ -651,6 +720,21 @@ KrylovBased::KrylovBased(LinearOperator::Ptr H_,
     Es.assign(static_cast<std::size_t>(N_max * N_max), complex128(0.));
     _h_krylov.assign(static_cast<std::size_t>((N_max + 1) * (N_max + 1)), complex128(0.));
 }
+
+#if LASYTEN_HAS_PYTHON
+KrylovBased::KrylovBased(LinearOperator::Ptr H_,
+                         VectorLike::Ptr psi0_,
+                         py::object options_,
+                         Dtype dtype_h_krylov,
+                         Dtype dtype_E)
+  : KrylovBased(std::move(H_),
+                std::move(psi0_),
+                parse_options(std::move(options_)),
+                dtype_h_krylov,
+                dtype_E)
+{
+}
+#endif
 
 void
 KrylovBased::_reset_krylov_state()
@@ -709,8 +793,12 @@ KrylovBased::_rebuild_krylov_for_result_full(VectorLike::Ptr /*psif*/, int64 /*N
     throw NotImplemented("KrylovBased._rebuild_krylov_for_result_full");
 }
 
-GMRES::GMRES(LinearOperator::Ptr A_, VectorLike::Ptr x_, VectorLike::Ptr b_, py::object options_)
-  : A(std::move(A_))
+GMRES::GMRES(LinearOperator::Ptr A_,
+             VectorLike::Ptr x_,
+             VectorLike::Ptr b_,
+             KrylovOptions options_)
+  : options(std::move(options_))
+  , A(std::move(A_))
   , b(b_ ? b_->clone() : nullptr)
   , x(x_ ? x_->clone() : nullptr)
 {
@@ -720,11 +808,10 @@ GMRES::GMRES(LinearOperator::Ptr A_, VectorLike::Ptr x_, VectorLike::Ptr b_, py:
     if (!x || !b) {
         throw std::invalid_argument("x and b must not be null");
     }
-    options = parse_options(std::move(options_));
-    N_min = dict_get<int64>(options, "N_min", int64(5));
-    N_max = dict_get<int64>(options, "N_max", int64(20));
-    restart = dict_get<int64>(options, "restart", int64(10));
-    res = dict_get<float64>(options, "res", 1.0e-8);
+    N_min = opt_get<int64>(options, "N_min", int64(5));
+    N_max = opt_get<int64>(options, "N_max", int64(20));
+    restart = opt_get<int64>(options, "restart", int64(10));
+    res = opt_get<float64>(options, "res", 1.0e-8);
 
     auto r0 = sub_vec(b->clone(), A->matvec(x));
     rs = { r0 };
@@ -740,6 +827,13 @@ GMRES::GMRES(LinearOperator::Ptr A_, VectorLike::Ptr x_, VectorLike::Ptr b_, py:
     _init_hessenberg();
 }
 
+#if LASYTEN_HAS_PYTHON
+GMRES::GMRES(LinearOperator::Ptr A_, VectorLike::Ptr x_, VectorLike::Ptr b_, py::object options_)
+  : GMRES(std::move(A_), std::move(x_), std::move(b_), parse_options(std::move(options_)))
+{
+}
+#endif
+
 void
 GMRES::_init_hessenberg()
 {
@@ -750,11 +844,13 @@ GMRES::_init_hessenberg()
     H.assign(static_cast<std::size_t>((N_max + 1) * N_max), complex128(0.));
 }
 
+#if LASYTEN_HAS_PYTHON
 py::array
 GMRES::H_numpy() const
 {
     return vector_to_numpy_2d(H, N_max + 1, N_max, Dtype::Complex128);
 }
+#endif
 
 std::tuple<VectorLike::Ptr, float64, std::vector<std::vector<float64>>, std::vector<int64>>
 GMRES::run()
@@ -883,13 +979,20 @@ GMRES::reset()
     _init_hessenberg();
 }
 
-Arnoldi::Arnoldi(LinearOperator::Ptr H_, VectorLike::Ptr psi0_, py::object options_)
-  : KrylovBased(std::move(H_), std::move(psi0_), options_)
+Arnoldi::Arnoldi(LinearOperator::Ptr H_, VectorLike::Ptr psi0_, KrylovOptions options_)
+  : KrylovBased(std::move(H_), std::move(psi0_), std::move(options_))
 {
-    E_tol = dict_get<float64>(options, "E_tol", std::numeric_limits<float64>::infinity());
-    which = dict_get<std::string>(options, "which", std::string("LM"));
-    num_ev = dict_get<int64>(options, "num_ev", int64(1));
+    E_tol = opt_get<float64>(options, "E_tol", std::numeric_limits<float64>::infinity());
+    which = opt_get<std::string>(options, "which", std::string("LM"));
+    num_ev = opt_get<int64>(options, "num_ev", int64(1));
 }
+
+#if LASYTEN_HAS_PYTHON
+Arnoldi::Arnoldi(LinearOperator::Ptr H_, VectorLike::Ptr psi0_, py::object options_)
+  : Arnoldi(std::move(H_), std::move(psi0_), parse_options(std::move(options_)))
+{
+}
+#endif
 
 std::tuple<std::vector<complex128>, std::vector<VectorLike::Ptr>, int64>
 Arnoldi::run()
@@ -1046,14 +1149,23 @@ Arnoldi::_converged(int64 k)
 
 ArnoldiEvolution::ArnoldiEvolution(LinearOperator::Ptr H_,
                                    VectorLike::Ptr psi0_,
-                                   py::object options_)
-  : Arnoldi(std::move(H_), psi0_, options_)
+                                   KrylovOptions options_)
+  : Arnoldi(std::move(H_), psi0_, std::move(options_))
 {
     _result_norm = 1.0;
     delta = std::nullopt;
     // Arnoldi._build_krylov does not set _psi0_norm; do it here.
     _psi0_norm = abs_number(norm(VectorLikeCPtr(psi0_)));
 }
+
+#if LASYTEN_HAS_PYTHON
+ArnoldiEvolution::ArnoldiEvolution(LinearOperator::Ptr H_,
+                                   VectorLike::Ptr psi0_,
+                                   py::object options_)
+  : ArnoldiEvolution(std::move(H_), std::move(psi0_), parse_options(std::move(options_)))
+{
+}
+#endif
 
 std::tuple<VectorLike::Ptr, int64>
 ArnoldiEvolution::run(complex128 delta_, std::optional<bool> normalize)
@@ -1152,15 +1264,28 @@ ArnoldiEvolution::_calc_result_full_evolution(int64 N)
 
 LanczosGroundState::LanczosGroundState(LinearOperator::Ptr H_,
                                        VectorLike::Ptr psi0_,
-                                       py::object options_)
-  : KrylovBased(std::move(H_), std::move(psi0_), options_, Dtype::Float64, Dtype::Float64)
+                                       KrylovOptions options_)
+  : KrylovBased(std::move(H_),
+                std::move(psi0_),
+                std::move(options_),
+                Dtype::Float64,
+                Dtype::Float64)
 {
-    E_tol = dict_get<float64>(options, "E_tol", std::numeric_limits<float64>::infinity());
-    N_cache = dict_get<int64>(options, "N_cache", N_max);
+    E_tol = opt_get<float64>(options, "E_tol", std::numeric_limits<float64>::infinity());
+    N_cache = opt_get<int64>(options, "N_cache", N_max);
     if (N_cache < 2) {
         throw std::invalid_argument("Need to cache at least two vectors.");
     }
 }
+
+#if LASYTEN_HAS_PYTHON
+LanczosGroundState::LanczosGroundState(LinearOperator::Ptr H_,
+                                       VectorLike::Ptr psi0_,
+                                       py::object options_)
+  : LanczosGroundState(std::move(H_), std::move(psi0_), parse_options(std::move(options_)))
+{
+}
+#endif
 
 std::tuple<float64, VectorLike::Ptr, int64>
 LanczosGroundState::run()
@@ -1294,12 +1419,21 @@ LanczosGroundState::_calc_result_krylov(int64 k)
 
 LanczosEvolution::LanczosEvolution(LinearOperator::Ptr H_,
                                    VectorLike::Ptr psi0_,
-                                   py::object options_)
+                                   KrylovOptions options_)
   : LanczosGroundState(std::move(H_), std::move(psi0_), std::move(options_))
 {
     _result_norm = 1.0;
     delta = std::nullopt;
 }
+
+#if LASYTEN_HAS_PYTHON
+LanczosEvolution::LanczosEvolution(LinearOperator::Ptr H_,
+                                   VectorLike::Ptr psi0_,
+                                   py::object options_)
+  : LanczosEvolution(std::move(H_), std::move(psi0_), parse_options(std::move(options_)))
+{
+}
+#endif
 
 std::tuple<VectorLike::Ptr, int64>
 LanczosEvolution::run(complex128 delta_, std::optional<bool> normalize)
@@ -1374,9 +1508,17 @@ LanczosEvolution::_converged(int64 k)
 }
 
 std::tuple<float64, VectorLike::Ptr, int64>
-lanczos(LinearOperator::Ptr H, VectorLike::Ptr psi, py::object options)
+lanczos(LinearOperator::Ptr H, VectorLike::Ptr psi, KrylovOptions options)
 {
     return LanczosGroundState(std::move(H), std::move(psi), std::move(options)).run();
 }
+
+#if LASYTEN_HAS_PYTHON
+std::tuple<float64, VectorLike::Ptr, int64>
+lanczos(LinearOperator::Ptr H, VectorLike::Ptr psi, py::object options)
+{
+    return lanczos(std::move(H), std::move(psi), parse_options(std::move(options)));
+}
+#endif
 
 } // namespace lasyten

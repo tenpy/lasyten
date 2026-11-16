@@ -75,14 +75,14 @@ set(LASYTEN_PYTHON_FREE_SOURCES
   tensors/constructors.cpp
   tensors/decompositions.cpp
   backends/backend_factory.cpp
+  tensors/krylov_based.cpp
+  backends/fusion_tree_mapping.cpp
+  backends/abelian.cpp
+  backends/fusion_tree_backend.cpp
 )
 
 set(LASYTEN_PYTHON_API_SOURCES
   backends/block_inds_numpy.cpp
-  backends/abelian.cpp
-  backends/fusion_tree_backend.cpp
-  backends/fusion_tree_mapping.cpp
-  tensors/krylov_based.cpp
 )
 
 target_sources(lasyten PRIVATE ${LASYTEN_PYTHON_FREE_SOURCES})

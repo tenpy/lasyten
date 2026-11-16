@@ -230,6 +230,53 @@ test_tensor_no_python(int /*argc*/, char** /*argv*/)
         TENSOR_TEST_CHECK(dense_close(bb, rec2->to_dense_block(), a_dense));
     }
 
+    // ---------------- eigh / eigvalsh / entropy ----------------
+    {
+        // Hermitian square operator on V0: H = M + M^T with dense entries.
+        auto cod_H = std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ V0 });
+        auto dom_H = std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ V0 });
+        std::vector<double> m_vals = pseudo_random(d0 * d0, 2.5);
+        std::vector<double> h_vals(d0 * d0, 0.);
+        for (int64 i = 0; i < d0; ++i) {
+            for (int64 j = 0; j < d0; ++j) {
+                h_vals[i * d0 + j] = m_vals[i * d0 + j] + m_vals[j * d0 + i];
+            }
+        }
+        BlockPtr h_dense = make_f64({ d0, d0 }, h_vals);
+        auto H = SymmetricTensor::from_dense_block(
+          h_dense, cod_H, dom_H, backend, LegLabelList{ "p", "p*" });
+        H->test_sanity();
+
+        auto [W, V] = eigh(H, LegLabelList{ "e" });
+        W->test_sanity();
+        V->test_sanity();
+        TENSOR_TEST_CHECK(W->leg()->dim == d0);
+        TENSOR_TEST_CHECK(V->labels.as_list().back() == "e");
+
+        // Reconstruct H ≈ V W V†
+        auto Vh = dagger(V);
+        auto rec = as_tensor(compose(as_tensor(compose(V, W)), Vh));
+        TENSOR_TEST_CHECK(dense_close(bb, rec->to_dense_block(), h_dense, 1e-8));
+
+        auto Wh = eigvalsh(H, LegLabelList{ "e" });
+        Wh->test_sanity();
+        TENSOR_TEST_CHECK(dense_close(bb, Wh->to_dense_block(), W->to_dense_block(), 1e-8));
+
+        // Von Neumann entropy on a normalized probability DiagonalTensor.
+        std::vector<double> probs = { 0.5, 0.3, 0.2 };
+        BlockPtr p_blk = make_f64({ d0 }, probs);
+        auto P = DiagonalTensor::from_diag_block(
+          p_blk, V0.as_space(), backend, LegLabelList{ "e", "e*" });
+        P->test_sanity();
+        float64 S1 = entropy(P, 1.0).as_float64();
+        TENSOR_TEST_CHECK(S1 > 0.);
+        float64 expect = 0.;
+        for (double p : probs) {
+            expect -= p * std::log(p);
+        }
+        TENSOR_TEST_CHECK(std::abs(S1 - expect) < 1e-10);
+    }
+
     std::cout << "NoSymmetry tensor stack on Eigen OK ("
               << A->backend->block_backend->get_backend_name() << ")\n";
     return 0;
