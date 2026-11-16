@@ -23,7 +23,7 @@ TeNPy downstream: [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md).
 | Phase 4 cleanup (gating, `nb::ndarray` boundary, `py::` inventory) | Done for first port (Numpy gate + Eigen `to_ndarray` / `block_from_ndarray`; default `"cpu"` → Eigen **deferred**, leftover #5) |
 | pybind11 removed from liblasyten | Done: `include/` / `src/` use nanobind only, through the thin `lasyten::py` layer (`detail/python_api.h`, `detail/py_array.h`); no `find_package(pybind11)` |
 | Stable ABI (abi3) | Done: `LASYTEN_STABLE_ABI` (default ON, Python >= 3.12), `_core.abi3.so`, `wheel.py-api = "cp312"`; CI in `.github/workflows/wheels.yml` (ubuntu + macOS micromamba abi3 wheels + `scripts/check_abi3_wheel.py`; optional Linux `cibuildwheel`) |
-| `LASYTEN_WITH_PYTHON=OFF` Python-free | Partial: Eigen + Space/Leg/Tensors, `NoSymmetryBackend`, **`AbelianBackend`**, **`FusionTreeBackend`** (core paths green; OFF stub inventory in [convert_FusionTreeBackend.md](convert_FusionTreeBackend.md) / leftover #1), `fusion_tree_mapping`, krylov, and native `svd`/`qr`/`lq`/`eigh`/`eig*`/`entropy` (incl. Charged/HiddenLeg factors) build without libpython (`ctest -R no_python`); models and Numpy/ArrayApi/Torch still Python-gated |
+| `LASYTEN_WITH_PYTHON=OFF` Python-free | Eigen + Space/Leg/Tensors, `NoSymmetryBackend`, **`AbelianBackend`**, **`FusionTreeBackend`** (heavy tree/mask paths native OFF; only always-stubs + `basis_perm`/`LegPipe` conditionals remain — [convert_FusionTreeBackend.md](convert_FusionTreeBackend.md)), `fusion_tree_mapping`, krylov, and native `svd`/`qr`/`lq`/`eigh`/`eig*`/`entropy` (incl. Charged/HiddenLeg factors) build without libpython (`ctest -R no_python`); models and Numpy/ArrayApi/Torch still Python-gated |
 
 ## Motivations
 
