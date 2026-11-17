@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate that a lasyten wheel is tagged cp312-abi3 and ships ``_core.abi3.so``.
 
-Used by ``.github/workflows/wheels.yml`` (issue #326 item 4 / leftover #2).
+Used by ``.github/workflows/publish.yml`` (issue #326 item 4 / leftover #2).
 """
 
 from __future__ import annotations

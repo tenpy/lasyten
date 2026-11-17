@@ -22,7 +22,7 @@ TeNPy downstream: [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md).
 | Full pybind → nanobind `_core` | Done (LO trampolines only; DummyTensor tests skipped) |
 | Phase 4 cleanup (gating, `nb::ndarray` boundary, `py::` inventory) | Done for first port (Numpy gate + Eigen `to_ndarray` / `block_from_ndarray`; default `"cpu"` → Eigen **deferred**, leftover #5) |
 | pybind11 removed from liblasyten | Done: `include/` / `src/` use nanobind only, through the thin `lasyten::py` layer (`detail/python_api.h`, `detail/py_array.h`); no `find_package(pybind11)` |
-| Stable ABI (abi3) | Done: `LASYTEN_STABLE_ABI` (default ON, Python >= 3.12), `_core.abi3.so`, `wheel.py-api = "cp312"`; CI in `.github/workflows/wheels.yml` (ubuntu + macOS micromamba abi3 wheels + `scripts/check_abi3_wheel.py`; optional Linux `cibuildwheel`) |
+| Stable ABI (abi3) | Done: `LASYTEN_STABLE_ABI` (default ON, Python >= 3.12), `_core.abi3.so`, `wheel.py-api = "cp312"`; CI in `.github/workflows/publish.yml` (ubuntu + macOS micromamba abi3 wheels + `scripts/check_abi3_wheel.py`; cibuildwheel linux/macOS) |
 | `LASYTEN_WITH_PYTHON=OFF` Python-free | Eigen + Space/Leg/Tensors, `NoSymmetryBackend`, **`AbelianBackend`**, **`FusionTreeBackend`** (heavy tree/mask paths native OFF; only always-stubs + `basis_perm`/`LegPipe` conditionals remain — [convert_FusionTreeBackend.md](convert_FusionTreeBackend.md)), `fusion_tree_mapping`, krylov, and native `svd`/`qr`/`lq`/`eigh`/`eig*`/`entropy` (incl. Charged/HiddenLeg factors) build without libpython (`ctest -R no_python`); models and Numpy/ArrayApi/Torch still Python-gated |
 
 ## Motivations
@@ -312,7 +312,7 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
    `BlockInds`). Models / `su2.cpp` and Numpy / ArrayApi / Torch stay in separate Python-gated
    `target_sources` (not shrunk further while models keep `py::array` storage).
 2. **Stable ABI / abi3 wheels** — **done** (`LASYTEN_STABLE_ABI`, `_core.abi3.so`, `wheel.py-api = "cp312"`).
-   CI (issue #326 item 4): `.github/workflows/wheels.yml` builds Release `cp312-abi3` wheels on
+   CI (issue #326 item 4): `.github/workflows/publish.yml` builds Release `cp312-abi3` wheels on
    **ubuntu-latest** and **macos-latest** via micromamba (`python -m build --no-isolation`),
    checks the tag / `_core.abi3.*` with `scripts/check_abi3_wheel.py`, and smoke-imports.
    `[tool.cibuildwheel]` in `pyproject.toml` drives an optional Linux `cibuildwheel` job

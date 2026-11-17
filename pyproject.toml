@@ -133,7 +133,7 @@ testpaths = ["tests"]
 
 # cibuildwheel (issue #326 item 4 / leftover #2): produce cp312-abi3 wheels.
 # Build with CPython >= 3.14 (requires-python); scikit-build-core tags abi3 via wheel.py-api.
-# Wheel CI (``.github/workflows/wheels.yml``) runs on release + workflow_dispatch only
+# Wheel CI (``.github/workflows/publish.yml``) runs on release + workflow_dispatch only
 # (micromamba abi3 hosts + cibuildwheel linux/macOS), not on every PR.
 # Do not vendor libtorch into the wheel: ``torch`` is a runtime dependency and
 # ``_core`` already has RPATH ``$ORIGIN/../torch/lib``. repair commands exclude
@@ -153,7 +153,7 @@ test-skip = "*"
 before-all = [
   "yum install -y eigen3-devel lapack-devel openblas-devel hdf5-devel doxygen || dnf install -y eigen3-devel lapack-devel openblas-devel hdf5-devel doxygen",
 ]
-# Eigen3_DIR is set via CIBW_ENVIRONMENT in .github/workflows/wheels.yml (FindEigen3 NO_MODULE).
+# Eigen3_DIR is set via CIBW_ENVIRONMENT in .github/workflows/publish.yml (FindEigen3 NO_MODULE).
 before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm cmake ninja"
 # Exclude Torch sonames: they come from the ``torch`` PyPI/conda package at runtime.
 # Bundling them fails (libs not on the linker path) and would bloat the wheel anyway.

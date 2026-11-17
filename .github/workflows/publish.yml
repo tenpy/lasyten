@@ -162,7 +162,7 @@ jobs:
     needs: [abi3-wheel, cibuildwheel-linux, cibuildwheel-macos]
     runs-on: ubuntu-latest
     # Trusted Publishing (OIDC) — configure on https://pypi.org and https://test.pypi.org:
-    #   Owner: tenpy  |  Repo: lasyten  |  Workflow: wheels.yml  |  Environment: (none or match below)
+    #   Owner: tenpy  |  Repo: lasyten  |  Workflow: publish.yml  |  Environment: (none or match below)
     # No PYPI_API_TOKEN / TEST_PYPI_API_TOKEN repository secrets are required with OIDC.
     permissions:
       id-token: write
