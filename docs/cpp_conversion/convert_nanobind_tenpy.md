@@ -39,7 +39,7 @@ must assign `self.dtype = …` only *after* `PlanarLinearOperator.__init__` /
 | Area | Current tenpy usage | Expected lasyten change | Downstream action |
 | --- | --- | --- | --- |
 | Default CPU backend | Implicit numpy / `block_backend` | Eigen as `"eigen"` only for now; **`"cpu"` stays Numpy** (switch deferred — leftover #5; Eigen pytest ~6× slower on tiny-block paths) | No action until lasyten flips the default; optional smoke with `block_backend="eigen"` |
-| `to_numpy()` / `block_from_numpy` | Widespread (mps, mpo, algorithms) | Tensor/`Mask`/`to_numpy` export read-only `nb::ndarray`; `block_from_ndarray` available | TeNPy: keep `block_from_numpy` for MPS imports until Numpy `block_from_ndarray` is stable; treat `to_numpy()` as read-only |
+| `to_numpy()` / `block_from_numpy` | Widespread (mps, mpo, algorithms) | Tensor/`Mask`/`to_numpy` export read-only `nb::ndarray`; `block_from_ndarray` available | TeNPy MPS imports use `block_from_ndarray` (Numpy path owns a copy); treat `to_numpy()` as read-only |
 | `Dtype.to_numpy_dtype()` | e.g. MPS init | Keep or re-export; binding style may change | Re-run type-sensitive paths after bump |
 | Import paths | `from lasyten.tensors.planar import PlanarLinearOperator` | Still exported from nanobind `_core` | Bump + full test; fix only if export layout changes |
 | `Scalar(...).to_numpy()` | norms, traces, residuals | Same idea; Eigen scalar blocks underneath | Compare float tolerances if Eigen vs SciPy SVD/eigh differ |
@@ -71,8 +71,8 @@ tenpy/networks/mpo.py
 
 ### Array bridge hotspots (review if/when Eigen becomes default `"cpu"`)
 
-- `tenpy/networks/mps.py` — `block_from_numpy` (keep until Numpy `block_from_ndarray` is
-  stable in MPS paths), `to_numpy` for dtype conversion, `permute_axes`, `reshape`
+- `tenpy/networks/mps.py` — `block_from_ndarray` for MPS array imports; `to_numpy` for
+  dtype conversion, `permute_axes`, `reshape`
 - `tenpy/networks/mpo.py` — `to_numpy` on rearranged tensors / traces (read-only under Eigen)
 - Algorithm residuals / norms calling `.to_numpy()` on scalars (owning 0-d copies; unchanged)
 - `tenpy/algorithms/mps_common.py` — set `dtype` **after** `PlanarLinearOperator.__init__`
@@ -81,7 +81,7 @@ tenpy/networks/mpo.py
 
 - [x] DMRG one-site / two-site (`EffectiveH.matvec` → Lanczos; dtype-after-init fix)
 - [ ] MPS transfer-matrix / `Arnoldi` (`TransferMatrix.matvec`)
-- [ ] `block_from_ndarray` for MPS imports (deferred: Numpy-backend segfault in some paths)
+- [x] `block_from_ndarray` for MPS imports (Numpy import owns a copy; GC-safe)
 - [ ] Abelian + no-symmetry small models
 - [ ] Optional Torch device path unchanged
 - [ ] Compare a few SVD/truncation energies vs pre-Eigen baseline (tolerances)

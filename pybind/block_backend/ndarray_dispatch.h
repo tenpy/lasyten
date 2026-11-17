@@ -3,7 +3,9 @@
 /// Dispatch ``nb::ndarray`` import/export across ``BlockBackend`` implementations.
 ///
 /// - Eigen: zero-copy export / copying import via ``eigen_ndarray.h``.
-/// - Numpy: zero-copy export of the stored ``py::array``; import builds a Numpy block.
+/// - Numpy: zero-copy export of the stored ``py::array``; import **copies** into an owned
+///   ``numpy.ndarray`` (``nb::cast`` of an ``nb::ndarray`` may alias a buffer that does not
+///   keep the source alive — wrapping that view in a Block use-after-frees after GC).
 /// - Torch: zero-copy ``nb::ndarray`` over the tensor buffer (CPU or CUDA); import copies
 ///   into a new contiguous torch tensor on the requested device.
 /// - Other backends: fall back to ``block_from_numpy`` / ``to_numpy``.
@@ -81,18 +83,23 @@ block_from_ndarray(BlockBackend& backend,
     if (dynamic_cast<NumpyBlockBackend*>(&backend) != nullptr) {
         eigen_ndarray::require_cpu_device(arr.device_type(), "NumpyBlockBackend");
         nb::object py_obj = nb::cast(arr);
-        py::array a = py::array::ensure(py_obj);
+        // Owning copy into a real ``numpy.ndarray``. A bare ``py::array::ensure(nb::cast(arr))``
+        // can leave the Block holding a view whose base dies when the caller's array is GC'd
+        // (MPS ``from_Bflat`` / product-state segfault on ``Block::dtype``).
+        // ``nb::arg`` is only for ``.def()`` signatures — use a real kwargs dict.
+        nb::object np = nb::module_::import_("numpy");
+        nb::dict kwargs;
+        kwargs["copy"] = true;
+        nb::object owned = dtype.has_value()
+                             ? np.attr("array")(py_obj, dtype::to_numpy_dtype(*dtype), **kwargs)
+                             : np.attr("array")(py_obj, **kwargs);
+        py::array a = py::array::ensure(owned);
         if (!a) {
             throw nb::type_error("block_from_ndarray: expected array-like");
         }
-        if (dtype.has_value()) {
-            // ``nb::arg`` is only for ``.def()`` signatures — use a real kwargs dict.
-            nb::dict kwargs;
-            kwargs["copy"] = false;
-            a = py::reinterpret_steal<py::array>(
-              a.attr("astype")(dtype::to_numpy_dtype(*dtype), **kwargs).ptr());
-        }
-        return backend.block_from_numpy(a, dtype, std::move(device));
+        // Dtype already applied above; pass nullopt so ``block_from_numpy`` does not
+        // ``asarray`` again and re-alias a non-owning view.
+        return backend.block_from_numpy(a, std::nullopt, std::move(device));
     }
 #endif
 #if defined(LASYTEN_WITH_TORCH_BACKEND) && LASYTEN_WITH_TORCH_BACKEND

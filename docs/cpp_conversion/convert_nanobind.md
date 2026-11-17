@@ -364,9 +364,10 @@ removed — leftover #3); Eigen BlockBackend pytest + no-Python ctest pass. With
     - Models DOF: binding ctors accept CPU `nb::ndarray`; properties export zero-copy read-only
       views; `to_numpy` / `get_*_numpy` / creation factories return owning NumPy copies. C++
       members remain `py::array` (models stay Python-gated).
-    TeNPy follow-up: `~/code/tenpy_v2` sets EffectiveH `dtype` after LO init and treats dense
-    `to_numpy` as read-only; MPS still uses `block_from_numpy` (Numpy `block_from_ndarray`
-    not yet stable there) — see [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md).
+    TeNPy follow-up: `~/code/tenpy_v2` sets EffectiveH `dtype` after LO init, treats dense
+    `to_numpy` as read-only, and uses `block_from_ndarray` for MPS imports (Numpy path
+    owns a copy so the Block outlives the source array) — see
+    [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md).
 11. **TeNPy `MPOTransferMatrix`** — still `NotImplementedError` on the TeNPy side. lasyten
     trampolines for `LinearOperator` (`matvec` / `to_tensor` / `adjoint`, `nb::dynamic_attr`)
     and `PlanarLinearOperator` (same three virtuals; `adjoint` must live on the *derived*

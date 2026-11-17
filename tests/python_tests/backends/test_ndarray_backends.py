@@ -21,11 +21,38 @@ def test_numpy_ndarray_roundtrip(numpy_bb):
     block = numpy_bb.block_from_ndarray(arr)
     out = numpy_bb.to_ndarray(block)
     npt.assert_array_equal(out, arr)
-    # zero-copy: mutating the view mutates the block
+    # Import is an owning copy (source may be GC'd); export is still zero-copy.
+    arr[0, 0] = -1.0
+    npt.assert_array_equal(numpy_bb.to_numpy(block)[0, 0], 0.0)
     out[0, 0] = 99.0
     npt.assert_array_equal(numpy_bb.to_numpy(block), out)
     ro = block.to_ndarray(writable=False)
     assert not ro.flags.writeable
+
+
+def test_numpy_block_from_ndarray_owns_storage_after_gc(numpy_bb):
+    """MPS from_Bflat / product-state regression: Block must outlive the source array.
+
+    ``nb::cast(nb::ndarray)`` + ``py::array::ensure`` used to leave the Block aliasing a
+    buffer that died with the caller's ndarray → segfault on ``Block.dtype`` after GC.
+    """
+    import gc
+
+    from lasyten import Dtype
+
+    blocks = []
+    for i in range(4):
+        # MPS product-state Bflat shape (p, vL, vR)
+        B = np.zeros((2, 1, 1), dtype=float)
+        B[0 if i % 2 == 0 else 1, 0, 0] = 1.0
+        blocks.append(numpy_bb.block_from_ndarray(B, dtype=Dtype.float64, device='cpu'))
+        del B
+    gc.collect()
+    for i, block in enumerate(blocks):
+        assert block.dtype == Dtype.float64
+        assert numpy_bb.get_shape(block) == (2, 1, 1)
+        out = numpy_bb.to_numpy(block)
+        assert out[0 if i % 2 == 0 else 1, 0, 0] == 1.0
 
 
 @pytest.mark.skipif(importlib.util.find_spec('torch') is None, reason='torch not installed')
