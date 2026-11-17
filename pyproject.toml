@@ -133,11 +133,11 @@ testpaths = ["tests"]
 
 # cibuildwheel (issue #326 item 4 / leftover #2): produce cp312-abi3 wheels.
 # Build with CPython >= 3.14 (requires-python); scikit-build-core tags abi3 via wheel.py-api.
-# Torch/HDF5/Eigen make plain manylinux awkward — CI uses micromamba hosts (see
-# .github/workflows/wheels.yml) and optionally cibuildwheel with the settings below.
+# Wheel CI (``.github/workflows/wheels.yml``) runs on release + workflow_dispatch only
+# (micromamba abi3 hosts + cibuildwheel linux/macOS), not on every PR.
 # Do not vendor libtorch into the wheel: ``torch`` is a runtime dependency and
-# ``_core`` already has RPATH ``$ORIGIN/../torch/lib``. auditwheel --exclude keeps
-# those sonames external (see repair-wheel-command on linux).
+# ``_core`` already has RPATH ``$ORIGIN/../torch/lib``. repair commands exclude
+# Torch sonames (auditwheel on linux, delocate on macOS).
 [tool.cibuildwheel]
 build = "cp314-*"
 skip = "pp* *-musllinux_* *i686* *win32*"
@@ -171,11 +171,18 @@ repair-wheel-command = """
 """
 
 [tool.cibuildwheel.macos]
+archs = ["native"]
 before-all = "brew install eigen hdf5 openblas doxygen || true"
 before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm cmake ninja"
-# delocate has no auditwheel-style --exclude; skip repair so Torch is not vendored.
-# Runtime resolution uses INSTALL_RPATH ``$ORIGIN/../torch/lib`` (and ``import torch``).
-repair-wheel-command = ""
+# Vendor brew deps (e.g. HDF5); leave Torch to the runtime ``torch`` package (RPATH
+# ``$ORIGIN/../torch/lib``). ``--ignore-missing-dependencies`` covers Torch libs that
+# delocate cannot copy; ``--exclude`` matches the Linux auditwheel policy.
+repair-wheel-command = """
+  delocate-wheel --ignore-missing-dependencies --require-archs {delocate_archs} \
+    --exclude libtorch --exclude libtorch_cpu --exclude libtorch_python \
+    --exclude libc10 --exclude libomp \
+    -w {dest_dir} -v {wheel}
+"""
 
 
 [tool.ruff]
