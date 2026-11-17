@@ -114,6 +114,17 @@ In addition to the above instructions, do the following:
 - This working setup using Clang did not support all features that the GNU/Ubuntu setup did,
   e.g. ``std::numbers`` was not available. In this particular case, we could simply get rid of that
   dependency, but future updates may again introduce features that are not supported by the Clang/MacOS toolchain.
+- After the switch from pybind11 to nanobind, I got linker errors. This is because CMake auto-selected Apple Accelerate
+as BLA_VENDOR, which does not have the required `LAPACKE_*` symbols. The fix for me was to configure the build
+to use OpenBLAS by running
+```
+cmake -S . -B build \
+  -DBLA_VENDOR=OpenBLAS \
+  -DCMAKE_PREFIX_PATH=/opt/homebrew/anaconda3/envs/tenpy_v2
+```
+where the conda env name is obviously custom to my setup.
+Note that this makes gitignored changes in the local `build` directory, and you will have to redo
+this whenever that directory resets.
 
 Hosting and packaging cutover (manual)
 ++++++++++++++++++++++++++++++++++++++
