@@ -5092,6 +5092,22 @@ def test_flip_bond_duality_involution(make_compatible_tensor):
     _assert_tdot_equal(expect, got)
 
 
+@pytest.mark.parametrize('bond_kind', ['plain', 'pipes', 'direct_sum'])
+def test_flip_bond_duality_is_two_leg_flips(make_compatible_tensor, make_compatible_space, bond_kind):
+    """`flip_bond_duality` is `flip_leg_duality` on both ends: the two `Z` isomorphisms cancel."""
+    if bond_kind == 'direct_sum':
+        summands = [make_compatible_space(max_sectors=2, max_mult=2).with_is_dual(False) for _ in range(3)]
+        V = DirectSumSpace(summands, is_dual=False, summand_labels=['IdL', 'A', 'IdR'])
+        kwargs = {'use_pipes': False, 'max_blocks': 3, 'max_block_size': 3}
+        A = make_compatible_tensor(codomain=[None, None], domain=[None, V], labels=['wL', 'p', 'wR', 'p*'], **kwargs)
+        B = make_compatible_tensor(codomain=[V, None], domain=[None, None], labels=['wL', 'p', 'wR', 'p*'], **kwargs)
+    else:
+        A, B = _flip_bond_duality_pair(make_compatible_tensor, use_pipes=bond_kind == 'pipes')
+    A2, B2 = tensors.flip_bond_duality(A, B, 'wR', 'wL')
+    assert_tensors_almost_equal(A2, tensors.flip_leg_duality(A, 'wR'))
+    assert_tensors_almost_equal(B2, tensors.flip_leg_duality(B, 'wL'))
+
+
 def test_flip_bond_duality_errors(make_compatible_tensor):
     A, B = _flip_bond_duality_pair(make_compatible_tensor)
     with pytest.raises(ValueError, match='contractible'):
@@ -5124,6 +5140,17 @@ def test_flip_bond_duality_same_tensor(make_compatible_tensor, make_compatible_s
     # the bond legs are adjacent, so the planar trace needs no braids and works for all symmetries
     pair = (T.labels.index('wL'), T.labels.index('wR'))
     assert tensors.almost_equal(tensors.planar_partial_trace(T2, pair), tensors.planar_partial_trace(T, pair))
+
+
+@pytest.mark.parametrize('first_flipped_leg, second_flipped_leg', [('wL', 'wR'), ('wR', 'wL')])
+def test_flip_bond_duality_same_tensor_is_two_leg_flips(
+    make_compatible_tensor, make_compatible_space, first_flipped_leg, second_flipped_leg
+):
+    """For a bond with both ends on one tensor, the two single-leg flips commute and give `flip_bond_duality`."""
+    T = _tensor_with_both_ends_of_a_bond(make_compatible_tensor, make_compatible_space)
+    T2, _ = tensors.flip_bond_duality(T, T, 'wL', 'wR')
+    expect = tensors.flip_leg_duality(tensors.flip_leg_duality(T, first_flipped_leg), second_flipped_leg)
+    assert_tensors_almost_equal(T2, expect)
 
 
 def test_flip_bond_duality_same_leg_error(make_compatible_tensor, make_compatible_space):
@@ -5217,6 +5244,60 @@ def test_flip_leg_duality_direct_sum(make_compatible_tensor, make_compatible_spa
     old_mults = {tuple(sec): mult for sec, mult in zip(old.sector_decomposition, old.multiplicities)}
     assert new_mults == old_mults
     assert tensors.inner(T2, T2).as_complex128() == pytest.approx(tensors.inner(T, T).as_complex128())
+
+
+@pytest.mark.parametrize('multiplicity', [1, 3])
+@pytest.mark.parametrize('flip_domain_leg', [False, True])
+def test_flip_leg_duality_trivial_sector(
+    make_compatible_tensor, make_compatible_space, compatible_symmetry, multiplicity, flip_domain_leg
+):
+    """On a leg with only the trivial sector, `Z` is the identity: only ``is_dual`` flips, the data is unchanged."""
+    trivial_leg = ElementarySpace.from_trivial_sector(dim=multiplicity, symmetry=compatible_symmetry, is_dual=False)
+    W = make_compatible_space(max_sectors=2, max_mult=2).with_is_dual(False)
+    # [t, p | p*] or [p | p*, t] (domain labels are listed in reverse order); the W legs guarantee allowed blocks
+    if flip_domain_leg:
+        T = make_compatible_tensor(codomain=[W], domain=[W, trivial_leg], labels=['p', 't', 'p*'], use_pipes=False)
+    else:
+        T = make_compatible_tensor(codomain=[trivial_leg, W], domain=[W], labels=['t', 'p', 'p*'], use_pipes=False)
+    T2 = tensors.flip_leg_duality(T, 't')
+    T2.test_sanity()
+    assert T2.labels == T.labels
+    assert T2.get_leg('t').is_dual != T.get_leg('t').is_dual
+    assert T2.get_leg('t').dim == multiplicity
+    if T.symmetry.can_be_dropped:
+        npt.assert_array_equal(T2.to_numpy(understood_braiding=True), T.to_numpy(understood_braiding=True))
+    else:
+        # anyons: no dense representation, compare the backend data directly. The blocks are labelled by the
+        # same sectors in the same order and contain the same numbers.
+        npt.assert_array_equal(T2.data.block_inds, T.data.block_inds)
+        assert len(T.data.blocks) > 0
+        assert len(T2.data.blocks) == len(T.data.blocks)
+        for block2, block in zip(T2.data.blocks, T.data.blocks):
+            assert T.backend.block_backend.allclose(block2, block)
+
+
+@pytest.mark.parametrize('symmetry_backend', [pytest.param('fusion_tree', marks=pytest.mark.FusionTree)])
+@pytest.mark.parametrize(
+    'flipped_leg, expect_flipped',
+    [('a', [[0.0, 1.0], [-1.0, 0.0]]), ('b', [[0.0, -1.0], [1.0, 0.0]])],
+)
+def test_flip_leg_duality_nontrivial_sector(symmetry_backend, block_backend, flipped_leg, expect_flipped):
+    """Counter-check to the trivial-sector test: on a spin-1/2 leg `Z` is not the identity.
+
+    Dense basis convention (see `test_from_block_su2_symm`): the basis of the spin-1/2 sector is
+    ``[down, up]``. The identity ``[a | b]`` has the dense data ``eye(2)``, and flipping the codomain leg ``a``
+    maps it to ``Z = [[0, 1], [-1, 0]]`` (the Frobenius-Schur indicator -1 of spin-1/2 enters as the sign
+    ``Z_{up,down} = -Z_{down,up}``). Flipping the domain leg ``b`` gives the transpose ``-Z``.
+    """
+    backend = get_backend(symmetry_backend, block_backend)
+    spin_half = ElementarySpace(su2_symmetry, [[1]])
+    T = SymmetricTensor.from_dense_block(
+        np.eye(2), codomain=[spin_half], domain=[spin_half], backend=backend, labels=[['a'], ['b']]
+    )
+    T2 = tensors.flip_leg_duality(T, flipped_leg)
+    T2.test_sanity()
+    assert T2.get_leg(flipped_leg).is_dual != T.get_leg(flipped_leg).is_dual
+    npt.assert_allclose(T2.to_numpy(), np.array(expect_flipped))
 
 
 def test_flip_leg_duality_errors(make_compatible_tensor):
