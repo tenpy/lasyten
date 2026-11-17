@@ -820,6 +820,35 @@ def test_Mask(make_compatible_tensor, compatible_symmetry_backend, np_random):
         npt.assert_array_equal(M_projection_np, M.as_numpy_mask())
     assert (M == M_projection).all()
 
+    print('checking from_sectors')
+    selected_sectors = SectorArray.from_sector(large_leg.defining_sectors[0])
+    empty_sectors = SectorArray.empty(large_leg.defining_sectors.sector_ind_len)
+    for selected, keep in [
+        (selected_sectors, True),
+        (selected_sectors, False),
+        (empty_sectors, True),
+        (empty_sectors, False),
+    ]:
+        mask = Mask.from_sectors(large_leg, keep=selected if keep else None, discard=None if keep else selected)
+        reference_diag = DiagonalTensor.from_sector_block_func(
+            lambda shape, coupled: np.full(shape, (coupled in selected) == keep, dtype=bool),
+            leg=large_leg,
+            backend=mask.backend,
+            dtype=Dtype.bool,
+        )
+        reference_mask = Mask.from_DiagonalTensor(reference_diag)
+        mask.test_sanity()
+        assert (mask == reference_mask).all()
+        if symmetry.can_be_dropped:
+            expected_mask = np.array(
+                [(sector in selected) == keep for sector in large_leg.sectors_of_basis], dtype=bool
+            )
+            npt.assert_array_equal(mask.as_numpy_mask(), expected_mask)
+    with pytest.raises(ValueError, match='Exactly one of keep or discard'):
+        Mask.from_sectors(large_leg)
+    with pytest.raises(ValueError, match='Exactly one of keep or discard'):
+        Mask.from_sectors(large_leg, keep=selected_sectors, discard=selected_sectors)
+
     print('checking from_random')
     M = Mask.from_random(large_leg, small_leg=None, backend=backend)
     M.test_sanity()
