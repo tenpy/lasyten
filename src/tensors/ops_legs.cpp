@@ -1846,49 +1846,45 @@ flip_leg_duality(TensorCPtr tensor, LegRef which_leg)
         // pipe, so the data of the tensor is valid for it and only the leg object is replaced.
         auto target = dss->with_opposite_duality();
         auto const flat_leg = res->get_leg(idx);
-        auto flat = flat_leg.is_pipe() ? nullptr : flat_leg.as_elementary_space();
-        if (!target || !flat || target->is_dual != flat->is_dual ||
-            target->sector_decomposition != flat->sector_decomposition ||
-            target->multiplicities != flat->multiplicities) {
-            throw std::logic_error(
-              "flip_leg_duality: the flipped direct sum space does not match the flipped leg.");
-        }
+        [[maybe_unused]] auto flat = flat_leg.is_pipe() ? nullptr : flat_leg.as_elementary_space();
+        assert(target && flat && target->is_dual == flat->is_dual &&
+               target->sector_decomposition == flat->sector_decomposition &&
+               target->multiplicities == flat->multiplicities &&
+               "flip_leg_duality: the flipped direct sum space must match the flipped leg");
         res = replace_legs_space(std::move(res), idx, Leg{ target });
     }
     return res;
 }
 
 std::pair<TensorPtr, TensorPtr>
-flip_arrows(TensorCPtr A, TensorCPtr B, LegRef leg_A, LegRef leg_B)
+flip_bond_duality(TensorCPtr A, TensorCPtr B, LegRef leg_A, LegRef leg_B)
 {
     if (!A || !B) {
-        throw std::invalid_argument("flip_arrows() requires non-null Tensor arguments");
+        throw std::invalid_argument("flip_bond_duality() requires non-null Tensor arguments");
     }
     int64 const idx_A = leg_idx(A, leg_A);
     int64 const idx_B = leg_idx(B, leg_B);
     bool const same_tensor = A.get() == B.get();
     if (same_tensor && idx_A == idx_B) {
-        throw std::invalid_argument(
-          "flip_arrows: if A and B are the same tensor, leg_A and leg_B must be different legs.");
+        throw std::invalid_argument("flip_bond_duality: if A and B are the same tensor, leg_A and "
+                                    "leg_B must be different legs.");
     }
     if (!(A->get_leg(idx_A) == B->get_leg(idx_B).dual())) {
         throw std::invalid_argument(
-          "flip_arrows: leg_A and leg_B are not contractible (must be duals).");
+          "flip_bond_duality: leg_A and leg_B are not contractible (must be duals).");
     }
     if (same_tensor) {
         // Both ends of the bond are legs of one tensor (e.g. the wrap bond of a one-site unit
         // cell). Flip both of them there; the position of the legs does not change.
         auto T = flip_leg_duality(flip_leg_duality(A, LegRef{ idx_A }), LegRef{ idx_B });
-        if (!(T->get_leg(idx_A) == T->get_leg(idx_B).dual())) {
-            throw std::logic_error("flip_arrows: the flipped legs are not contractible.");
-        }
+        assert(T->get_leg(idx_A) == T->get_leg(idx_B).dual() &&
+               "flip_bond_duality: the flipped legs must be contractible");
         return { T, T };
     }
     auto A2 = flip_leg_duality(A, LegRef{ idx_A });
     auto B2 = flip_leg_duality(B, LegRef{ idx_B });
-    if (!(A2->get_leg(idx_A) == B2->get_leg(idx_B).dual())) {
-        throw std::logic_error("flip_arrows: the flipped legs are not contractible.");
-    }
+    assert(A2->get_leg(idx_A) == B2->get_leg(idx_B).dual() &&
+           "flip_bond_duality: the flipped legs must be contractible");
     return { std::move(A2), std::move(B2) };
 }
 

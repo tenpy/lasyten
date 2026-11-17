@@ -29,10 +29,11 @@ namespace lasyten {
 /// conjugated). Note that this does *not* exchange ``wL`` and ``wR``.
 ///
 /// The conjugate tensors are brought back to the standard leg order and labels by planar leg
-/// permutations (no braids, i.e. this works for fermions and anyons), and the virtual legs, which
-/// are dualized by `dagger`, are flipped back with `flip_arrows`, such that the result has the
-/// same duality convention as the input: ``result[i].get_leg('wR').is_dual`` equals
-/// ``factorization[i].get_leg('wR').is_dual``, and likewise for ``'wL'``. The sectors of the
+/// permutations (no braids, i.e. this works for fermions and anyons). The virtual legs, which
+/// are dualized by `dagger`, are flipped back: each interior bond ``(i, i + 1)`` with
+/// `flip_bond_duality` (a gauge transformation of the bond), and, if `flip_boundary_legs` is
+/// true, the outer ``wL`` of the first and the outer ``wR`` of the last tensor with
+/// `flip_leg_duality`. The sectors of the
 /// virtual legs are the conjugated ones, since e.g. the dagger of ``S+`` is ``S-``, and
 /// the ``summand_labels`` of ``DirectSumSpace`` legs are kept. This is crucial for combining the
 /// result with the original chain, e.g. to add an MPO and its hermitian conjugate. The cost is
@@ -40,15 +41,23 @@ namespace lasyten {
 /// does not grow exponentially.
 ///
 /// @param factorization The tensors, one per site.
-/// @param cyclic Whether the rightmost ``wR`` leg is also contracted with the leftmost ``wL``
-///     leg (infinite MPO unit cell). If ``False``, the two outermost virtual legs are open and
-///     are flipped as well, such that all virtual legs have the same duality as in the input.
+/// @param flip_boundary_legs Whether to also flip the two outer virtual legs, i.e. ``wL`` of the
+///     first and ``wR`` of the last tensor (for a single tensor: both of its virtual legs), such
+///     that all virtual legs have the same duality as in the input. In an *infinite* chain, these
+///     two legs are contracted with each other, so with ``true`` the result has the dualities of
+///     the input, which is needed to combine it with the original chain. In a *finite* chain,
+///     they are dummy legs that get contracted with the left / right environments. Flipping is
+///     the right choice if the environments are created later on, or if existing environments
+///     are used without applying `dagger` to them: the single-leg flip makes them compatible
+///     again. If the existing environments are daggered as well, the network
+///     ``<psi|H|psi>`` is consistent with ``false``, which keeps the dualized outer legs as
+///     given by `dagger`.
 /// @returns The tensors of the hermitian conjugate chain, same length and labels as the input.
 ///
-/// @see Coupling::dagger, flip_arrows
+/// @see Coupling::dagger, flip_bond_duality, flip_leg_duality
 [[nodiscard]] std::vector<SymmetricTensorPtr> dagger_factorization(
   std::vector<SymmetricTensorPtr> const& factorization,
-  bool cyclic = false);
+  bool flip_boundary_legs = true);
 
 /// A coupling is an operator on a few `Site` s, factorized as one tensor per site.
 ///

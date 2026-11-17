@@ -30,7 +30,7 @@ bind_models_couplings(py::module_& m)
     m.def("dagger_factorization",
           &dagger_factorization,
           py::arg("factorization"),
-          py::arg("cyclic") = false,
+          py::arg("flip_boundary_legs") = true,
           DOC(lasyten, dagger_factorization));
 
     py::class_<Coupling, py::smart_holder> coupling(m, "Coupling");

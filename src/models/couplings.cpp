@@ -646,7 +646,7 @@ Coupling::to_tensor() const
 }
 
 std::vector<SymmetricTensorPtr>
-dagger_factorization(std::vector<SymmetricTensorPtr> const& factorization, bool cyclic)
+dagger_factorization(std::vector<SymmetricTensorPtr> const& factorization, bool flip_boundary_legs)
 {
     static std::vector<std::string> const expected_labels = { "wL", "p", "wR", "p*" };
     std::size_t const n = factorization.size();
@@ -679,31 +679,25 @@ dagger_factorization(std::vector<SymmetricTensorPtr> const& factorization, bool 
     if (n == 0) {
         return res;
     }
-    // `dagger` dualized all virtual legs. Flip them back, bond by bond with the pair function to
-    // keep the contraction exact.
-    auto flip_bond = [&](std::size_t left, std::size_t right) {
-        if (!(res[left]->get_leg("wR") == res[right]->get_leg("wL").dual())) {
-            throw std::invalid_argument(std::format(
-              "dagger_factorization: the wR leg of tensor {} is not dual to the wL leg of tensor "
-              "{}{}",
-              left,
-              right,
-              right == 0 ? " (wrap bond, only contractible for a cyclic chain, see `cyclic`)"
-                         : ""));
-        }
-        auto [A2, B2] = flip_arrows(
-          res[left], res[right], LegRef{ std::string("wR") }, LegRef{ std::string("wL") });
-        res[left] = as_symmetric(std::move(A2));
-        res[right] = as_symmetric(std::move(B2));
-    };
+    // `dagger` dualized all virtual legs. Flip the interior bonds back with the pair function,
+    // which is a gauge transformation, i.e. keeps the contraction exact.
     for (std::size_t i = 0; i + 1 < n; ++i) {
-        flip_bond(i, i + 1);
+        if (!(res[i]->get_leg("wR") == res[i + 1]->get_leg("wL").dual())) {
+            throw std::invalid_argument(
+              std::format("dagger_factorization: the wR leg of tensor {} is not dual to the wL "
+                          "leg of tensor {}",
+                          i,
+                          i + 1));
+        }
+        auto [A2, B2] = flip_bond_duality(
+          res[i], res[i + 1], LegRef{ std::string("wR") }, LegRef{ std::string("wL") });
+        res[i] = as_symmetric(std::move(A2));
+        res[i + 1] = as_symmetric(std::move(B2));
     }
-    if (cyclic) {
-        // for n == 1, both ends of the wrap bond are legs of the same tensor
-        flip_bond(n - 1, 0);
-    } else {
-        // open boundary legs: nothing to contract with, flip each on its own
+    if (flip_boundary_legs) {
+        // The outer legs are not contracted with another tensor of the chain (they are dummy legs
+        // of a finite chain, or contracted with the other end of an infinite chain, which is
+        // flipped as well). Flip them on their own. For n == 1, these are both legs of tensor 0.
         res.front() = as_symmetric(flip_leg_duality(res.front(), LegRef{ std::string("wL") }));
         res.back() = as_symmetric(flip_leg_duality(res.back(), LegRef{ std::string("wR") }));
     }
@@ -713,7 +707,7 @@ dagger_factorization(std::vector<SymmetricTensorPtr> const& factorization, bool 
 Coupling
 Coupling::dagger(std::optional<std::string> new_name) const
 {
-    return Coupling(sites, dagger_factorization(factorization, false), new_name ? new_name : name);
+    return Coupling(sites, dagger_factorization(factorization), new_name ? new_name : name);
 }
 
 py::array

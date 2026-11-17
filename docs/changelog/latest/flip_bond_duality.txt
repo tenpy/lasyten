@@ -1,0 +1,19 @@
+- New functions :func:`lasyten.tensors.flip_bond_duality` (C++ ``lasyten::flip_bond_duality``) and
+  :func:`lasyten.tensors.flip_leg_duality` (C++ ``lasyten::flip_leg_duality``).
+  ``flip_bond_duality`` flips the duality (``is_dual``) of a bond between two contracted legs of two tensors, as ``Z``
+  on one end and ``Z^{-1}`` on the other. It is a gauge transformation of the bond: the contraction is unchanged
+  (similar to :func:`lasyten.tensors.move_hidden_leg`). ``flip_leg_duality`` flips a single leg and thereby *changes*
+  the tensor; it is only valid if that leg is (implicitly) contracted with its conjugate later on, e.g. the open
+  boundary legs of a finite MPO. Together, they are the missing ingredient for ``dagger`` on a chain of tensors
+  (e.g. an MPO), which dualizes all virtual legs.
+- New function :func:`lasyten.models.couplings.dagger_factorization`: hermitian conjugate of an MPO-like
+  chain of ``[wL, p, wR, p*]`` tensors, linear in the number of tensors. ``Coupling.dagger`` now uses it
+  instead of contracting the full operator, and keeps the virtual leg dualities of the original coupling.
+  The parameter ``flip_boundary_legs`` (default ``True``) controls whether the two outer virtual legs are flipped as well,
+  which is what is needed for both finite and infinite chains unless the environments of a finite chain are daggered, too.
+  Addresses https://github.com/tenpy/lasyten/issues/311.
+  Note that the factorization of ``Coupling.dagger()`` now differs from the previous one (which refactorized the
+  full operator) by a gauge on the virtual legs, e.g. signs on the odd sector of fermion parity. The operator
+  ``Coupling.dagger().to_tensor()`` is unchanged.
+- ``flip_bond_duality`` with both ends of the bond on one tensor (``flip_bond_duality(A, A, leg_a, leg_b)``) flips both
+  legs of that tensor and returns it twice.

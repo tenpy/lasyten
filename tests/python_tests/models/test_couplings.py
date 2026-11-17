@@ -186,8 +186,8 @@ def test_coupling_dagger(codom, make_compatible_space):
             assert Wd.get_leg(lab).dim == W.get_leg(lab).dim
 
 
-def _cyclic_dense(Ws):
-    """Dense operator ``O[p_0, .., p_{n-1}, q_0, .., q_{n-1}]`` of a cyclic chain of ``W`` tensors.
+def _closed_chain_dense(Ws):
+    """Dense operator ``O[p_0, .., p_{n-1}, q_0, .., q_{n-1}]`` of a closed chain of ``W`` tensors.
 
     ``O = sum_a W_0[a_0, p_0, a_1, q_0] W_1[a_1, p_1, a_2, q_1] ... W_{n-1}[a_{n-1}, p_{n-1}, a_0, q_{n-1}]``.
     """
@@ -198,7 +198,7 @@ def _cyclic_dense(Ws):
     return np.einsum(f'{subs}->{p}{q}', *arrs)
 
 
-def _random_cyclic_chain(num_sites, make_compatible_space, same_bond=False):
+def _random_closed_chain(num_sites, make_compatible_space, same_bond=False):
     """Random ``[wL, p | wR, p*]`` tensors, where the last ``wR`` is dual to the first ``wL``.
 
     With ``same_bond=True`` all bonds have the same space. Then codomain ``[v, p]`` and domain ``[p, v]`` have the
@@ -219,34 +219,55 @@ def _random_cyclic_chain(num_sites, make_compatible_space, same_bond=False):
     ]
 
 
+@pytest.mark.parametrize('flip_boundary_legs', [True, False])
 @pytest.mark.parametrize('num_sites', [1, 2, 3])
-def test_dagger_factorization_cyclic(num_sites, make_compatible_space):
-    """``cyclic=True``: the last ``wR`` is contracted with the first ``wL`` (infinite MPO)."""
-    Ws = _random_cyclic_chain(num_sites, make_compatible_space)
-    Ws_d = couplings.dagger_factorization(Ws, cyclic=True)
+def test_dagger_factorization_flip_boundary_legs(num_sites, flip_boundary_legs, make_compatible_space):
+    """The interior bonds always have the dualities of the input; the outer legs only with ``flip_boundary_legs``."""
+    Ws = _random_closed_chain(num_sites, make_compatible_space)
+    Ws_d = couplings.dagger_factorization(Ws, flip_boundary_legs=flip_boundary_legs)
     assert len(Ws_d) == num_sites
     for W, Wd in zip(Ws, Ws_d):
         Wd.test_sanity()
         assert Wd.labels == W.labels
-        for lab in ['wL', 'wR']:
-            assert Wd.get_leg(lab).is_dual == W.get_leg(lab).is_dual
+        assert Wd.get_leg('wL').dim == W.get_leg('wL').dim
+        assert Wd.get_leg('wR').dim == W.get_leg('wR').dim
+    for i in range(1, num_sites):
+        assert Ws_d[i].get_leg('wL').is_dual == Ws[i].get_leg('wL').is_dual
+        assert Ws_d[i - 1].get_leg('wR').is_dual == Ws[i - 1].get_leg('wR').is_dual
+    # the outer legs: wL of the first and wR of the last tensor
+    assert (Ws_d[0].get_leg('wL').is_dual == Ws[0].get_leg('wL').is_dual) == flip_boundary_legs
+    assert (Ws_d[-1].get_leg('wR').is_dual == Ws[-1].get_leg('wR').is_dual) == flip_boundary_legs
+    # the chain is still contractible, including the bond between the two outer legs
     for i in range(num_sites):
         assert Ws_d[i].get_leg('wR') == Ws_d[(i + 1) % num_sites].get_leg('wL').dual
 
 
+def test_dagger_factorization_flip_boundary_legs_default(make_compatible_space):
+    Ws = _random_closed_chain(2, make_compatible_space)
+    default = couplings.dagger_factorization(Ws)
+    flipped = couplings.dagger_factorization(Ws, flip_boundary_legs=True)
+    for Wd, Wf in zip(default, flipped):
+        assert tensors.almost_equal(Wd, Wf)
+
+
+@pytest.mark.parametrize('flip_boundary_legs', [True, False])
 @pytest.mark.parametrize('num_sites', [1, 2, 3])
-def test_dagger_factorization_cyclic_dense(num_sites, make_compatible_space):
-    """The cyclic hermitian conjugate agrees with the conjugate transpose of the dense operator."""
-    Ws = _random_cyclic_chain(num_sites, make_compatible_space, same_bond=True)
+def test_dagger_factorization_dense(num_sites, flip_boundary_legs, make_compatible_space):
+    """On a closed chain, the result agrees with the conjugate transpose of the dense operator.
+
+    This holds with and without ``flip_boundary_legs``, since the flip of the two outer legs of a closed chain
+    is the same as the flip of the bond between them.
+    """
+    Ws = _random_closed_chain(num_sites, make_compatible_space, same_bond=True)
     if not Ws[0].symmetry.can_be_dropped:
         pytest.skip('dense contraction needs a symmetry that can be dropped (not for anyonic symmetries)')
-    Ws_d = couplings.dagger_factorization(Ws, cyclic=True)
+    Ws_d = couplings.dagger_factorization(Ws, flip_boundary_legs=flip_boundary_legs)
     # O^dagger[p, q] = conj(O[q, p])
-    O = _cyclic_dense(Ws)
+    O = _closed_chain_dense(Ws)
     expect = np.transpose(np.conj(O), [*range(num_sites, 2 * num_sites), *range(num_sites)])
     # the comparison must not be trivial: a zero operator equals its own conjugate transpose
     assert not np.allclose(O, expect)
-    npt.assert_allclose(_cyclic_dense(Ws_d), expect, atol=1e-10)
+    npt.assert_allclose(_closed_chain_dense(Ws_d), expect, atol=1e-10)
 
 
 def test_dagger_factorization_errors(make_compatible_space):
@@ -258,13 +279,14 @@ def test_dagger_factorization_errors(make_compatible_space):
     three_legs = tensors.SymmetricTensor.from_random_normal(codomain=legs, domain=legs[:1], labels=['wL', 'p', 'wR'])
     with pytest.raises(ValueError, match='codomain and 2 domain'):
         couplings.dagger_factorization([three_legs])
-    # the wrap bond does not match: the last wR is not dual to the first wL
+    # the bond between the two tensors does not match: the wR leg of the first is not dual to the wL leg of the second
     V, P = legs
-    mismatch = tensors.SymmetricTensor.from_random_normal(
-        codomain=[V, P], domain=[P, V.dual], labels=['wL', 'p', 'wR', 'p*']
+    first = tensors.SymmetricTensor.from_random_normal(codomain=[V, P], domain=[P, V], labels=['wL', 'p', 'wR', 'p*'])
+    second = tensors.SymmetricTensor.from_random_normal(
+        codomain=[V.dual, P], domain=[P, V], labels=['wL', 'p', 'wR', 'p*']
     )
-    with pytest.raises(ValueError, match='wrap bond'):
-        couplings.dagger_factorization([mismatch], cyclic=True)
+    with pytest.raises(ValueError, match='not dual'):
+        couplings.dagger_factorization([first, second])
 
 
 # TEST SPIN COUPLINGS
