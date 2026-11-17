@@ -41,17 +41,15 @@ namespace lasyten {
 /// does not grow exponentially.
 ///
 /// @param factorization The tensors, one per site.
-/// @param flip_boundary_legs Whether to also flip the two outer virtual legs, i.e. ``wL`` of the
-///     first and ``wR`` of the last tensor (for a single tensor: both of its virtual legs), such
-///     that all virtual legs have the same duality as in the input. In an *infinite* chain, these
-///     two legs are contracted with each other, so with ``true`` the result has the dualities of
-///     the input, which is needed to combine it with the original chain. In a *finite* chain,
-///     they are dummy legs that get contracted with the left / right environments. Flipping is
-///     the right choice if the environments are created later on, or if existing environments
-///     are used without applying `dagger` to them: the single-leg flip makes them compatible
-///     again. If the existing environments are daggered as well, the network
-///     ``<psi|H|psi>`` is consistent with ``false``, which keeps the dualized outer legs as
-///     given by `dagger`.
+/// @param flip_boundary_legs Whether to also flip the two outer virtual legs, ``wL`` of the first
+///     and ``wR`` of the last tensor (for a single tensor: both of its virtual legs). For an MPO
+///     this does not change the operator: in an infinite chain the two legs form the wrap bond,
+///     so flipping both is a gauge transformation, and the dummy legs of a finite MPO carry only
+///     the trivial sector, on which ``Z`` is the identity. It only decides their duality: with
+///     ``true``, all virtual legs have the dualities of the input, as needed to add or compare
+///     the result with the original chain or to contract it with environments built for the
+///     input; ``false`` keeps the outer legs as dualized by `dagger`, which matches environments
+///     that are daggered as well.
 /// @returns The tensors of the hermitian conjugate chain, same length and labels as the input.
 ///
 /// @see Coupling::dagger, flip_bond_duality, flip_leg_duality

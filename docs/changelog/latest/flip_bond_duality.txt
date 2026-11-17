@@ -3,8 +3,8 @@
   ``flip_bond_duality`` flips the duality (``is_dual``) of a bond between two contracted legs of two tensors, as ``Z``
   on one end and ``Z^{-1}`` on the other. It is a gauge transformation of the bond: the contraction is unchanged
   (similar to :func:`lasyten.tensors.move_hidden_leg`). ``flip_leg_duality`` flips a single leg and thereby *changes*
-  the tensor; it is only valid if that leg is (implicitly) contracted with its conjugate later on, e.g. the open
-  boundary legs of a finite MPO. Together, they are the missing ingredient for ``dagger`` on a chain of tensors
+  the tensor by ``Z`` (not on legs with only the trivial sector, e.g. the dummy legs of a finite MPO); keeping the
+  network consistent is up to the caller. Together, they are the missing ingredient for ``dagger`` on a chain of tensors
   (e.g. an MPO), which dualizes all virtual legs.
 - New function :func:`lasyten.models.couplings.dagger_factorization`: hermitian conjugate of an MPO-like
   chain of ``[wL, p, wR, p*]`` tensors, linear in the number of tensors. ``Coupling.dagger`` now uses it

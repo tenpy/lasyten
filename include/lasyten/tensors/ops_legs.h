@@ -281,14 +281,11 @@ void check_same_legs(TensorCPtr t1, TensorCPtr t2);
 /// i.e. only the convention how the bond space is written down changes. Each leg stays on its
 /// side, i.e. in the codomain or in the domain of its tensor, and all labels are preserved.
 ///
-/// This is a gauge transformation of the bond: the network that is represented by the two
-/// tensors is unchanged. It is similar in spirit to `move_hidden_leg`, which also only makes
-/// sense when applied to both tensors at once. In contrast, `flip_leg_duality` flips a single leg
-/// and thereby changes the tensor.
-///
-/// On the tensor level, this is the isomorphism @f$ Z_a : a^* \to \bar{a} @f$ (see
-/// `BaseSymmetry::Z_iso`) on one end of the bond and its inverse on the other end. Note that
-/// bending the leg alone cannot achieve this, since a bent leg is listed as the same space.
+/// One end of the bond gets the isomorphism @f$ Z_a : a^* \to \bar{a} @f$ (see
+/// `BaseSymmetry::Z_iso`), the other its inverse. They cancel, so this is a gauge transformation
+/// of the bond, comparable to `move_hidden_leg`; `flip_leg_duality` alone does not cancel and
+/// changes the tensor. Bending the leg cannot achieve this, since a bent leg is listed as the
+/// same space.
 ///
 /// The typical use case is an MPO that was conjugated tensor by tensor: ``dagger`` dualizes all
 /// virtual legs, and this function brings them back to the convention of the original MPO, such
@@ -327,18 +324,13 @@ void check_same_legs(TensorCPtr t1, TensorCPtr t2);
 /// block by block on the sectors ``a`` (see `BaseSymmetry::Z_iso`). The sectors are not changed.
 /// Labels and the position of the leg (codomain / domain) are preserved.
 ///
-/// @warning This *changes the tensor* by that isomorphism. In contrast to `flip_bond_duality`, it
-///     is *not* a gauge transformation: it is the caller's job to keep the network consistent,
-///     e.g. by flipping every tensor that the leg is (implicitly) contracted with. A network that
-///     contains the flipped tensor is only equivalent to the original one if the flipped leg is
-///     (implicitly) contracted with the conjugate of the tensor later on, such that the ``Z``
-///     cancels. This is the case for open boundary legs, e.g. the trivial dummy legs ``wL`` /
-///     ``wR`` of a finite MPO that are contracted with left / right environments (see
-///     `dagger_factorization`). More than two tensors can share such an implicitly contracted
-///     leg, e.g. environments, whose virtual legs must stay compatible with the virtual legs of
-///     the MPS and MPO; then the same leg has to be flipped on all of them.
-///     `flip_bond_duality` is the two-tensor case of this: a gauge transformation of one
-///     explicitly contracted bond, which flips both ends consistently.
+/// @warning This *changes the tensor* by ``Z``, except on a leg with only the trivial sector,
+///     where ``Z`` is the identity and only ``is_dual`` changes (e.g. the dummy legs of a finite
+///     MPO). Keeping a network consistent is up to the caller: every tensor that shares the leg,
+///     explicitly or implicitly (e.g. MPS, MPO and environments on one virtual bond), needs the
+///     same flip. For one explicitly contracted pair, `flip_bond_duality` does this as a gauge
+///     transformation. Contractions with the conjugate tensor, such as the norm, are unchanged,
+///     since ``Z`` is unitary.
 ///
 /// For a leg that is a `LegPipe`, the result is the flattened `ElementarySpace` with opposite
 /// duality. A `DirectSumSpace` leg stays a `DirectSumSpace` with the same summands and
