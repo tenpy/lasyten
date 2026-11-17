@@ -1,13 +1,12 @@
 #include <lasyten/block_backend/block_backend.h>
 #include <lasyten/block_backend/numpy.h>
+#include <lasyten/detail/python_api.h>
 #include <lasyten/tools.h>
 
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <map>
 #include <mutex>
-#include <pybind11/numpy.h>
-#include <pybind11/pytypes.h>
 #include <regex>
 #include <span>
 #include <stdexcept>
@@ -40,7 +39,7 @@ NumpyBlockBackend::Block::Block(py::array arr)
     try {
         dtype::from_numpy_dtype(arr_.dtype());
     } catch (std::invalid_argument& e) {
-        std::string dtype_str = py::str(arr_.dtype()).cast<std::string>();
+        std::string dtype_str = py::cast<std::string>(py::str(arr_.dtype()));
         throw std::invalid_argument("NumpyBlockBackend::Block: invalid numpy dtype: " + dtype_str);
     }
 }
@@ -112,7 +111,7 @@ py::object
 NumpyBlockBackend::Block::_item_key_cast_Blocks_to_numpy(py::object key) const
 {
     if (py::isinstance<NumpyBlockBackend::Block>(key)) {
-        NumpyBlockBackend::Block* block = key.cast<NumpyBlockBackend::Block*>();
+        NumpyBlockBackend::Block* block = py::cast<NumpyBlockBackend::Block*>(key);
         return block->to_numpy();
     } else if (py::isinstance<py::tuple>(key)) {
         // cast any Block objects in the key to numpy arrays and make a new tuple
@@ -120,7 +119,8 @@ NumpyBlockBackend::Block::_item_key_cast_Blocks_to_numpy(py::object key) const
         py::tuple new_tuple = py::tuple(key_tuple.size());
         for (py::ssize_t i = 0; i < key_tuple.size(); ++i) {
             if (py::isinstance<NumpyBlockBackend::Block>(key_tuple[i])) {
-                NumpyBlockBackend::Block* block = key_tuple[i].cast<NumpyBlockBackend::Block*>();
+                NumpyBlockBackend::Block* block =
+                  py::cast<NumpyBlockBackend::Block*>(key_tuple[i]);
                 new_tuple[i] = block->to_numpy();
             } else {
                 new_tuple[i] = key_tuple[i];
@@ -156,21 +156,21 @@ NumpyBlockBackend::Block::set_item(py::object key, py::object value)
 {
     if (auto idcs = BlockBackend::try_py_key_to_block_indices(key)) {
         if (py::isinstance<BlockBackend::Block>(value)) {
-            set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Block&>());
+            set_item(std::span<const BlockIndex>(*idcs), py::cast<BlockBackend::Block&>(value));
             return;
         }
         if (py::isinstance<BlockBackend::Scalar>(value)) {
-            set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Scalar&>());
+            set_item(std::span<const BlockIndex>(*idcs), py::cast<BlockBackend::Scalar&>(value));
             return;
         }
         NumpyBlockBackend::Block tmp(
-          py::module_::import("numpy").attr("asarray")(value).cast<py::array>());
+          py::cast<py::array>(py::module_::import("numpy").attr("asarray")(value)));
         set_item(std::span<const BlockIndex>(*idcs), tmp);
         return;
     }
     py::object key_copy = _item_key_cast_Blocks_to_numpy(key);
     if (py::isinstance<NumpyBlockBackend::Block>(value)) {
-        NumpyBlockBackend::Block* block = value.cast<NumpyBlockBackend::Block*>();
+        NumpyBlockBackend::Block* block = py::cast<NumpyBlockBackend::Block*>(value);
         value = block->to_numpy();
     }
     arr_.attr("__setitem__")(key_copy, value);
@@ -195,13 +195,13 @@ NumpyBlockBackend::Block::set_item(int64 idx, const Scalar& value)
 complex128
 NumpyBlockBackend::Block::_item_as_complex128() const
 {
-    return (arr_.attr("item")()).cast<complex128>();
+    return py::cast<complex128>((arr_.attr("item")()));
 }
 
 int64
 NumpyBlockBackend::Block::_item_as_int64() const
 {
-    return (arr_.attr("item")()).cast<int64>();
+    return py::cast<int64>((arr_.attr("item")()));
 }
 
 BlockPtr
@@ -482,7 +482,7 @@ NumpyBlockBackend::as_block(py::object a,
     (void)as_device(device);
     if (py::isinstance<NumpyBlockBackend::Block>(a)) {
         // just use the block directly, no need to convert to numpy and back
-        BlockPtr block = a.cast<BlockPtr>();
+        BlockPtr block = py::cast<BlockPtr>(a);
         if (dtype_opt) {
             block = block->get_backend()->to_dtype(block, *dtype_opt);
         }
@@ -490,7 +490,7 @@ NumpyBlockBackend::as_block(py::object a,
     }
     if (py::isinstance<BlockBackend::Block>(a)) {
         // Foreign backend Block (e.g. Torch): convert via numpy.
-        BlockPtr block = a.cast<BlockPtr>();
+        BlockPtr block = py::cast<BlockPtr>(a);
         py::array arr = block->to_numpy();
         if (dtype_opt)
             arr = py::array(arr.attr("astype")(dtype::to_numpy_dtype(*dtype_opt)));
@@ -503,7 +503,7 @@ NumpyBlockBackend::as_block(py::object a,
     if (py::isinstance<py::array>(arr)) {
         py::array arr_arr = py::reinterpret_borrow<py::array>(arr);
         py::object d = arr_arr.dtype();
-        if (np.attr("issubdtype")(d, np.attr("integer")).cast<bool>())
+        if (py::to_bool(np.attr("issubdtype")(d, np.attr("integer"))))
             arr = arr.attr("astype")(np.attr("float64"), py::arg("copy") = false);
     }
     return wrap(arr);
@@ -553,10 +553,10 @@ NumpyBlockBackend::abs_argmax(const BlockCPtr& block)
     for (py::ssize_t i = 0; i < arr.ndim(); ++i)
         shape_tuple[i] = py::int_(arr.shape(i));
     py::object idx = np.attr("unravel_index")(np.attr("argmax")(np.attr("abs")(arr)), shape_tuple);
-    py::tuple t = py::cast<py::tuple>(idx);
+    py::tuple t = py::to_tuple(idx);
     std::vector<int64> out;
     for (auto const& item : t)
-        out.push_back(item.cast<int64>());
+        out.push_back(py::cast<int64>(item));
     return out;
 }
 
@@ -569,10 +569,10 @@ NumpyBlockBackend::argmin(const BlockCPtr& block)
     for (py::ssize_t i = 0; i < arr.ndim(); ++i)
         shape_tuple[i] = py::int_(arr.shape(i));
     py::object idx = np.attr("unravel_index")(np.attr("argmin")(arr), shape_tuple);
-    py::tuple t = py::cast<py::tuple>(idx);
+    py::tuple t = py::to_tuple(idx);
     std::vector<int64> out;
     for (auto const& item : t)
-        out.push_back(item.cast<int64>());
+        out.push_back(py::cast<int64>(item));
     return out;
 }
 
@@ -582,7 +582,7 @@ NumpyBlockBackend::all(const BlockCPtr& a)
     /* converted from following python code:
      * return np.all(a)
      */
-    return np_attr("all")(obj(a)).cast<bool>();
+    return py::to_bool(np_attr("all")(obj(a)));
 }
 
 bool
@@ -591,8 +591,8 @@ NumpyBlockBackend::allclose(const BlockCPtr& a, const BlockCPtr& b, float64 rtol
     /* converted from following python code:
      * return np.allclose(a, b, rtol=rtol, atol=atol)
      */
-    return np_attr("allclose")(obj(a), obj(b), py::arg("rtol") = rtol, py::arg("atol") = atol)
-      .cast<bool>();
+    return py::to_bool(
+      np_attr("allclose")(obj(a), obj(b), py::arg("rtol") = rtol, py::arg("atol") = atol));
 }
 
 BlockPtr
@@ -610,7 +610,7 @@ NumpyBlockBackend::any(const BlockCPtr& a)
     /* converted from following python code:
      * return np.any(a)
      */
-    return np_attr("any")(obj(a)).cast<bool>();
+    return py::to_bool(np_attr("any")(obj(a)));
 }
 
 BlockPtr
@@ -678,7 +678,7 @@ NumpyBlockBackend::eigh(const BlockCPtr& block, std::optional<std::string> sort)
      * return w, v
      */
     py::object a = obj(block);
-    py::tuple res = py::cast<py::tuple>(np_attr("linalg").attr("eigh")(a));
+    py::tuple res = py::to_tuple(np_attr("linalg").attr("eigh")(a));
     py::object w = res[0];
     py::object v = res[1];
     if (sort) {
@@ -694,7 +694,7 @@ std::tuple<BlockPtr, BlockPtr>
 NumpyBlockBackend::eig(const BlockCPtr& block, std::optional<std::string> sort)
 {
     py::object a = obj(block);
-    py::tuple res = py::cast<py::tuple>(np_attr("linalg").attr("eig")(a));
+    py::tuple res = py::to_tuple(np_attr("linalg").attr("eig")(a));
     Dtype cdtype = dtype::to_complex(get_dtype(block));
     BlockPtr w = to_dtype(wrap(res[0]), cdtype);
     BlockPtr v = to_dtype(wrap(res[1]), cdtype);
@@ -799,7 +799,7 @@ NumpyBlockBackend::block_from_mask(const BlockCPtr& mask, Dtype dtype)
     py::module_ np = numpy_module();
     py::object dt = dtype::to_numpy_dtype(dtype);
     int64 M = static_cast<int64>(m_arr.shape(0));
-    int64 N = np.attr("sum")(m_arr).cast<int64>();
+    int64 N = py::cast<int64>(np.attr("sum")(m_arr));
     py::object res = np.attr("zeros")(py::make_tuple(N, M), py::arg("dtype") = dt);
     res[py::make_tuple(np.attr("arange")(N), m_arr)] = 1;
     return wrap(res);
@@ -837,7 +837,7 @@ NumpyBlockBackend::get_diagonal(const BlockCPtr& a, std::optional<float64> tol)
     py::object res = np_attr("diagonal")(arr);
     if (tol) {
         py::object diag_mat = np_attr("diag")(res);
-        if (!np_attr("allclose")(arr, diag_mat, py::arg("atol") = *tol).cast<bool>())
+        if (!py::to_bool(np_attr("allclose")(arr, diag_mat, py::arg("atol") = *tol)))
             throw std::invalid_argument("Not a diagonal block.");
     }
     return wrap(res);
@@ -1071,7 +1071,7 @@ NumpyBlockBackend::_block_repr_lines(const BlockCPtr& a,
      */
     py::module_ np = numpy_module();
     py::object arr = obj(a);
-    int64 old_linewidth = np_attr("get_printoptions")()["linewidth"].cast<int64>();
+    int64 old_linewidth = py::cast<int64>(np_attr("get_printoptions")()["linewidth"]);
     np_attr("set_printoptions")(py::arg("linewidth") =
                                   max_width - static_cast<int64>(indent.size()));
     py::str s = py::str(arr);
@@ -1081,15 +1081,15 @@ NumpyBlockBackend::_block_repr_lines(const BlockCPtr& a,
     int64 n = py::len(lines);
     if (n <= max_lines) {
         for (int64 i = 0; i < n; ++i)
-            out.push_back(indent + lines[i].cast<std::string>());
+            out.push_back(indent + py::cast<std::string>(lines[i]));
     } else {
         int64 first = (max_lines - 1) / 2;
         int64 last = max_lines - 1 - first;
         for (int64 i = 0; i < first; ++i)
-            out.push_back(indent + lines[i].cast<std::string>());
+            out.push_back(indent + py::cast<std::string>(lines[i]));
         out.push_back(indent + "...");
         for (int64 i = n - last; i < n; ++i)
-            out.push_back(indent + lines[i].cast<std::string>());
+            out.push_back(indent + py::cast<std::string>(lines[i]));
     }
     return out;
 }

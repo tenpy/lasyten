@@ -1,6 +1,6 @@
 #include <lasyten/symmetries/factors/sun.h>
 
-#include <lasyten/block_backend/numpy.h>
+#include <lasyten/block_backend/block_backend.h>
 #include <lasyten/config.h>
 #include <lasyten/symmetries/exceptions.h>
 #include <lasyten/symmetries/fusion_symbol.h>
@@ -39,6 +39,18 @@
 namespace lasyten {
 
 namespace {
+
+/// Missing SU(N) data: ``FileNotFoundError`` on the Python side (historical API).
+[[noreturn]] void
+throw_file_not_found(std::string const& msg)
+{
+#if LASYTEN_HAS_PYTHON
+    PyErr_SetString(PyExc_FileNotFoundError, msg.c_str());
+    throw py::error_already_set();
+#else
+    throw std::runtime_error("FileNotFoundError: " + msg);
+#endif
+}
 
 std::string
 sector_slash_path(Sector const& a)
@@ -342,8 +354,7 @@ open_su_n_data_file(std::string const& full_path, char const* kind, int N, int64
           hweight,
           full_path);
         // Match the historical Python API: missing SU(N) data is FileNotFoundError.
-        PyErr_SetString(PyExc_FileNotFoundError, msg.c_str());
-        throw py::error_already_set();
+        throw_file_not_found(msg);
     }
     auto file = std::make_shared<HighFive::File>(full_path, HighFive::File::ReadOnly);
     auto stored = file_attr_int64(*file, "Highest_Weight");
@@ -556,60 +567,84 @@ register_shared_state(SharedStateKey const& key, std::shared_ptr<SunState> const
 /// a key for the all-trivial sectors and a key containing the highest weight twice. The number of
 /// F keys grows like weight^5 (110k at weight 12), so this must stay linear: indexing the keys of
 /// an old-style HDF5 group one by one (``H5Lget_name_by_idx``) is quadratic.
+///
+/// HDF5 1.12 renamed the iterate/info APIs (``H5Literate2`` / ``H5L_info2_t``); keep 1.10
+/// fallbacks for manylinux EPEL ``hdf5-devel``.
+struct CheckSymbolGroupState
+{
+    std::string prefix;
+    std::string zero_key;
+    std::string h_key;
+    char kind = 'F';
+    int64 highest_weight = 0;
+    bool have_first = false;
+    bool found_h = false;
+};
+
+herr_t
+check_symbol_group_visit(char const* name, CheckSymbolGroupState& st)
+{
+    std::string_view const key(name);
+    if (!st.have_first && key.starts_with(st.prefix)) {
+        st.have_first = true;
+        auto const num_lists = static_cast<int>(std::ranges::count(key, '['));
+        auto const commas = static_cast<int>(std::ranges::count(key, ','));
+        st.zero_key = std::string(1, st.kind);
+        for (int i = 0; i < num_lists; ++i) {
+            st.zero_key += "[0";
+            for (int j = 0; j < commas / num_lists; ++j) {
+                st.zero_key += ", 0";
+            }
+            st.zero_key += "]";
+        }
+        std::string h_bracket = "[" + std::to_string(st.highest_weight);
+        for (int j = 0; j < commas / num_lists; ++j) {
+            h_bracket += ", 0";
+        }
+        h_bracket += "]";
+        st.h_key = h_bracket + h_bracket;
+    }
+    if (st.have_first && key.find(st.h_key) != std::string_view::npos) {
+        st.found_h = true;
+        return herr_t{ 1 }; // found: stop the iteration
+    }
+    return herr_t{ 0 };
+}
+
 void
 check_symbol_group(HighFive::Group& root, char kind, int64 highest_weight)
 {
-    struct State
-    {
-        std::string prefix;
-        std::string zero_key;
-        std::string h_key;
-        char kind = 'F';
-        int64 highest_weight = 0;
-        bool have_first = false;
-        bool found_h = false;
-    };
     std::string const group_name = std::string(1, kind) + "_sym";
     if (!hdf5_io::h5_contains(root, group_name)) {
         throw std::invalid_argument("HDF5 file does not contain '/" + group_name + "/' group.");
     }
-    State state;
+    CheckSymbolGroupState state;
     state.kind = kind;
     state.prefix = std::string(1, kind) + "[";
     state.highest_weight = highest_weight;
-    auto callback =
-      [](hid_t /*group*/, char const* name, H5L_info2_t const* /*info*/, void* data) {
-          auto& st = *static_cast<State*>(data);
-          std::string_view const key(name);
-          if (!st.have_first && key.starts_with(st.prefix)) {
-              st.have_first = true;
-              auto const num_lists = static_cast<int>(std::ranges::count(key, '['));
-              auto const commas = static_cast<int>(std::ranges::count(key, ','));
-              st.zero_key = std::string(1, st.kind);
-              for (int i = 0; i < num_lists; ++i) {
-                  st.zero_key += "[0";
-                  for (int j = 0; j < commas / num_lists; ++j) {
-                      st.zero_key += ", 0";
-                  }
-                  st.zero_key += "]";
-              }
-              std::string h_bracket = "[" + std::to_string(st.highest_weight);
-              for (int j = 0; j < commas / num_lists; ++j) {
-                  h_bracket += ", 0";
-              }
-              h_bracket += "]";
-              st.h_key = h_bracket + h_bracket;
-          }
-          if (st.have_first && key.find(st.h_key) != std::string_view::npos) {
-              st.found_h = true;
-              return herr_t{ 1 }; // found: stop the iteration
-          }
-          return herr_t{ 0 };
-      };
     hid_t group = hdf5_io::h5_open(root, group_name);
     hsize_t position = 0;
-    herr_t const status =
-      H5Literate2(group, H5_INDEX_NAME, H5_ITER_INC, &position, callback, &state);
+#if H5_VERSION_GE(1, 12, 0)
+    herr_t const status = H5Literate2(
+      group,
+      H5_INDEX_NAME,
+      H5_ITER_INC,
+      &position,
+      [](hid_t, char const* name, H5L_info2_t const*, void* data) -> herr_t {
+          return check_symbol_group_visit(name, *static_cast<CheckSymbolGroupState*>(data));
+      },
+      &state);
+#else
+    herr_t const status = H5Literate(
+      group,
+      H5_INDEX_NAME,
+      H5_ITER_INC,
+      &position,
+      [](hid_t, char const* name, H5L_info_t const*, void* data) -> herr_t {
+          return check_symbol_group_visit(name, *static_cast<CheckSymbolGroupState*>(data));
+      },
+      &state);
+#endif
     if (status < 0) {
         H5Idec_ref(group);
         throw std::runtime_error("SUN: iterating over the keys of '/" + group_name + "/' failed");
@@ -1188,7 +1223,7 @@ SUN::_f_symbol_from_CG(Sector a, Sector b, Sector c, Sector d, Sector e, Sector 
         throw_hweight_too_low(
           "CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0], d.q[0], e.q[0], f.q[0] }), hw);
     }
-    auto& be = *static_cast<BlockBackend*>(NumpyBlockBackend::from_factory("cpu"));
+    auto& be = *default_cpu_block_backend();
     auto X1 =
       block_from_fusion_symbol(be,
                                _fusion_tensor(a, b, f, false, false)
@@ -1290,7 +1325,7 @@ SUN::_r_symbol_from_CG(Sector a, Sector b, Sector c) const
     if (a.q[0] > hw || b.q[0] > hw || c.q[0] > hw) {
         throw_hweight_too_low("CG", CGpath, std::max({ a.q[0], b.q[0], c.q[0] }), hw);
     }
-    BlockBackend& be = *NumpyBlockBackend::from_factory("cpu");
+    BlockBackend& be = *default_cpu_block_backend();
     auto X1 = block_from_fusion_symbol(be, fusion_tensor(a, b, c));
     auto Y1 = be.conj(block_from_fusion_symbol(be, fusion_tensor(b, a, c)));
     if (!be.any(X1) || !be.any(Y1)) {
@@ -1357,10 +1392,17 @@ SUN::frobenius_schur(Sector a) const
 bool
 SUN::has_data_in_group(hid_t loc) const
 {
+#if H5_VERSION_GE(1, 12, 0)
     H5O_info2_t info{};
     if (H5Oget_info3(loc, &info, H5O_INFO_BASIC) < 0) {
         return false;
     }
+#else
+    H5O_info_t info{};
+    if (H5Oget_info(loc, &info) < 0) {
+        return false;
+    }
+#endif
     if (info.type == H5O_TYPE_DATASET) {
         hid_t space = H5Dget_space(loc);
         hssize_t n = H5Sget_simple_extent_npoints(space);
@@ -1606,8 +1648,7 @@ SUN::from_config(int N,
                               filename_base.value_or(get_config().su_n_data_filename_base),
                               N,
                               kinds[i]);
-                PyErr_SetString(PyExc_FileNotFoundError, msg.c_str());
-                throw py::error_already_set();
+                throw_file_not_found(msg);
             }
         }
         h_cg = *detected[0];

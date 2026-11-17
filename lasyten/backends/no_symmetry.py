@@ -1,6 +1,6 @@
 """Implements a 'dummy' tensor backend that does not exploit symmetries.
 
-C++ implementation via pybind11 (``lasyten._core``).
+C++ implementation via nanobind (``lasyten._core``).
 """
 
 # Copyright (C) TeNPy Developers, Apache license

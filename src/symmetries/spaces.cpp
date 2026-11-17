@@ -52,6 +52,34 @@ bool_repr(bool value)
     return value ? "True" : "False";
 }
 
+/// ``space.repr(show_symmetry=..., one_line=...)`` of a child space, dispatching on the dynamic
+/// type (``ElementarySpace::repr`` is not virtual).
+[[nodiscard]] std::string
+factor_repr(ElementarySpace const& es, bool show_symmetry, bool one_line)
+{
+    if (auto const* alp = dynamic_cast<AbelianLegPipe const*>(&es)) {
+        return alp->repr(show_symmetry, one_line);
+    }
+    if (auto const* dss = dynamic_cast<DirectSumSpace const*>(&es)) {
+        return dss->repr(show_symmetry, one_line);
+    }
+    return es.repr(show_symmetry, one_line);
+}
+
+/// Same for a `Leg` (plain ElementarySpace, AbelianLegPipe, DirectSumSpace or LegPipe).
+[[nodiscard]] std::string
+factor_repr(Leg const& factor, bool show_symmetry, bool one_line)
+{
+    if (auto const es = factor.as_elementary_space()) {
+        return factor_repr(*es, show_symmetry, one_line);
+    }
+    if (auto const pipe = factor.as_leg_pipe()) {
+        return pipe->repr(show_symmetry, one_line);
+    }
+    throw std::runtime_error("factor_repr on null Leg");
+}
+
+#if LASYTEN_HAS_PYTHON
 [[nodiscard]] py::array_t<int64>
 vector_to_array(std::vector<int64> const& v)
 {
@@ -62,6 +90,8 @@ vector_to_array(std::vector<int64> const& v)
     }
     return arr;
 }
+
+#endif // LASYTEN_HAS_PYTHON
 
 } // namespace
 
@@ -192,6 +222,7 @@ axis_set_inverse_basis_perm(float64 dim,
     basis_perm_field = inverse_permutation(*inverse_basis_perm_field);
 }
 
+#if LASYTEN_HAS_PYTHON
 [[nodiscard]] py::object
 axis_apply_basis_perm(std::optional<std::vector<int64>> const& basis_perm,
                       std::optional<std::vector<int64>> const& inverse_basis_perm,
@@ -232,6 +263,7 @@ axis_apply_basis_perm(std::optional<std::vector<int64>> const& basis_perm,
     }
     return data[py::tuple(idx)];
 }
+#endif // LASYTEN_HAS_PYTHON
 
 } // namespace
 
@@ -543,6 +575,7 @@ Leg::ascii_arrow() const
       impl);
 }
 
+#if LASYTEN_HAS_PYTHON
 py::object
 Leg::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose) const
 {
@@ -555,6 +588,7 @@ Leg::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose
       },
       impl);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 bool
 Leg::operator==(Leg const& other) const
@@ -588,30 +622,6 @@ operator bool() const
 }
 
 namespace {
-
-[[nodiscard]] std::vector<int64>
-py_array_to_i64(py::array arr)
-{
-    auto casted = py::array_t<int64, py::array::c_style | py::array::forcecast>::ensure(arr);
-    auto r = casted.unchecked<1>();
-    std::vector<int64> out(static_cast<std::size_t>(r.shape(0)));
-    for (py::ssize_t i = 0; i < r.shape(0); ++i) {
-        out[static_cast<std::size_t>(i)] = r(i);
-    }
-    return out;
-}
-
-[[nodiscard]] std::vector<float64>
-py_array_to_f64(py::array arr)
-{
-    auto casted = py::array_t<float64, py::array::c_style | py::array::forcecast>::ensure(arr);
-    auto r = casted.unchecked<1>();
-    std::vector<float64> out(static_cast<std::size_t>(r.shape(0)));
-    for (py::ssize_t i = 0; i < r.shape(0); ++i) {
-        out[static_cast<std::size_t>(i)] = r(i);
-    }
-    return out;
-}
 
 [[nodiscard]] SectorArray
 take_or_all(SectorArray const& arr, std::optional<std::vector<std::size_t>> const& perm)
@@ -1166,12 +1176,14 @@ LegPipe::ascii_arrow() const
     return "║";
 }
 
+#if LASYTEN_HAS_PYTHON
 py::object
 LegPipe::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose) const
 {
     return axis_apply_basis_perm(
       _basis_perm, _inverse_basis_perm, arr, axis, inverse, pre_compose);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 bool
 LegPipe::operator==(LegPipe const& other) const
@@ -1247,15 +1259,8 @@ LegPipe::repr(bool show_symmetry, bool one_line) const
         std::vector<std::string> lines;
         lines.push_back(std::format("{}([", ClsName));
         for (auto const& leg : legs) {
-            py::object leg_obj = py::cast(leg);
-            std::string rep;
-            try {
-                rep =
-                  py::str(leg_obj.attr("__repr__")(py::arg("show_symmetry") = false,
-                                                   py::arg("one_line") = force_children_one_line));
-            } catch (py::error_already_set&) {
-                rep = py::str(leg_obj.attr("__repr__")());
-            }
+            std::string const rep =
+              factor_repr(leg, /*show_symmetry=*/false, /*one_line=*/force_children_one_line);
             std::istringstream iss(rep);
             std::string line;
             while (std::getline(iss, line)) {
@@ -1353,39 +1358,6 @@ parse_inputs_drop_symmetry(std::optional<std::vector<int64>> const& which,
         }
     }
     return { std::move(valid), std::make_shared<Symmetry>(std::move(remaining)) };
-}
-
-[[nodiscard]] py::object
-slices_to_py(std::optional<std::vector<std::array<int64, 2>>> const& slices)
-{
-    if (!slices) {
-        return py::none();
-    }
-    py::array_t<int64> arr({ static_cast<py::ssize_t>(slices->size()), py::ssize_t{ 2 } });
-    auto buf = arr.mutable_unchecked<2>();
-    for (std::size_t i = 0; i < slices->size(); ++i) {
-        buf(static_cast<py::ssize_t>(i), 0) = (*slices)[i][0];
-        buf(static_cast<py::ssize_t>(i), 1) = (*slices)[i][1];
-    }
-    return arr;
-}
-
-[[nodiscard]] py::object
-optional_perm_to_py(std::optional<std::vector<int64>> const& perm)
-{
-    if (!perm) {
-        return py::none();
-    }
-    return vector_to_array(*perm);
-}
-
-[[nodiscard]] std::optional<std::vector<int64>>
-optional_perm_from_py(py::object obj)
-{
-    if (obj.is_none()) {
-        return std::nullopt;
-    }
-    return py_array_to_i64(py::array::ensure(obj));
 }
 
 } // namespace
@@ -1843,22 +1815,20 @@ ElementarySpace::repr(bool show_symmetry, bool one_line) const
             items.push_back(std::format("symmetry={}", Space::symmetry->repr()));
         }
         if (opt.full_sectors) {
-            py::list def_sector_strs;
+            std::vector<std::string> def_sector_strs;
             for (auto const& a : defining_sectors) {
-                def_sector_strs.append(Space::symmetry->sector_str(a));
+                def_sector_strs.push_back(Space::symmetry->sector_str(a));
             }
-            py::list sector_dec_strs;
+            std::vector<std::string> sector_dec_strs;
             for (auto const& a : sector_decomposition) {
-                sector_dec_strs.append(Space::symmetry->sector_str(a));
+                sector_dec_strs.push_back(Space::symmetry->sector_str(a));
             }
             items.push_back(std::format("defining_sectors={}", format_like_list(def_sector_strs)));
             items.push_back(
               std::format("sector_decomposition={}", format_like_list(sector_dec_strs)));
-            items.push_back(
-              std::format("multiplicities={}", format_like_list(py::cast(multiplicities))));
+            items.push_back(std::format("multiplicities={}", format_like_list(multiplicities)));
             if (_basis_perm) {
-                items.push_back(
-                  std::format("basis_perm={}", format_like_list(py::cast(*_basis_perm))));
+                items.push_back(std::format("basis_perm={}", format_like_list(*_basis_perm)));
             }
         }
         if (opt.summarized_sectors) {
@@ -2088,7 +2058,7 @@ ElementarySpace::idx_to_sector(int64 idx) const
 }
 
 ElementarySpace::Ptr
-ElementarySpace::take_slice(py::array blockmask) const
+ElementarySpace::take_slice(std::vector<bool> const& blockmask) const
 {
     // --- hints from Python ElementarySpace.take_slice ---
     // should be guaranteed by check above already, but to be sure...
@@ -2098,20 +2068,16 @@ ElementarySpace::take_slice(py::array blockmask) const
         throw SymmetryError(
           std::format("take_slice is meaningless for {}.", Space::symmetry->str()));
     }
-    auto casted = py::array_t<bool, py::array::c_style | py::array::forcecast>::ensure(blockmask);
-    if (!casted || casted.ndim() != 1) {
-        throw py::type_error("blockmask must be a 1D array of bool");
-    }
-    auto const public_mask = casted.unchecked<1>();
+    auto const& public_mask = blockmask;
     auto const num_basis_states = dim_as_size(Space::dim);
-    if (static_cast<std::size_t>(public_mask.shape(0)) != num_basis_states) {
+    if (public_mask.size() != num_basis_states) {
         throw std::invalid_argument("blockmask has wrong length");
     }
     // note: mask is in the internal basis order from here on, i.e. we applied the basis_perm.
     std::vector<bool> mask(num_basis_states);
     for (std::size_t i = 0; i < num_basis_states; ++i) {
         auto const public_idx = _basis_perm ? (*_basis_perm)[i] : static_cast<int64>(i);
-        mask[i] = public_mask(static_cast<py::ssize_t>(public_idx));
+        mask[i] = public_mask[static_cast<std::size_t>(public_idx)];
     }
     SectorArray sectors = SectorArray::empty(Space::symmetry->sector_ind_len);
     std::vector<int64> mults;
@@ -2258,12 +2224,14 @@ ElementarySpace::set_inverse_basis_perm(std::optional<std::vector<int64>> invers
       Space::dim, _basis_perm, _inverse_basis_perm, std::move(inverse_basis_perm));
 }
 
+#if LASYTEN_HAS_PYTHON
 py::object
 ElementarySpace::apply_basis_perm(py::object arr, int64 axis, bool inverse, bool pre_compose) const
 {
     return axis_apply_basis_perm(
       _basis_perm, _inverse_basis_perm, arr, axis, inverse, pre_compose);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 void
 ElementarySpace::save_hdf5(lasyten::hdf5::Saver& saver,
@@ -2656,12 +2624,12 @@ DirectSumSpace::drop_symmetry(std::optional<std::vector<int64>> which)
 }
 
 ElementarySpace::Ptr
-DirectSumSpace::take_slice(py::array blockmask) const
+DirectSumSpace::take_slice(std::vector<bool> const& blockmask) const
 {
     warn("Using `DirectSumSpace.take_slice` loses the direct-sum structure and results in "
          "a plain ElementarySpace. Explicitly convert using `as_plain_ElementarySpace` to "
          "suppress this warning.");
-    return as_plain_ElementarySpace()->take_slice(std::move(blockmask));
+    return as_plain_ElementarySpace()->take_slice(blockmask);
 }
 
 void
@@ -2879,25 +2847,6 @@ factor_drop_symmetry(Leg const& factor, std::optional<std::vector<int64>> const&
     return std::make_shared<LegPipe>(std::move(new_legs), pipe->is_dual, pipe->combine_cstyle);
 }
 
-/// ``factor.__repr__(show_symmetry=..., one_line=...)``, with fallbacks.
-[[nodiscard]] std::string
-factor_repr(py::handle factor, bool show_symmetry, bool one_line)
-{
-    // the C++ classes bind the parametrized version as ``repr``, the Python ones as ``__repr__``
-    for (char const* name : { "repr", "__repr__" }) {
-        if (!py::hasattr(factor, name)) {
-            continue;
-        }
-        try {
-            return py::str(factor.attr(name)(py::arg("show_symmetry") = show_symmetry,
-                                             py::arg("one_line") = one_line));
-        } catch (py::error_already_set&) {
-            // the attribute does not accept these arguments; fall through
-        }
-    }
-    return py::str(factor.attr("__repr__")());
-}
-
 /// ``np.prod(values)``, i.e. ``1`` for an empty input.
 [[nodiscard]] int64
 product(std::vector<int64> const& values)
@@ -2935,15 +2884,6 @@ join(std::vector<std::string> const& parts, std::string const& sep)
         out += parts[i];
     }
     return out;
-}
-
-[[nodiscard]] py::object
-dim_to_py(float64 dim)
-{
-    if (std::floor(dim) == dim) {
-        return py::int_(static_cast<long long>(dim));
-    }
-    return py::float_(dim);
 }
 
 /// ``TensorProduct._calc_sectors``, for factors that are already flattened to spaces.
@@ -3610,8 +3550,7 @@ TensorProduct::repr(bool show_symmetry, bool one_line) const
             std::vector<std::string> reprs;
             reprs.reserve(factors.size());
             for (auto const& factor : factors) {
-                reprs.push_back(
-                  factor_repr(py::cast(factor), /*show_symmetry=*/false, /*one_line=*/true));
+                reprs.push_back(factor_repr(factor, /*show_symmetry=*/false, /*one_line=*/true));
             }
             one_line_items.push_back(std::format("factors=[{}]", join(reprs, ", ")));
             lines.push_back(std::format("{}factors=[", indent));
@@ -3624,13 +3563,13 @@ TensorProduct::repr(bool show_symmetry, bool one_line) const
             lines.push_back(std::format("{}num_factors={},", indent, num_factors));
         }
         if (opt.full_sectors) {
-            py::list sector_strs;
+            std::vector<std::string> sector_strs;
             for (auto const& a : sector_decomposition) {
-                sector_strs.append(symmetry->sector_str(a));
+                sector_strs.push_back(symmetry->sector_str(a));
             }
             std::vector<std::string> const new_items{
                 std::format("sector_decomposition={}", format_like_list(sector_strs)),
-                std::format("multiplicities={}", format_like_list(py::cast(multiplicities)))
+                std::format("multiplicities={}", format_like_list(multiplicities))
             };
             one_line_items.insert(one_line_items.end(), new_items.begin(), new_items.end());
             for (auto const& item : new_items) {
@@ -4360,7 +4299,7 @@ AbelianLegPipe::set_inverse_basis_perm(std::optional<std::vector<int64>> /*inver
 }
 
 ElementarySpace::Ptr
-AbelianLegPipe::take_slice(py::array blockmask) const
+AbelianLegPipe::take_slice(std::vector<bool> const& blockmask) const
 {
     warn("Using `AbelianLegPipe.take_slice` loses the product (pipe) structure and results in "
          "a plain ElementarySpace. Explicitly convert using `as_ElementarySpace` to suppress "
@@ -4368,7 +4307,7 @@ AbelianLegPipe::take_slice(py::array blockmask) const
     // note: unlike the Python version, we call the ElementarySpace implementation directly.
     // Python goes through ``as_ElementarySpace(is_dual=self.is_dual)``, which returns ``self``
     // and therefore recurses infinitely.
-    return ElementarySpace::take_slice(std::move(blockmask));
+    return ElementarySpace::take_slice(blockmask);
 }
 
 ElementarySpace::Ptr
@@ -4457,8 +4396,8 @@ AbelianLegPipe::repr(bool show_symmetry, bool one_line) const
             std::vector<std::string> reprs;
             reprs.reserve(legs.size());
             for (auto const& leg : legs) {
-                reprs.push_back(factor_repr(
-                  py::cast(leg), /*show_symmetry=*/false, /*one_line=*/opt.child_mode > 0));
+                reprs.push_back(
+                  factor_repr(*leg, /*show_symmetry=*/false, /*one_line=*/opt.child_mode > 0));
             }
             one_line_items.push_back(std::format("factors=[{}]", join(reprs, ", ")));
             lines.push_back(std::format("{}factors=[", indent));
@@ -4472,18 +4411,18 @@ AbelianLegPipe::repr(bool show_symmetry, bool one_line) const
         }
 
         if (opt.sector_mode == 0) {
-            py::list sector_dec_strs;
+            std::vector<std::string> sector_dec_strs;
             for (auto const& a : sector_decomposition) {
-                sector_dec_strs.append(Space::symmetry->sector_str(a));
+                sector_dec_strs.push_back(Space::symmetry->sector_str(a));
             }
-            py::list def_sector_strs;
+            std::vector<std::string> def_sector_strs;
             for (auto const& a : defining_sectors) {
-                def_sector_strs.append(Space::symmetry->sector_str(a));
+                def_sector_strs.push_back(Space::symmetry->sector_str(a));
             }
             std::vector<std::string> const new_items{
                 std::format("sector_decomposition={}", format_like_list(sector_dec_strs)),
                 std::format("defining_sectors={}", format_like_list(def_sector_strs)),
-                std::format("multiplicities={}", format_like_list(py::cast(multiplicities)))
+                std::format("multiplicities={}", format_like_list(multiplicities))
             };
             one_line_items.insert(one_line_items.end(), new_items.begin(), new_items.end());
             for (auto const& item : new_items) {
@@ -4499,7 +4438,7 @@ AbelianLegPipe::repr(bool show_symmetry, bool one_line) const
                 one_line_items.emplace_back("basis_perm=[...]");
                 lines.push_back(std::format("{}basis_perm=[...],", indent));
             } else {
-                auto const perm = format_like_list(py::cast(*_basis_perm));
+                auto const perm = format_like_list(*_basis_perm);
                 one_line_items.push_back(std::format("basis_perm={}", perm));
                 lines.push_back(std::format("{}basis_perm={},", indent, perm));
             }

@@ -1,11 +1,14 @@
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 #include "docstrings/backends/fusion_tree_backend.h"
 
 #include "backends/casters.hpp"
 
 #include <lasyten/backends/fusion_tree_backend.h>
+#include <lasyten/backends/fusion_tree_mapping.h>
+#if LASYTEN_WITH_NUMPY_BACKEND
 #include <lasyten/block_backend/numpy.h>
+#endif
 #include <lasyten/block_backend/torch.h>
 #include <lasyten/tensors/diagonal_tensor.h>
 #include <lasyten/tensors/mask.h>
@@ -26,27 +29,29 @@ namespace {
 std::shared_ptr<BlockBackend>
 as_shared_block_backend(py::object obj)
 {
+#if LASYTEN_WITH_NUMPY_BACKEND
     if (py::isinstance<NumpyBlockBackend>(obj)) {
-        auto* p = obj.cast<NumpyBlockBackend*>();
+        auto* p = py::cast<NumpyBlockBackend*>(obj);
         return NumpyBlockBackend::from_factory_shared(p->default_device);
     }
+#endif
     if (py::isinstance<TorchBlockBackend>(obj)) {
-        auto* p = obj.cast<TorchBlockBackend*>();
+        auto* p = py::cast<TorchBlockBackend*>(obj);
         return TorchBlockBackend::from_factory_shared(p->default_device);
     }
-    auto* raw = obj.cast<BlockBackend*>();
+    auto* raw = py::cast<BlockBackend*>(obj);
     return std::shared_ptr<BlockBackend>(raw, [](BlockBackend*) {});
 }
 
 } // namespace
 
 void
-bind_fusion_tree_data(py::module_& m)
+bind_fusion_tree_data(nb::module_& m)
 {
-    py::class_<FusionTreeData, TensorBackend::Data, py::smart_holder> cls(m, "FusionTreeData");
+    nb::class_<FusionTreeData, TensorBackend::Data> cls(m, "FusionTreeData");
     cls.doc() = DOC(lasyten, FusionTreeData);
 
-    cls.def(py::init([](BlockInds block_inds,
+    cls.def(nb::new_([](BlockInds block_inds,
                         std::vector<BlockBackend::BlockPtr> blocks,
                         Dtype dtype,
                         std::string device,
@@ -54,59 +59,59 @@ bind_fusion_tree_data(py::module_& m)
                 return std::make_shared<FusionTreeData>(
                   std::move(block_inds), std::move(blocks), dtype, std::move(device), is_sorted);
             }),
-            py::arg("block_inds"),
-            py::arg("blocks"),
-            py::arg("dtype"),
-            py::arg("device"),
-            py::arg("is_sorted") = false);
+            nb::arg("block_inds"),
+            nb::arg("blocks"),
+            nb::arg("dtype"),
+            nb::arg("device"),
+            nb::arg("is_sorted") = false);
 
-    cls.def_readwrite("block_inds", &FusionTreeData::block_inds)
-      .def_readwrite("blocks", &FusionTreeData::blocks)
-      .def_readwrite("dtype", &FusionTreeData::dtype)
-      .def_readwrite("device", &FusionTreeData::device);
+    cls.def_rw("block_inds", &FusionTreeData::block_inds)
+      .def_rw("blocks", &FusionTreeData::blocks)
+      .def_rw("dtype", &FusionTreeData::dtype)
+      .def_rw("device", &FusionTreeData::device);
 
     cls
       .def("block_ind_from_coupled",
            &FusionTreeData::block_ind_from_coupled,
-           py::arg("coupled"),
-           py::arg("domain"),
+           nb::arg("coupled"),
+           nb::arg("domain"),
            DOC(lasyten, FusionTreeData, block_ind_from_coupled))
       .def("block_ind_from_domain_sector_ind",
            &FusionTreeData::block_ind_from_domain_sector_ind,
-           py::arg("domain_sector_ind"),
+           nb::arg("domain_sector_ind"),
            DOC(lasyten, FusionTreeData, block_ind_from_domain_sector_ind))
       .def(
         "discard_zero_blocks",
         [](FusionTreeData& self, py::object backend, float64 eps) {
             self.discard_zero_blocks(as_shared_block_backend(backend), eps);
         },
-        py::arg("backend"),
-        py::arg("eps"),
+        nb::arg("backend"),
+        nb::arg("eps"),
         DOC(lasyten, FusionTreeData, discard_zero_blocks))
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5_const<FusionTreeData>(),
-           py::arg("hdf5_saver"),
-           py::arg("h5gr"),
-           py::arg("subpath"))
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"))
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<FusionTreeData>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 }
 
 void
-bind_fusion_tree_backend(py::module_& m)
+bind_fusion_tree_backend(nb::module_& m)
 {
-    py::class_<FusionTreeBackend, TensorBackend, py::smart_holder> cls(m, "FusionTreeBackend");
+    nb::class_<FusionTreeBackend, TensorBackend> cls(m, "FusionTreeBackend");
     cls.doc() = DOC(lasyten, FusionTreeBackend);
 
-    cls.def(py::init([](py::object block_backend) {
+    cls.def(nb::new_([](py::object block_backend) {
                 return std::make_shared<FusionTreeBackend>(as_shared_block_backend(block_backend));
             }),
-            py::arg("block_backend"));
-    cls.def_static("wrap", &FusionTreeBackend::wrap, py::arg("data"));
-    cls.def_static("unwrap", &FusionTreeBackend::unwrap, py::arg("data"));
+            nb::arg("block_backend"));
+    cls.def_static("wrap", &FusionTreeBackend::wrap, nb::arg("data"));
+    cls.def_static("unwrap", &FusionTreeBackend::unwrap, nb::arg("data"));
 
     cls.def(
       "partial_trace",
@@ -130,21 +135,37 @@ bind_fusion_tree_backend(py::module_& m)
           }
           return py::make_tuple(std::move(data), std::move(codomain), std::move(domain));
       },
-      py::arg("tensor"),
-      py::arg("pairs"),
-      py::arg("levels") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("pairs"),
+      nb::arg("levels").none() = nb::none(),
       DOC(lasyten, FusionTreeBackend, partial_trace));
 
-    cls.def("apply_instructions",
-            &FusionTreeBackend::apply_instructions,
-            py::arg("tensor"),
-            py::arg("instructions"),
-            py::arg("codomain_idcs"),
-            py::arg("domain_idcs"),
-            py::arg("new_codomain"),
-            py::arg("new_domain"),
-            py::arg("mixes_codomain_domain"),
-            DOC(lasyten, FusionTreeBackend, apply_instructions));
+    cls.def(
+      "apply_instructions",
+      [](FusionTreeBackend& self,
+         SymmetricTensorCPtr tensor,
+         py::object instructions,
+         std::vector<int64> codomain_idcs,
+         std::vector<int64> domain_idcs,
+         TensorProduct::Ptr new_codomain,
+         TensorProduct::Ptr new_domain,
+         bool mixes_codomain_domain) {
+          return self.apply_instructions(tensor,
+                                         instructions_from_python(instructions),
+                                         std::move(codomain_idcs),
+                                         std::move(domain_idcs),
+                                         std::move(new_codomain),
+                                         std::move(new_domain),
+                                         mixes_codomain_domain);
+      },
+      nb::arg("tensor"),
+      nb::arg("instructions"),
+      nb::arg("codomain_idcs"),
+      nb::arg("domain_idcs"),
+      nb::arg("new_codomain"),
+      nb::arg("new_domain"),
+      nb::arg("mixes_codomain_domain"),
+      DOC(lasyten, FusionTreeBackend, apply_instructions));
 }
 
 } // namespace lasyten

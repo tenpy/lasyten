@@ -1,6 +1,6 @@
 #include "../../doc_plus.h"
 #include "docstrings/symmetries/factors/su2.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 #include "symmetries/casters.hpp"
 
@@ -21,23 +21,23 @@ constexpr char const* kSu2TestOnlyWarning =
 } // namespace
 
 void
-bind_su2(py::module_& m)
+bind_su2(nb::module_& m)
 {
-    py::class_<_SU2, Group, py::smart_holder> cls(m, "_SU2", DOC(lasyten, _SU2));
+    nb::class_<_SU2, Group> cls(m, "_SU2", DOC(lasyten, _SU2));
 
     cls
-      .def(py::init([](std::optional<std::string> descriptive_name) {
+      .def(nb::new_([](std::optional<std::string> descriptive_name) {
                py::module_::import("warnings")
                  .attr("warn")(
                    kSu2TestOnlyWarning, py::module_::import("builtins").attr("UserWarning"), 2);
                return std::make_shared<_SU2>(std::move(descriptive_name));
            }),
-           py::arg("descriptive_name") = py::none())
+           nb::arg("descriptive_name").none() = nb::none())
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<_SU2>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 
     // Class-level convenience sectors (match Python ``_SU2.spin_half`` etc.).
     cls.attr("spin_zero") = _SU2::spin_zero;

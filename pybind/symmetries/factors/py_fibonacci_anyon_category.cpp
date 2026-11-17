@@ -1,6 +1,6 @@
 #include "../../doc_plus.h"
 #include "docstrings/symmetries/factors/fibonacci_anyon_category.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 #include "symmetries/casters.hpp"
 
@@ -12,19 +12,19 @@
 namespace lasyten {
 
 void
-bind_fibonacci_anyon_category(py::module_& m)
+bind_fibonacci_anyon_category(nb::module_& m)
 {
-    py::class_<FibonacciAnyonCategory, SymmetryFactor, py::smart_holder> cls(
+    nb::class_<FibonacciAnyonCategory, SymmetryFactor> cls(
       m, "FibonacciAnyonCategory", DOC(lasyten, FibonacciAnyonCategory));
-    cls.def(py::init<std::string>(), py::arg("handedness") = "left")
+    cls.def(lasyten::ctor<decltype(cls), std::string>(), nb::arg("handedness") = "left")
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<FibonacciAnyonCategory>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
     cls.attr("vacuum") = FibonacciAnyonCategory::vacuum;
     cls.attr("tau") = FibonacciAnyonCategory::tau;
-    cls.def_readonly("handedness", &FibonacciAnyonCategory::handedness);
+    cls.def_ro("handedness", &FibonacciAnyonCategory::handedness);
 }
 
 } // namespace lasyten

@@ -141,8 +141,10 @@ load_instance(lasyten::hdf5::Loader& loader, std::string const& path, Make&& mak
 
 [[nodiscard]] std::string class_attr(HighFive::Group& h5gr);
 
+#if LASYTEN_HAS_PYTHON
 /// NumPy ↔ ``Hdf5Buffer`` (used by numpy/torch/array_api block backends).
 [[nodiscard]] hdf5_io::Hdf5Buffer buffer_from_numpy(py::array arr);
 [[nodiscard]] py::array numpy_from_buffer(hdf5_io::Hdf5Buffer const& buf);
+#endif // LASYTEN_HAS_PYTHON
 
 } // namespace lasyten::hdf5_export

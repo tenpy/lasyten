@@ -1,15 +1,16 @@
 #pragma once
 
+#include <lasyten/lasyten.h>
+
 #include "py_hdf5_bridge.h"
 
 #include "hdf5_py_bridge.h"
 
-#include <pybind11/pybind11.h>
 #include <string>
 
 namespace lasyten::hdf5 {
 
-namespace py = pybind11;
+namespace py = lasyten::py;
 
 /// ``save_hdf5(self, py_saver, py_h5gr, subpath)`` → C++ Saver/Group + TLS PyBridge.
 template<typename C>

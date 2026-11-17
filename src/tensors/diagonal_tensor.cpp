@@ -4,7 +4,6 @@
 #include <lasyten/backends/abelian.h>
 #include <lasyten/backends/backend_factory.h>
 #include <lasyten/backends/fusion_tree_backend.h>
-#include <lasyten/block_backend/torch.h>
 #include <lasyten/symmetries/exceptions.h>
 #include <lasyten/tools.h>
 #include <lasyten/tools/warn.h>
@@ -188,7 +187,7 @@ DiagonalTensor::from_dense_block(BlockBackend::BlockPtr block,
     if (!backend) {
         backend = get_backend(leg_sp->symmetry);
     }
-    auto block_ptr = backend->block_backend->as_block(py::cast(block), dtype, device);
+    auto block_ptr = backend->block_backend->convert_block(block, dtype, device);
     auto diag = backend->block_backend->get_diagonal(block_ptr, 1e-10);
     return from_diag_block(diag, leg_sp, backend, std::move(labels), dtype, device, tol);
 }
@@ -208,7 +207,7 @@ DiagonalTensor::from_diag_block(BlockBackend::BlockPtr diag,
       _init_parse_args(tp, tp, std::move(backend));
     (void)unused_domain;
     (void)symmetry;
-    auto diag_ptr = backend_tp->block_backend->as_block(py::cast(diag), dtype, device);
+    auto diag_ptr = backend_tp->block_backend->convert_block(diag, dtype, device);
     diag_ptr = backend_tp->block_backend->apply_basis_perm(diag_ptr, { as_leg_cptr(leg_sp) });
     auto data = backend_tp->diagonal_from_block(diag_ptr, co_domain, tol);
     return std::make_shared<DiagonalTensor>(
@@ -534,6 +533,7 @@ DiagonalTensor::diagonal_as_block(std::optional<Dtype> dtype_opt)
     return res;
 }
 
+#if LASYTEN_HAS_PYTHON
 py::array
 DiagonalTensor::diagonal_as_numpy(py::object numpy_dtype)
 {
@@ -546,6 +546,7 @@ DiagonalTensor::diagonal_as_numpy(py::object numpy_dtype)
       numpy_dtype.is_none() ? std::nullopt : std::optional<py::object>{ numpy_dtype };
     return py::reinterpret_borrow<py::array>(backend->block_backend->to_numpy(block, np_dt));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 DiagonalTensor::Ptr
 DiagonalTensor::elementwise_almost_equal(DiagonalTensorCPtr other, float64 rtol, float64 atol)
@@ -620,7 +621,7 @@ DiagonalTensor::_get_item(std::vector<int64> const& idx)
     int64 i1 = idx[0];
     int64 i2 = idx[1];
     if (i1 != i2) {
-        return backend->block_backend->as_scalar(dtype::zero_scalar(dtype), dtype);
+        return backend->block_backend->as_scalar(complex128{ 0.0 }, dtype);
     }
     return backend->get_element_diagonal(
       std::static_pointer_cast<DiagonalTensor const>(shared_from_this()), i1);
@@ -711,7 +712,11 @@ DiagonalTensor::sector_argmin(std::optional<Sector> s) const
     }
 
     auto space = leg();
+#if LASYTEN_HAS_PYTHON
     bool abelian_backend = static_cast<bool>(std::dynamic_pointer_cast<AbelianBackend>(backend));
+#else
+    bool abelian_backend = false; // AbelianBackend is only built with Python
+#endif
     auto const& sectors =
       abelian_backend ? space->sector_decomposition : codomain->sector_decomposition;
     std::optional<std::size_t> restricted_sector;
@@ -771,13 +776,9 @@ DiagonalTensor::sector_argmin(std::optional<Sector> s) const
       [bb, selected_sector, selected_local_argmin, device_s](std::vector<int64> const& shape,
                                                              Sector const& coupled) {
           if (coupled == selected_sector) {
-              py::array_t<bool> arr(static_cast<py::ssize_t>(shape[0]));
-              auto buf = arr.mutable_unchecked<1>();
-              for (py::ssize_t i = 0; i < buf.shape(0); ++i) {
-                  buf(i) = false;
-              }
-              buf(static_cast<py::ssize_t>(selected_local_argmin)) = true;
-              return bb->as_block(arr, Dtype::Bool, device_s);
+              std::vector<bool> mask(static_cast<std::size_t>(shape[0]), false);
+              mask[static_cast<std::size_t>(selected_local_argmin)] = true;
+              return bb->block_from_bool_vector(mask, device_s);
           }
           return bb->zeros(shape, Dtype::Bool, device_s);
       },
@@ -885,15 +886,17 @@ DiagonalTensor::to_backend(TensorBackend::Ptr new_backend,
     auto device_s = new_backend->block_backend->as_device(
       device_opt.has_value() ? device_opt : std::optional<std::string>{ device });
     TensorBackend::DataPtr new_data;
+#if LASYTEN_HAS_PYTHON // FusionTreeBackend is only built with Python
     if (std::dynamic_pointer_cast<FusionTreeBackend>(backend) &&
         std::dynamic_pointer_cast<FusionTreeBackend>(new_backend)) {
         new_data =
           backend->to_block_backend(data, new_backend->block_backend, dtype_opt, device_s);
-    } else {
+    } else
+#endif
+    {
         auto old_diag = backend->diagonal_tensor_to_block(
           std::static_pointer_cast<DiagonalTensor const>(shared_from_this()));
-        auto new_diag =
-          new_backend->block_backend->as_block(py::cast(old_diag), dtype_opt, device_s);
+        auto new_diag = new_backend->block_backend->convert_block(old_diag, dtype_opt, device_s);
         new_data = new_backend->diagonal_from_block(new_diag, codomain, 0.);
     }
     return std::make_shared<DiagonalTensor>(
@@ -960,14 +963,16 @@ DiagonalTensor::from_hdf5(lasyten::hdf5::Loader& loader,
       data, as_space(codomain->factors[0]), backend, symmetry, std::move(labels));
     obj->dtype = dt;
     obj->device = backend->get_device_from_data(data);
-    if (dynamic_cast<TorchBlockBackend*>(backend->block_backend.get()) != nullptr) {
-        obj->device = TorchBlockBackend::device_for_hdf5_load(
-          obj->device, backend->block_backend->default_device);
+    if (is_torch_block_backend(backend->block_backend.get())) {
+        obj->device =
+          torch_device_for_hdf5_load(obj->device, backend->block_backend->default_device);
+#if LASYTEN_HAS_PYTHON
         if (auto* abd = dynamic_cast<AbelianBackendData*>(data.get())) {
             abd->device = obj->device;
         } else if (auto* ftd = dynamic_cast<FusionTreeData*>(data.get())) {
             ftd->device = obj->device;
         }
+#endif
     }
     loader.memorize_load(h5gr.getId(), std::static_pointer_cast<void>(obj));
     return obj;
@@ -1059,9 +1064,8 @@ Identity::from_hdf5(lasyten::hdf5::Loader& loader,
         labels.assign(2, "");
     }
 
-    if (dynamic_cast<TorchBlockBackend*>(backend->block_backend.get()) != nullptr) {
-        device =
-          TorchBlockBackend::device_for_hdf5_load(device, backend->block_backend->default_device);
+    if (is_torch_block_backend(backend->block_backend.get())) {
+        device = torch_device_for_hdf5_load(device, backend->block_backend->default_device);
     } else {
         device = backend->block_backend->as_device(device);
     }
@@ -1147,6 +1151,7 @@ Identity::diagonal_as_block(std::optional<Dtype> dtype_opt)
       { static_cast<int64>(leg()->dim) }, dtype_opt.value_or(dtype), device);
 }
 
+#if LASYTEN_HAS_PYTHON
 py::array
 Identity::diagonal_as_numpy(py::object numpy_dtype)
 {
@@ -1157,6 +1162,7 @@ Identity::diagonal_as_numpy(py::object numpy_dtype)
       backend->block_backend->ones_block({ static_cast<int64>(leg()->dim) }, dtype, device);
     return backend->block_backend->to_numpy(block, numpy_dtype);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 DiagonalTensor::Ptr
 Identity::elementwise_almost_equal(DiagonalTensorCPtr other, float64 rtol, float64 atol)
@@ -1186,9 +1192,9 @@ Identity::_get_item(std::vector<int64> const& idx)
         throw std::invalid_argument(std::format("expected 2 indices, got {}", idx.size()));
     }
     if (idx[0] != idx[1]) {
-        return backend->block_backend->as_scalar(dtype::zero_scalar(dtype), dtype);
+        return backend->block_backend->as_scalar(complex128{ 0.0 }, dtype);
     }
-    return backend->block_backend->as_scalar(dtype::one_scalar(dtype), dtype);
+    return backend->block_backend->as_scalar(complex128{ 1.0 }, dtype);
 }
 
 bool
@@ -1217,7 +1223,7 @@ Identity::max() const
     if (!dtype::is_real(dtype)) {
         throw std::invalid_argument("max is only defined for real dtypes");
     }
-    return backend->block_backend->as_scalar(dtype::one_scalar(dtype), dtype);
+    return backend->block_backend->as_scalar(complex128{ 1.0 }, dtype);
 }
 
 BlockBackend::Scalar
@@ -1226,7 +1232,7 @@ Identity::min() const
     if (!dtype::is_real(dtype)) {
         throw std::invalid_argument("min is only defined for real dtypes");
     }
-    return backend->block_backend->as_scalar(dtype::one_scalar(dtype), dtype);
+    return backend->block_backend->as_scalar(complex128{ 1.0 }, dtype);
 }
 
 int64

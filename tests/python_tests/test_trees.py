@@ -36,7 +36,7 @@ def random_fusion_tree(
         return trees.FusionTree.from_empty(symmetry=symmetry)
     if num_uncoupled == 1:
         sector = sector_rng()
-        is_dual = np_random.choice([True, False])
+        is_dual = bool(np_random.choice([True, False]))
         return trees.FusionTree.from_sector(symmetry, sector, is_dual=is_dual)
     fusion_outcomes = []
     multiplicities = []

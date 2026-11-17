@@ -11,7 +11,7 @@
 #include <lasyten/tensors/symmetric_tensor.h>
 #include <lasyten/tensors/tensor.h>
 
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include <optional>
 #include <stdexcept>
@@ -31,7 +31,7 @@ py_as_space_leg(py::object leg)
     if (py::isinstance<LegPipe>(leg)) {
         throw std::invalid_argument("DiagonalTensor / Mask is not defined on LegPipes.");
     }
-    auto space = leg.cast<Space::Ptr>();
+    auto space = py::cast<Space::Ptr>(leg);
     if (auto es = std::dynamic_pointer_cast<ElementarySpace>(space); es && es->is_pipe()) {
         throw std::invalid_argument("DiagonalTensor / Mask is not defined on LegPipes.");
     }
@@ -54,19 +54,19 @@ py_optional_tensor(py::object obj)
     if (obj.is_none()) {
         return nullptr;
     }
-    return obj.cast<TensorCPtr>();
+    return py::cast<TensorCPtr>(obj);
 }
 
 inline SymmetricTensorCPtr
 py_as_symmetric_cptr(py::object obj)
 {
-    return obj.cast<SymmetricTensorCPtr>();
+    return py::cast<SymmetricTensorCPtr>(obj);
 }
 
 inline DiagonalTensorCPtr
 py_as_diagonal_cptr(py::object obj)
 {
-    return obj.cast<DiagonalTensorCPtr>();
+    return py::cast<DiagonalTensorCPtr>(obj);
 }
 
 inline BlockBackend::BlockPtr
@@ -79,7 +79,7 @@ py_optional_block(py::object obj,
         return nullptr;
     }
     try {
-        auto block = obj.cast<BlockBackend::BlockPtr>();
+        auto block = py::cast<BlockBackend::BlockPtr>(obj);
         if (dtype.has_value() || device.has_value()) {
             return backend->block_backend->as_block(obj, dtype, device);
         }
@@ -102,9 +102,9 @@ inline std::variant<ElementarySpace::Ptr, Sector>
 py_as_charge(py::object charge)
 {
     if (py::isinstance<ElementarySpace>(charge)) {
-        return charge.cast<ElementarySpace::Ptr>();
+        return py::cast<ElementarySpace::Ptr>(charge);
     }
-    return charge.cast<Sector>();
+    return py::cast<Sector>(charge);
 }
 
 inline std::optional<std::variant<ElementarySpace::Ptr, Sector>>

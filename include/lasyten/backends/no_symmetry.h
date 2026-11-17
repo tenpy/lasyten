@@ -326,7 +326,7 @@ class NoSymmetryBackend : public TensorBackend
     /// ``new_domain[-1].sector_decomposition[sector_idx]`` of the leg ``new_domain[-1]``.
     /// @param dtype The new dtype of the block.
     /// @param device The device for the block.
-    DataPtr from_grid(std::vector<std::vector<py::object>> grid,
+    DataPtr from_grid(std::vector<std::vector<TensorCPtr>> grid,
                       TensorProduct::Ptr new_codomain,
                       TensorProduct::Ptr new_domain,
                       std::vector<std::vector<int64>> left_mult_slices,

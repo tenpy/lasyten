@@ -18,10 +18,11 @@ namespace lasyten {
 
 namespace {
 
+#if LASYTEN_HAS_PYTHON
 Space::Ptr
 as_space(py::handle obj)
 {
-    return obj.cast<Space::Ptr>();
+    return py::cast<Space::Ptr>(obj);
 }
 
 /// Symmetry of a :class:`TensorProduct` factor (:class:`Space` or :class:`Leg` /
@@ -30,12 +31,12 @@ Symmetry::Ptr
 factor_symmetry(py::handle factor)
 {
     if (py::isinstance<Space>(factor)) {
-        return factor.cast<Space*>()->symmetry;
+        return py::cast<Space*>(factor)->symmetry;
     }
-    if (py::isinstance<Leg>(factor)) {
-        return factor.cast<Leg>().symmetry();
+    if ((py::isinstance<ElementarySpace>(factor) || py::isinstance<LegPipe>(factor))) {
+        return py::cast<Leg>(factor).symmetry();
     }
-    return factor.attr("symmetry").cast<Symmetry::Ptr>();
+    return py::cast<Symmetry::Ptr>(factor.attr("symmetry"));
 }
 
 /// Quantum dimension of a :class:`TensorProduct` factor.
@@ -43,12 +44,12 @@ float64
 factor_dim(py::handle factor)
 {
     if (py::isinstance<Space>(factor)) {
-        return factor.cast<Space*>()->dim;
+        return py::cast<Space*>(factor)->dim;
     }
-    if (py::isinstance<Leg>(factor)) {
-        return factor.cast<Leg>().dim();
+    if ((py::isinstance<ElementarySpace>(factor) || py::isinstance<LegPipe>(factor))) {
+        return py::cast<Leg>(factor).dim();
     }
-    return factor.attr("dim").cast<float64>();
+    return py::cast<float64>(factor.attr("dim"));
 }
 
 std::string
@@ -57,7 +58,7 @@ as_leg_label(py::handle obj)
     if (obj.is_none()) {
         return "";
     }
-    return obj.cast<std::string>();
+    return py::cast<std::string>(obj);
 }
 
 LegLabelList
@@ -69,6 +70,7 @@ sequence_as_leg_labels(py::handle seq)
     }
     return out;
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::string
 format_dim(float64 dim, int distance, std::string const& huge_dim, float64 huge_dim_value)
@@ -95,16 +97,18 @@ format_dim(float64 dim, int distance, std::string const& huge_dim, float64 huge_
     throw std::runtime_error("format_dim: unexpected dim formatting failure");
 }
 
-/// Match Space.dim / Tensor.shape Python exposure: whole-number dims as int.
-py::list
-dims_to_python(std::vector<float64> const& dims)
+/// ``str`` of each dim, matching Space.dim / Tensor.shape Python exposure: whole-number dims as
+/// int.
+std::vector<std::string>
+dims_to_strings(std::vector<float64> const& dims)
 {
-    py::list out;
+    std::vector<std::string> out;
+    out.reserve(dims.size());
     for (float64 d : dims) {
         if (std::isfinite(d) && std::floor(d) == d) {
-            out.append(py::int_(static_cast<long long>(d)));
+            out.push_back(std::format("{}", static_cast<long long>(d)));
         } else {
-            out.append(py::float_(d));
+            out.push_back(std::format("{}", d));
         }
     }
     return out;
@@ -307,6 +311,7 @@ Tensor::_init_parse_labels(std::optional<LegLabelList> labels,
     return *labels;
 }
 
+#if LASYTEN_HAS_PYTHON
 TensorProduct::Ptr
 tensor_product_from_python(py::object obj, Symmetry::Ptr symmetry)
 {
@@ -317,11 +322,11 @@ tensor_product_from_python(py::object obj, Symmetry::Ptr symmetry)
         return std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{}, std::move(symmetry));
     }
     if (py::isinstance<TensorProduct>(obj)) {
-        return obj.cast<TensorProduct::Ptr>();
+        return py::cast<TensorProduct::Ptr>(obj);
     }
     std::vector<Leg::Ptr> factors;
     for (auto item : obj) {
-        factors.push_back(item.cast<Leg::Ptr>());
+        factors.push_back(py::cast<Leg::Ptr>(item));
     }
     return std::make_shared<TensorProduct>(std::move(factors), std::move(symmetry));
 }
@@ -331,11 +336,11 @@ parse_tensor_init_args(py::object codomain, py::object domain, TensorBackend::Pt
 {
     Symmetry::Ptr symmetry;
     if (py::isinstance<TensorProduct>(codomain)) {
-        symmetry = codomain.cast<TensorProduct::Ptr>()->symmetry;
+        symmetry = py::cast<TensorProduct::Ptr>(codomain)->symmetry;
     } else if (py::len(codomain) > 0) {
         symmetry = factor_symmetry(codomain[py::int_(0)]);
     } else if (!domain.is_none() && py::isinstance<TensorProduct>(domain)) {
-        symmetry = domain.cast<TensorProduct::Ptr>()->symmetry;
+        symmetry = py::cast<TensorProduct::Ptr>(domain)->symmetry;
     } else if (!domain.is_none() && py::len(domain) > 0) {
         symmetry = factor_symmetry(domain[py::int_(0)]);
     } else {
@@ -373,7 +378,7 @@ parse_tensor_init_labels(py::object labels,
         return Tensor::_init_parse_labels(std::nullopt, codomain, domain, is_endomorphism);
     }
 
-    py::sequence seq = labels.cast<py::sequence>();
+    py::sequence seq = py::cast<py::sequence>(labels);
     if (py::len(seq) == 0) {
         return Tensor::_init_parse_labels(LegLabelList{}, codomain, domain, is_endomorphism);
     }
@@ -443,6 +448,7 @@ parse_tensor_init(py::object codomain,
     auto labs = parse_tensor_init_labels(labels, c, d, is_endomorphism);
     return { std::move(c), std::move(d), std::move(b), std::move(s), std::move(labs) };
 }
+#endif // LASYTEN_HAS_PYTHON
 
 void
 Tensor::test_sanity() const
@@ -791,9 +797,9 @@ Tensor::_repr_header_lines(std::string const& indent, bool use_symm_str) const
     } else {
         // Match Python f'{self.labels}   ;   {self.codomain_labels} <- {self.domain_labels}'
         labels_str = std::format("{}   ;   {} <- {}",
-                                 format_like_list(py::cast(labs)),
-                                 format_like_list(py::cast(codomain_labels())),
-                                 format_like_list(py::cast(domain_labels())));
+                                 format_like_list(labs),
+                                 format_like_list(codomain_labels()),
+                                 format_like_list(domain_labels()));
     }
     std::vector<std::string> lines = {
         std::format("{}* Device: {}", indent, device),
@@ -807,9 +813,9 @@ Tensor::_repr_header_lines(std::string const& indent, bool use_symm_str) const
         std::reverse(domain_dims.begin(), domain_dims.end());
         lines.push_back(std::format("{}* Shape: {}   ;   {} <- {}",
                                     indent,
-                                    format_like_list(dims_to_python(shape)),
-                                    format_like_list(dims_to_python(codomain_dims)),
-                                    format_like_list(dims_to_python(domain_dims))));
+                                    format_like_list(dims_to_strings(shape)),
+                                    format_like_list(dims_to_strings(codomain_dims)),
+                                    format_like_list(dims_to_strings(domain_dims))));
     }
     if ((!symmetry->can_be_dropped()) || (!symmetry->is_abelian())) {
         if (has_pipes()) {
@@ -818,7 +824,7 @@ Tensor::_repr_header_lines(std::string const& indent, bool use_symm_str) const
             std::vector<int64> codomain_nums;
             for (auto const& leg : codomain->factors) {
                 int64 s = 0;
-                for (auto m : as_space(leg)->multiplicities) {
+                for (auto m : leg.as_space()->multiplicities) {
                     s += m;
                 }
                 codomain_nums.push_back(s);
@@ -826,7 +832,7 @@ Tensor::_repr_header_lines(std::string const& indent, bool use_symm_str) const
             std::vector<int64> domain_nums;
             for (auto const& leg : domain->factors) {
                 int64 s = 0;
-                for (auto m : as_space(leg)->multiplicities) {
+                for (auto m : leg.as_space()->multiplicities) {
                     s += m;
                 }
                 domain_nums.push_back(s);
@@ -837,9 +843,9 @@ Tensor::_repr_header_lines(std::string const& indent, bool use_symm_str) const
             }
             lines.push_back(std::format("{}* Num Sectors: {}   ;   {} <- {}",
                                         indent,
-                                        format_like_list(py::cast(all_nums)),
-                                        format_like_list(py::cast(codomain_nums)),
-                                        format_like_list(py::cast(domain_nums))));
+                                        format_like_list(all_nums),
+                                        format_like_list(codomain_nums),
+                                        format_like_list(domain_nums)));
         }
     }
     return lines;
@@ -893,6 +899,7 @@ Tensor::get_leg_co_domain(std::vector<std::variant<int64, std::string>> const& w
     return out;
 }
 
+#if LASYTEN_HAS_PYTHON
 py::array
 Tensor::to_numpy(std::optional<std::vector<std::variant<int64, std::string>>> leg_order,
                  py::object numpy_dtype,
@@ -903,8 +910,9 @@ Tensor::to_numpy(std::optional<std::vector<std::variant<int64, std::string>>> le
     if (!numpy_dtype.is_none()) {
         np_dtype = numpy_dtype;
     }
-    return backend->block_backend->to_numpy(block, np_dtype).cast<py::array>();
+    return py::cast<py::array>(backend->block_backend->to_numpy(block, np_dtype));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::string
 Tensor::__repr__() const

@@ -35,12 +35,12 @@ int64
 py_object_to_int64(py::handle obj)
 {
     if (py::isinstance<py::int_>(obj)) {
-        return obj.cast<int64>();
+        return py::cast<int64>(obj);
     }
     if (py::hasattr(obj, "item")) {
-        return obj.attr("item")().cast<int64>();
+        return py::cast<int64>(obj.attr("item")());
     }
-    return py::module_::import("builtins").attr("int")(obj).cast<int64>();
+    return py::cast<int64>(py::module_::import("builtins").attr("int")(obj));
 }
 
 py::module_
@@ -73,7 +73,7 @@ parse_spin_S(std::optional<std::string> const& S)
     if (!S) {
         return 0.5;
     }
-    return py::float_(py::str(*S)).cast<float64>();
+    return py::cast<float64>(py::float_(py::str(*S)));
 }
 
 SymmetryFactor::Ptr
@@ -138,14 +138,14 @@ Symmetry::Ptr
 fermion_conservation_law_to_symmetry(py::object conserve)
 {
     if (py::isinstance<py::str>(conserve)) {
-        return FermionicDOF::conservation_law_to_symmetry(conserve.cast<std::string>());
+        return FermionicDOF::conservation_law_to_symmetry(py::cast<std::string>(conserve));
     }
     if (is_iterable(conserve)) {
         std::vector<SymmetryFactor::Ptr> sym_factors;
         int64 num_no_sym = 0;
         for (py::ssize_t k = 0; k < py::len(conserve); ++k) {
             py::object conserve_k = conserve[py::int_(k)];
-            std::string ck = py::str(conserve_k).cast<std::string>();
+            std::string ck = py::cast<std::string>(py::str(conserve_k));
             if (ck == "N" || ck == "Nk" || ck == "N_k") {
                 sym_factors.push_back(
                   std::make_shared<U1>(std::format("species{}_fermion_occupation", k)));
@@ -166,7 +166,7 @@ fermion_conservation_law_to_symmetry(py::object conserve)
         return symmetry_from_factors(std::move(sym_factors));
     }
     throw std::invalid_argument(
-      std::format("Invalid `conserve`: {}", py::str(conserve).cast<std::string>()));
+      std::format("Invalid `conserve`: {}", py::cast<std::string>(py::str(conserve))));
 }
 
 bool
@@ -307,7 +307,7 @@ SpinSite::prepare(float64 S, std::optional<std::string> conserve, bool use_test_
     if (two_S < 0) {
         throw std::invalid_argument("Negative spin.");
     }
-    if (!np.attr("allclose")(two_S / 2., spin_S).cast<bool>()) {
+    if (!py::to_bool(np.attr("allclose")(two_S / 2., spin_S))) {
         throw std::invalid_argument("total_spin must be half integer: 0, 1/2, 1, 3/2, ...");
     }
 
@@ -324,7 +324,8 @@ SpinSite::prepare(float64 S, std::optional<std::string> conserve, bool use_test_
 
     std::map<std::string, int64> state_labels;
     for (int64 n = 0; n < dim; ++n) {
-        state_labels[py::str(py::cast(static_cast<float64>(n) - spin_S)).cast<std::string>()] = n;
+        state_labels[py::cast<std::string>(py::str(py::cast(static_cast<float64>(n) - spin_S)))] =
+          n;
     }
     state_labels["down"] = 0;
     state_labels["up"] = dim - 1;
@@ -335,9 +336,9 @@ SpinlessBosonSite::Prepared
 SpinlessBosonSite::prepare(py::object Nmax, py::object conserve)
 {
     auto np = numpy_module();
-    auto Nmax_arr =
-      np.attr("atleast_1d")(np.attr("asarray")(Nmax, py::arg("dtype") = "int")).cast<py::array>();
-    if (!np.attr("allclose")(Nmax_arr, np.attr("asarray")(Nmax_arr)).cast<bool>()) {
+    auto Nmax_arr = py::cast<py::array>(
+      np.attr("atleast_1d")(np.attr("asarray")(Nmax, py::arg("dtype") = "int")));
+    if (!py::to_bool(np.attr("allclose")(Nmax_arr, np.attr("asarray")(Nmax_arr)))) {
         throw std::invalid_argument("Invalid `Nmax`");
     }
     int64 const num_species = py_object_to_int64(Nmax_arr.attr("size"));
@@ -373,7 +374,7 @@ SpinlessBosonSite::prepare(py::object Nmax, py::object conserve)
             } else if (!factor_is_u1(factor)) {
                 throw std::invalid_argument(
                   std::format("Entry in `conserve` invalid for `SpinlessBosonSite`: {}",
-                              py::str(conserve_k).cast<std::string>()));
+                              py::cast<std::string>(py::str(conserve_k))));
             }
         }
         py::list sector_rows;
@@ -417,7 +418,7 @@ SpinlessBosonSite::prepare(py::object Nmax, py::object conserve)
         } else {
             throw std::invalid_argument(
               std::format("`conserve` invalid for `SpinlessBosonSite`: {}",
-                          py::str(conserve).cast<std::string>()));
+                          py::cast<std::string>(py::str(conserve))));
         }
     }
 
@@ -444,7 +445,7 @@ SpinlessBosonSite::prepare(py::object Nmax, py::object conserve)
             for (py::handle x : occ_list) {
                 label_parts.append(py_object_to_int64(x));
             }
-            label = py::str(py::tuple(label_parts)).cast<std::string>();
+            label = py::cast<std::string>(py::str(py::tuple(label_parts)));
         }
         auto occ_arr = np.attr("asarray")(occ_list, py::arg("dtype") = "int");
         state_labels[label] =
@@ -495,7 +496,7 @@ SpinlessFermionSite::prepare(int64 num_species, py::object conserve)
             } else if (!factor_is_u1(factor)) {
                 throw std::invalid_argument(
                   std::format("Entry in `conserve` invalid for `SpinlessFermionSite`: {}",
-                              py::str(conserve_k).cast<std::string>()));
+                              py::cast<std::string>(py::str(conserve_k))));
             }
         }
         py::list sector_rows;
@@ -530,7 +531,7 @@ SpinlessFermionSite::prepare(int64 num_species, py::object conserve)
         leg = ElementarySpace::from_basis(sym, sector_array_from_numpy(sectors));
     } else {
         throw std::invalid_argument(std::format("`conserve` invalid for `SpinlessFermionSite`: {}",
-                                                py::str(conserve).cast<std::string>()));
+                                                py::cast<std::string>(py::str(conserve))));
     }
 
     std::map<std::string, int64> state_labels;
@@ -548,7 +549,7 @@ SpinlessFermionSite::prepare(int64 num_species, py::object conserve)
             for (py::handle x : occ_list) {
                 label_parts.append(py_object_to_int64(x));
             }
-            label = py::str(py::tuple(label_parts)).cast<std::string>();
+            label = py::cast<std::string>(py::str(py::tuple(label_parts)));
         }
         int64 idx = 0;
         for (py::handle x : occ_list) {
@@ -679,7 +680,7 @@ ClockSite::prepare(int64 q, std::optional<std::string> conserve)
       np.attr("multiply")(np.attr("arange")(q), py::cast(std::complex(0., 1.)))));
     auto Z = np.attr("diag")(phase);
     auto clock_operators =
-      np.attr("stack")(py::make_tuple(X, Z), py::arg("axis") = 2).cast<py::array>();
+      py::cast<py::array>(np.attr("stack")(py::make_tuple(X, Z), py::arg("axis") = 2));
 
     std::map<std::string, int64> state_labels;
     for (int64 n = 0; n < q; ++n) {
@@ -824,7 +825,7 @@ SpinSite::test_sanity()
                                      py::make_tuple(py::make_tuple(-1, 1), py::make_tuple(-1, 0)));
     int64 const two_S = leg_dim(leg) - 1;
     auto eigenvalue = np.attr("multiply")(two_S * (two_S + 2) / 4., np.attr("eye")(two_S + 1));
-    if (!np.attr("allclose")(S_sq, eigenvalue).cast<bool>()) {
+    if (!py::to_bool(np.attr("allclose")(S_sq, eigenvalue))) {
         throw std::runtime_error("SpinSite sanity check failed: S^2 eigenvalue mismatch.");
     }
 }
@@ -874,8 +875,8 @@ SpinlessBosonSite::repr() const
 {
     auto bos = std::dynamic_pointer_cast<BosonicDOF>(require_occupation());
     return std::format("SpinlessBosonSite(Nmax={}, conserve={}, filling={})",
-                       py::str(bos->Nmax).cast<std::string>(),
-                       py::str(conserve).cast<std::string>(),
+                       py::cast<std::string>(py::str(bos->Nmax)),
+                       py::cast<std::string>(py::str(conserve)),
                        filling ? std::to_string(*filling) : "None");
 }
 
@@ -919,7 +920,7 @@ SpinlessFermionSite::repr() const
 {
     return std::format("SpinlessFermionSite(num_species={}, conserve={}, filling={})",
                        num_species,
-                       py::str(conserve).cast<std::string>(),
+                       py::cast<std::string>(py::str(conserve)),
                        filling ? std::to_string(*filling) : "None");
 }
 
@@ -1431,7 +1432,7 @@ py::array
 kron_embed_stack3(py::array stack, int64 site_idx, std::vector<int64> const& dims)
 {
     auto np = numpy_module();
-    py::ssize_t n_ops = stack.attr("shape").attr("__getitem__")(2).cast<py::ssize_t>();
+    py::ssize_t n_ops = py::cast<py::ssize_t>(stack.attr("shape").attr("__getitem__")(2));
     py::list mats;
     for (py::ssize_t a = 0; a < n_ops; ++a) {
         py::array mat = stack.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), a));

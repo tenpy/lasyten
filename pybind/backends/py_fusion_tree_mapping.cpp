@@ -1,8 +1,9 @@
+#include <lasyten/backends/block_inds_numpy.h>
 #include <lasyten/backends/fusion_tree_mapping.h>
 #include <lasyten/backends/fusion_tree_permute.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 #include "docstrings/backends/fusion_tree_mapping.h"
 
 #include <format>
@@ -13,49 +14,67 @@
 
 namespace lasyten {
 
-void
-bind_fusion_tree_mapping(py::module_& m)
+namespace {
+
+std::optional<BlockInds>
+optional_block_inds_from_py(py::object obj)
 {
-    py::class_<BraidInstruction> braid_cls(m, "BraidInstruction");
+    if (obj.is_none()) {
+        return std::nullopt;
+    }
+    if (py::isinstance<BlockInds>(obj)) {
+        return py::cast<BlockInds>(obj);
+    }
+    return block_inds_from_numpy(obj);
+}
+
+} // namespace
+
+void
+bind_fusion_tree_mapping(nb::module_& m)
+{
+    nb::class_<BraidInstruction> braid_cls(m, "BraidInstruction");
     braid_cls.doc() =
       doc_cpp_ref(R"pydoc(BraidInstruction)pydoc", "lasyten::BraidInstruction", "class");
 
     braid_cls
-      .def(
-        py::init<bool, int64, bool>(), py::arg("codomain"), py::arg("idx"), py::arg("overbraid"))
-      .def_readwrite("codomain", &BraidInstruction::codomain)
-      .def_readwrite("idx", &BraidInstruction::idx)
-      .def_readwrite("overbraid", &BraidInstruction::overbraid)
-      .def(py::self == py::self)
+      .def(lasyten::ctor<decltype(braid_cls), bool, int64, bool>(),
+           nb::arg("codomain"),
+           nb::arg("idx"),
+           nb::arg("overbraid"))
+      .def_rw("codomain", &BraidInstruction::codomain)
+      .def_rw("idx", &BraidInstruction::idx)
+      .def_rw("overbraid", &BraidInstruction::overbraid)
+      .def(nb::self == nb::self)
       .def("__repr__", [](BraidInstruction const& i) {
           return std::format(
             "BraidInstruction(codomain={}, idx={}, overbraid={})", i.codomain, i.idx, i.overbraid);
       });
 
-    py::class_<BendInstruction> bend_cls(m, "BendInstruction");
+    nb::class_<BendInstruction> bend_cls(m, "BendInstruction");
     bend_cls.doc() =
       doc_cpp_ref(R"pydoc(BendInstruction)pydoc", "lasyten::BendInstruction", "class");
 
-    bend_cls.def(py::init<bool>(), py::arg("bend_down"))
-      .def_readwrite("bend_down", &BendInstruction::bend_down)
-      .def(py::self == py::self)
+    bend_cls.def(lasyten::ctor<decltype(bend_cls), bool>(), nb::arg("bend_down"))
+      .def_rw("bend_down", &BendInstruction::bend_down)
+      .def(nb::self == nb::self)
       .def("__repr__", [](BendInstruction const& i) {
           return std::format("BendInstruction(bend_down={})", i.bend_down);
       });
 
-    py::class_<TwistInstruction> twist_cls(m, "TwistInstruction");
+    nb::class_<TwistInstruction> twist_cls(m, "TwistInstruction");
     twist_cls.doc() =
       doc_cpp_ref(R"pydoc(TwistInstruction)pydoc", "lasyten::TwistInstruction", "class");
 
     twist_cls
-      .def(py::init<bool, std::vector<int64>, bool>(),
-           py::arg("codomain"),
-           py::arg("idcs"),
-           py::arg("overtwist"))
-      .def_readwrite("codomain", &TwistInstruction::codomain)
-      .def_readwrite("idcs", &TwistInstruction::idcs)
-      .def_readwrite("overtwist", &TwistInstruction::overtwist)
-      .def(py::self == py::self)
+      .def(lasyten::ctor<decltype(twist_cls), bool, std::vector<int64>, bool>(),
+           nb::arg("codomain"),
+           nb::arg("idcs"),
+           nb::arg("overtwist"))
+      .def_rw("codomain", &TwistInstruction::codomain)
+      .def_rw("idcs", &TwistInstruction::idcs)
+      .def_rw("overtwist", &TwistInstruction::overtwist)
+      .def(nb::self == nb::self)
       .def("__repr__", [](TwistInstruction const& i) {
           std::string idcs_str = "[";
           for (std::size_t k = 0; k < i.idcs.size(); ++k) {
@@ -71,28 +90,43 @@ bind_fusion_tree_mapping(py::module_& m)
                              i.overtwist);
       });
 
-    py::class_<TreePairMapping> tree_pair(m, "TreePairMapping");
+    nb::class_<TreePairMapping> tree_pair(m, "TreePairMapping");
     tree_pair.doc() = DOC(lasyten, TreePairMapping);
 
     tree_pair
-      .def(py::init<SparseMappingFusionTreePair, bool>(), py::arg("mapping"), py::arg("is_real"))
-      .def_readwrite("is_real", &TreePairMapping::is_real)
-      .def_readwrite("mapping", &TreePairMapping::mapping)
-      .def_static("from_identity",
-                  &TreePairMapping::from_identity,
-                  py::arg("codomain"),
-                  py::arg("domain"),
-                  py::arg("block_inds") = py::none(),
-                  DOC(lasyten, TreePairMapping, from_identity))
-      .def_static("from_instructions",
-                  &TreePairMapping::from_instructions,
-                  py::arg("instructions"),
-                  py::arg("codomain"),
-                  py::arg("domain"),
-                  py::arg("block_inds") = py::none())
+      .def(lasyten::ctor<decltype(tree_pair), SparseMappingFusionTreePair, bool>(),
+           nb::arg("mapping"),
+           nb::arg("is_real"))
+      .def_rw("is_real", &TreePairMapping::is_real)
+      .def_rw("mapping", &TreePairMapping::mapping)
+      .def_static(
+        "from_identity",
+        [](TensorProduct::Ptr codomain, TensorProduct::Ptr domain, py::object block_inds) {
+            return TreePairMapping::from_identity(
+              std::move(codomain), std::move(domain), optional_block_inds_from_py(block_inds));
+        },
+        nb::arg("codomain"),
+        nb::arg("domain"),
+        nb::arg("block_inds").none() = nb::none(),
+        DOC(lasyten, TreePairMapping, from_identity))
+      .def_static(
+        "from_instructions",
+        [](std::vector<Instruction> const& instructions,
+           TensorProduct::Ptr codomain,
+           TensorProduct::Ptr domain,
+           py::object block_inds) {
+            return TreePairMapping::from_instructions(instructions,
+                                                      std::move(codomain),
+                                                      std::move(domain),
+                                                      optional_block_inds_from_py(block_inds));
+        },
+        nb::arg("instructions"),
+        nb::arg("codomain"),
+        nb::arg("domain"),
+        nb::arg("block_inds").none() = nb::none())
       .def("prune",
            &TreePairMapping::prune,
-           py::arg("tol") = 1e-15,
+           nb::arg("tol") = 1e-15,
            doc_cpp_ref(R"pydoc(prune)pydoc", "lasyten::TreePairMapping::prune()"))
       .def(
         "transform_tensor",
@@ -105,7 +139,7 @@ bind_fusion_tree_mapping(py::module_& m)
            std::vector<int64> codomain_idcs,
            std::vector<int64> domain_idcs,
            py::object block_backend) {
-            auto backend = block_backend.cast<std::shared_ptr<BlockBackend>>();
+            auto backend = py::cast<std::shared_ptr<BlockBackend>>(block_backend);
             return self.transform_tensor(data,
                                          codomain,
                                          domain,
@@ -115,44 +149,59 @@ bind_fusion_tree_mapping(py::module_& m)
                                          domain_idcs,
                                          backend);
         },
-        py::arg("data"),
-        py::arg("codomain"),
-        py::arg("domain"),
-        py::arg("new_codomain"),
-        py::arg("new_domain"),
-        py::arg("codomain_idcs"),
-        py::arg("domain_idcs"),
-        py::arg("block_backend"),
+        nb::arg("data"),
+        nb::arg("codomain"),
+        nb::arg("domain"),
+        nb::arg("new_codomain"),
+        nb::arg("new_domain"),
+        nb::arg("codomain_idcs"),
+        nb::arg("domain_idcs"),
+        nb::arg("block_backend"),
         doc_cpp_ref(R"pydoc(transform_tensor)pydoc",
                     "lasyten::TreePairMapping::transform_tensor()"));
 
-    py::class_<FactorizedTreeMapping> fact(m, "FactorizedTreeMapping");
+    nb::class_<FactorizedTreeMapping> fact(m, "FactorizedTreeMapping");
     fact.doc() = DOC(lasyten, FactorizedTreeMapping);
 
     fact
-      .def(py::init<FusionTreeMappingVariant, FusionTreeMappingVariant, bool>(),
-           py::arg("splitting_tree_mapping"),
-           py::arg("fusion_tree_mapping"),
-           py::arg("is_real"))
-      .def_readwrite("is_real", &FactorizedTreeMapping::is_real)
-      .def_readwrite("splitting_tree_mapping", &FactorizedTreeMapping::splitting_tree_mapping)
-      .def_readwrite("fusion_tree_mapping", &FactorizedTreeMapping::fusion_tree_mapping)
-      .def_static("from_identity",
-                  &FactorizedTreeMapping::from_identity,
-                  py::arg("codomain"),
-                  py::arg("domain"),
-                  py::arg("block_inds") = py::none(),
-                  doc_cpp_ref(R"pydoc(from_identity)pydoc",
-                              "lasyten::FactorizedTreeMapping::from_identity()"))
-      .def_static("from_instructions",
-                  &FactorizedTreeMapping::from_instructions,
-                  py::arg("instructions"),
-                  py::arg("codomain"),
-                  py::arg("domain"),
-                  py::arg("block_inds") = py::none())
+      .def(
+        lasyten::ctor<decltype(fact), FusionTreeMappingVariant, FusionTreeMappingVariant, bool>(),
+        nb::arg("splitting_tree_mapping"),
+        nb::arg("fusion_tree_mapping"),
+        nb::arg("is_real"))
+      .def_rw("is_real", &FactorizedTreeMapping::is_real)
+      .def_rw("splitting_tree_mapping", &FactorizedTreeMapping::splitting_tree_mapping)
+      .def_rw("fusion_tree_mapping", &FactorizedTreeMapping::fusion_tree_mapping)
+      .def_static(
+        "from_identity",
+        [](TensorProduct::Ptr codomain, TensorProduct::Ptr domain, py::object block_inds) {
+            return FactorizedTreeMapping::from_identity(
+              std::move(codomain), std::move(domain), optional_block_inds_from_py(block_inds));
+        },
+        nb::arg("codomain"),
+        nb::arg("domain"),
+        nb::arg("block_inds").none() = nb::none(),
+        doc_cpp_ref(R"pydoc(from_identity)pydoc",
+                    "lasyten::FactorizedTreeMapping::from_identity()"))
+      .def_static(
+        "from_instructions",
+        [](std::vector<Instruction> const& instructions,
+           TensorProduct::Ptr codomain,
+           TensorProduct::Ptr domain,
+           py::object block_inds) {
+            return FactorizedTreeMapping::from_instructions(
+              instructions,
+              std::move(codomain),
+              std::move(domain),
+              optional_block_inds_from_py(block_inds));
+        },
+        nb::arg("instructions"),
+        nb::arg("codomain"),
+        nb::arg("domain"),
+        nb::arg("block_inds").none() = nb::none())
       .def("prune",
            &FactorizedTreeMapping::prune,
-           py::arg("tol") = 1e-15,
+           nb::arg("tol") = 1e-15,
            doc_cpp_ref(R"pydoc(prune)pydoc", "lasyten::FactorizedTreeMapping::prune()"))
       .def(
         "transform_tensor",
@@ -165,7 +214,7 @@ bind_fusion_tree_mapping(py::module_& m)
            std::vector<int64> codomain_idcs,
            std::vector<int64> domain_idcs,
            py::object block_backend) {
-            auto backend = block_backend.cast<std::shared_ptr<BlockBackend>>();
+            auto backend = py::cast<std::shared_ptr<BlockBackend>>(block_backend);
             return self.transform_tensor(data,
                                          codomain,
                                          domain,
@@ -175,43 +224,44 @@ bind_fusion_tree_mapping(py::module_& m)
                                          domain_idcs,
                                          backend);
         },
-        py::arg("data"),
-        py::arg("codomain"),
-        py::arg("domain"),
-        py::arg("new_codomain"),
-        py::arg("new_domain"),
-        py::arg("codomain_idcs"),
-        py::arg("domain_idcs"),
-        py::arg("block_backend"),
+        nb::arg("data"),
+        nb::arg("codomain"),
+        nb::arg("domain"),
+        nb::arg("new_codomain"),
+        nb::arg("new_domain"),
+        nb::arg("codomain_idcs"),
+        nb::arg("domain_idcs"),
+        nb::arg("block_backend"),
         doc_cpp_ref(R"pydoc(transform_tensor)pydoc",
                     "lasyten::FactorizedTreeMapping::transform_tensor()"));
 
-    py::class_<PermuteLegsInstructionEngine> perm_cls(m, "PermuteLegsInstructionEngine");
+    nb::class_<PermuteLegsInstructionEngine> perm_cls(m, "PermuteLegsInstructionEngine");
     perm_cls.doc() = doc_cpp_ref(R"pydoc(PermuteLegsInstructionEngine)pydoc",
                                  "lasyten::PermuteLegsInstructionEngine",
                                  "class");
 
     perm_cls
-      .def(py::init<int64,
-                    int64,
-                    std::vector<int64>,
-                    std::vector<int64>,
-                    std::vector<std::optional<int64>>,
-                    std::vector<std::optional<bool>>,
-                    bool>(),
-           py::arg("num_codomain_legs"),
-           py::arg("num_domain_legs"),
-           py::arg("codomain_idcs"),
-           py::arg("domain_idcs"),
-           py::arg("levels"),
-           py::arg("bend_right"),
-           py::arg("has_symmetric_braid"))
-      .def_readwrite("num_legs", &PermuteLegsInstructionEngine::num_legs)
-      .def_readwrite("has_symmetric_braid", &PermuteLegsInstructionEngine::has_symmetric_braid)
-      .def_readwrite("num_codomain_legs", &PermuteLegsInstructionEngine::num_codomain_legs)
-      .def_readwrite("num_domain_legs", &PermuteLegsInstructionEngine::num_domain_legs)
-      .def_readwrite("target_positions", &PermuteLegsInstructionEngine::target_positions)
-      .def_readwrite("levels", &PermuteLegsInstructionEngine::levels)
+      .def(lasyten::ctor<decltype(perm_cls),
+                         int64,
+                         int64,
+                         std::vector<int64>,
+                         std::vector<int64>,
+                         std::vector<std::optional<int64>>,
+                         std::vector<std::optional<bool>>,
+                         bool>(),
+           nb::arg("num_codomain_legs"),
+           nb::arg("num_domain_legs"),
+           nb::arg("codomain_idcs"),
+           nb::arg("domain_idcs"),
+           nb::arg("levels"),
+           nb::arg("bend_right"),
+           nb::arg("has_symmetric_braid"))
+      .def_rw("num_legs", &PermuteLegsInstructionEngine::num_legs)
+      .def_rw("has_symmetric_braid", &PermuteLegsInstructionEngine::has_symmetric_braid)
+      .def_rw("num_codomain_legs", &PermuteLegsInstructionEngine::num_codomain_legs)
+      .def_rw("num_domain_legs", &PermuteLegsInstructionEngine::num_domain_legs)
+      .def_rw("target_positions", &PermuteLegsInstructionEngine::target_positions)
+      .def_rw("levels", &PermuteLegsInstructionEngine::levels)
       .def("evaluate_instructions",
            [](PermuteLegsInstructionEngine& self) {
                auto inst = self.evaluate_instructions();
@@ -223,10 +273,10 @@ bind_fusion_tree_mapping(py::module_& m)
            })
       .def("verify",
            &PermuteLegsInstructionEngine::verify,
-           py::arg("num_codomain_legs"),
-           py::arg("num_domain_legs"),
-           py::arg("codomain_idcs"),
-           py::arg("domain_idcs"),
+           nb::arg("num_codomain_legs"),
+           nb::arg("num_domain_legs"),
+           nb::arg("codomain_idcs"),
+           nb::arg("domain_idcs"),
            doc_cpp_ref(R"pydoc(verify)pydoc", "lasyten::PermuteLegsInstructionEngine::verify()"));
 }
 

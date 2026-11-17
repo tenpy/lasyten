@@ -487,17 +487,13 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
     auto codomain = std::make_shared<TensorProduct>(std::move(cod_legs));
     auto domain = std::make_shared<TensorProduct>(std::move(dom_legs));
 
-    std::vector<std::vector<py::object>> py_grid(
-      static_cast<std::size_t>(n_rows), std::vector<py::object>(static_cast<std::size_t>(n_cols)));
-    for (int64 i = 0; i < n_rows; ++i) {
-        for (int64 j = 0; j < n_cols; ++j) {
-            auto const& t = grid[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)];
-            py_grid[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)] =
-              t ? py::cast(t) : py::none();
-        }
+    std::vector<std::vector<TensorCPtr>> cgrid;
+    cgrid.reserve(grid.size());
+    for (auto const& row : grid) {
+        cgrid.emplace_back(row.begin(), row.end());
     }
 
-    auto data = backend->from_grid(std::move(py_grid),
+    auto data = backend->from_grid(std::move(cgrid),
                                    codomain,
                                    domain,
                                    std::move(left_mult_slices),
@@ -613,19 +609,15 @@ DirectSumSpace::projection_onto_summands(std::optional<std::vector<SummandRef>> 
             throw std::runtime_error(
               "DirectSumSpace::projection_onto_summands: unexpected diagonal block shape");
         }
-        py::array_t<bool> block(static_cast<py::ssize_t>(shape[0]));
-        auto buf = block.mutable_unchecked<1>();
-        for (py::ssize_t i = 0; i < buf.shape(0); ++i) {
-            buf(i) = false;
-        }
+        std::vector<bool> mask(static_cast<std::size_t>(shape[0]), false);
         for (auto i_cap : kept_cap) {
             int64 const start = slc[static_cast<std::size_t>(i_cap)];
             int64 const stop = slc[static_cast<std::size_t>(i_cap) + 1];
             for (int64 i = start; i < stop; ++i) {
-                buf(static_cast<py::ssize_t>(i)) = true;
+                mask[static_cast<std::size_t>(i)] = true;
             }
         }
-        return bb->as_block(block, Dtype::Bool, device);
+        return bb->block_from_bool_vector(mask, device);
     };
 
     auto diag = DiagonalTensor::from_sector_block_func(

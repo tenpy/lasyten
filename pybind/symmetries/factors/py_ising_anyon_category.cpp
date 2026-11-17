@@ -1,6 +1,6 @@
 #include "../../doc_plus.h"
 #include "docstrings/symmetries/factors/ising_anyon_category.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 #include "symmetries/casters.hpp"
 
@@ -10,20 +10,20 @@
 namespace lasyten {
 
 void
-bind_ising_anyon_category(py::module_& m)
+bind_ising_anyon_category(nb::module_& m)
 {
-    py::class_<IsingAnyonCategory, SymmetryFactor, py::smart_holder> cls(
+    nb::class_<IsingAnyonCategory, SymmetryFactor> cls(
       m, "IsingAnyonCategory", DOC(lasyten, IsingAnyonCategory));
-    cls.def(py::init<int>(), py::arg("nu") = 1)
+    cls.def(lasyten::ctor<decltype(cls), int>(), nb::arg("nu") = 1)
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<IsingAnyonCategory>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
     cls.attr("vacuum") = IsingAnyonCategory::vacuum;
     cls.attr("sigma") = IsingAnyonCategory::sigma;
     cls.attr("psi") = IsingAnyonCategory::psi;
-    cls.def_readonly("nu", &IsingAnyonCategory::nu);
+    cls.def_ro("nu", &IsingAnyonCategory::nu);
 }
 
 } // namespace lasyten

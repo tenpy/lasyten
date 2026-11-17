@@ -307,7 +307,7 @@ class ClassStub:
 
 @dataclass
 class ModuleStub:
-    doc: str = 'LASyTen python bindings using pybind11'
+    doc: str = 'LASyTen python bindings using nanobind'
     classes: dict[str, ClassStub] = field(default_factory=dict)
     functions: dict[str, Member] = field(default_factory=dict)
     constants: dict[str, str] = field(default_factory=dict)  # name -> repr/doc note
@@ -379,6 +379,11 @@ class DocResolver:
 # Binding parser
 # ---------------------------------------------------------------------------
 
+def _is_init(arg: str) -> bool:
+    """True for constructor registrations (pybind11 ``py::init`` or nanobind equivalents)."""
+    return any(tok in arg for tok in ('py::init', 'nb::init', 'nb::new_', 'ctor<', 'ctor_for<'))
+
+
 _SKIP_BASES = frozenset(
     {
         'py::smart_holder',
@@ -397,12 +402,12 @@ def _filter_bases(template_args: str) -> list[str]:
             continue  # primary type
         # Drop template wrappers / holders / trampolines
         bare = p.split('<', 1)[0].split('::')[-1].strip()
-        if bare in _SKIP_BASES or bare.startswith('py::'):
+        if bare in _SKIP_BASES or bare.startswith(('py::', 'nb::')):
             continue
         if _TRAMPOLINE_RE.match(bare):
             continue
         # Nested C++ types like BlockBackend::Block are not Python bases
-        if '::' in p and not p.startswith('py::'):
+        if '::' in p and not p.startswith(('py::', 'nb::')):
             # e.g. BlockBackend::Block — skip as base (nested class registration)
             continue
         bases.append(bare)
@@ -497,7 +502,7 @@ class BindingParser:
     def _parse_handle_aliases(self, text: str) -> None:
         """Bind ``auto& alias = *g_handle;`` used after declare-then-define shells."""
         for m in re.finditer(
-            r'(?:auto\s*&|py::class_\s*<[^>]+>\s*&)\s*([A-Za-z_][\w]*)\s*=\s*\*\s*([A-Za-z_][\w]*)\s*;',
+            r'(?:auto\s*&|(?:py|nb)::class_\s*<[^>]+>\s*&)\s*([A-Za-z_][\w]*)\s*=\s*\*\s*([A-Za-z_][\w]*)\s*;',
             text,
         ):
             alias, source = m.group(1), m.group(2)
@@ -562,7 +567,7 @@ class BindingParser:
     def _parse_classes(self, text: str) -> None:
         # py::class_<...>(parent_or_m, "Name" [, doc])
         # optionally assigned: py::class_<...> cls(...)
-        for m in re.finditer(r'py::class_\s*<', text):
+        for m in re.finditer(r'(?:py|nb)::class_\s*<', text):
             lt = m.end() - 1  # at '<'
             # find matching '>' for template args (angle-aware, rough)
             depth = 0
@@ -675,11 +680,15 @@ class BindingParser:
             'def_property': 'property',
             'def_readonly': 'readonly',
             'def_readwrite': 'readwrite',
+            'def_prop_ro': 'property',
+            'def_prop_rw': 'property',
+            'def_ro': 'readonly',
+            'def_rw': 'readwrite',
             'def': 'method',
         }
         for cm in re.finditer(
-            r'\.\s*(def_static|def_property_readonly|def_property|'
-            r'def_readonly|def_readwrite|def)\s*\(',
+            r'\.\s*(def_static|def_property_readonly|def_property|def_prop_ro|def_prop_rw|'
+            r'def_readonly|def_readwrite|def_ro|def_rw|def)\s*\(',
             region,
         ):
             kind = patterns[cm.group(1)]
@@ -693,13 +702,13 @@ class BindingParser:
                 continue
             name = _python_name_from_string_arg(args[0])
             if not name:
-                if 'py::init' in args[0]:
+                if _is_init(args[0]):
                     cls.members.setdefault('__init__', Member('__init__', 'method', ''))
                 continue
             self._set_member(cls, name, kind, self._doc_from_def_args(args))
 
     def _parse_native_enums(self, text: str) -> None:
-        for m in re.finditer(r'py::native_enum\s*<[^>]+>\s*', text):
+        for m in re.finditer(r'(?:py::native_enum|nb::enum_)\s*<[^>]+>\s*', text):
             # optional var
             before = text[max(0, m.start() - 60) : m.start()]
             var_m = re.search(r'([A-Za-z_][\w]*)\s*$', before)
@@ -721,11 +730,18 @@ class BindingParser:
                 continue
             close = _matching_paren(text, j)
             args = _split_args(text[j + 1 : close])
-            if len(args) < 3:
+            is_nb = text[m.start() : m.start() + 8] == 'nb::enum'
+            if len(args) < (2 if is_nb else 3):
                 continue
             py_name = _python_name_from_string_arg(args[1])
-            enum_base = _python_name_from_string_arg(args[2]) or 'enum.Enum'
-            doc = self.resolver.resolve(args[3]) if len(args) > 3 else ''
+            if is_nb:
+                # nb::enum_<E>(scope, "Name", [nb::is_arithmetic(),] [doc])
+                enum_base = 'enum.IntEnum' if any('is_arithmetic' in a for a in args[2:]) else 'enum.Enum'
+                doc_args = [a for a in args[2:] if not a.strip().startswith('nb::is_')]
+                doc = self.resolver.resolve(doc_args[0]) if doc_args else ''
+            else:
+                enum_base = _python_name_from_string_arg(args[2]) or 'enum.Enum'
+                doc = self.resolver.resolve(args[3]) if len(args) > 3 else ''
             if not py_name:
                 continue
             cls = self._ensure_class(py_name, doc=doc)
@@ -734,7 +750,7 @@ class BindingParser:
             if var_name:
                 self._bind_handle(var_name, py_name, m.start())
             hm = re.search(
-                r'py::native_enum\s*<[^>]+>\s+([A-Za-z_][\w]*)\s*\(',
+                r'(?:py::native_enum|nb::enum_)\s*<[^>]+>\s+([A-Za-z_][\w]*)\s*\(',
                 text[m.start() : m.start() + 200],
             )
             if hm:
@@ -763,8 +779,11 @@ class BindingParser:
                     self.mod.constants[val] = val
 
     def _parse_exceptions(self, text: str) -> None:
-        for m in re.finditer(r'py::register_exception\s*<[^>]+>\s*\(', text):
+        for m in re.finditer(
+            r'(?:py::register_exception|nb::exception)\s*<[^>]+>\s*(?:[A-Za-z_]\w*\s*)?\(', text
+        ):
             open_idx = text.index('(', m.start())
+            nb_var = re.search(r'>\s*([A-Za-z_]\w*)\s*\($', text[m.start() : open_idx + 1])
             close = _matching_paren(text, open_idx)
             args = _split_args(text[open_idx + 1 : close])
             if len(args) < 2:
@@ -811,6 +830,8 @@ class BindingParser:
             )
             if bm:
                 self._bind_handle(bm.group(1), py_name, m.start())
+            if nb_var:
+                self._bind_handle(nb_var.group(1), py_name, m.start())
 
     def _parse_module_defs(self, text: str) -> None:
         for m in re.finditer(r'\bm\.def\s*\(', text):
@@ -906,11 +927,15 @@ class BindingParser:
             ('def_property', 'property'),
             ('def_readonly', 'readonly'),
             ('def_readwrite', 'readwrite'),
+            ('def_prop_ro', 'property'),
+            ('def_prop_rw', 'property'),
+            ('def_ro', 'readonly'),
+            ('def_rw', 'readwrite'),
             ('def', 'method'),
         ]
         for m in re.finditer(
-            r'([A-Za-z_][\w]*)\s*\.\s*(def_static|def_property_readonly|def_property|'
-            r'def_readonly|def_readwrite|def)\s*\(',
+            r'([A-Za-z_][\w]*)\s*\.\s*(def_static|def_property_readonly|def_property|def_prop_ro|def_prop_rw|'
+            r'def_readonly|def_readwrite|def_ro|def_rw|def)\s*\(',
             text,
         ):
             if self._in_helper_body(m.start()):
@@ -931,7 +956,7 @@ class BindingParser:
                 # still include dunders that autodoc might want; keep them
                 if not name:
                     # py::init — skip
-                    if 'py::init' in args[0] or args[0].strip().startswith('py::init'):
+                    if _is_init(args[0]):
                         cls = self._resolve_cls(handle, m.start())
                         if cls and '__init__' not in cls.members:
                             cls.members['__init__'] = Member('__init__', 'method', '')
@@ -965,7 +990,7 @@ class BindingParser:
         # Chained .def( without handle — walk from known handle starts
         for m in re.finditer(
             r'([A-Za-z_][\w]*)\s*(?:\.def|\.def_static|\.def_property|'
-            r'\.def_property_readonly|\.def_readonly|\.def_readwrite)',
+            r'\.def_property_readonly|\.def_readonly|\.def_readwrite|\.def_prop_ro|\.def_prop_rw|\.def_ro|\.def_rw)',
             text,
         ):
             if self._in_helper_body(m.start()):
@@ -982,8 +1007,8 @@ class BindingParser:
             end = self._statement_end(text, region_start)
             region = text[region_start:end]
             for cm in re.finditer(
-                r'\.\s*(def_static|def_property_readonly|def_property|'
-                r'def_readonly|def_readwrite|def)\s*\(',
+                r'\.\s*(def_static|def_property_readonly|def_property|def_prop_ro|def_prop_rw|'
+                r'def_readonly|def_readwrite|def_ro|def_rw|def)\s*\(',
                 region,
             ):
                 kind = dict(patterns)[cm.group(1)]
@@ -997,7 +1022,7 @@ class BindingParser:
                     continue
                 name = _python_name_from_string_arg(args[0])
                 if not name:
-                    if 'py::init' in args[0]:
+                    if _is_init(args[0]):
                         cls.members.setdefault('__init__', Member('__init__', 'method', ''))
                     continue
                 self._set_member(cls, name, kind, self._doc_from_def_args(args))
@@ -1093,7 +1118,7 @@ class BindingParser:
             params = text[open_paren + 1 : close_paren]
             # Require a Class& / py::class_& parameter (the bind target).
             param_m = re.search(
-                r'(?:Class|py::class_\s*<[^>]+>)\s*&\s*([A-Za-z_][\w]*)',
+                r'(?:Class|(?:py|nb)::class_\s*<[^>]+>)\s*&\s*([A-Za-z_][\w]*)',
                 params,
             )
             if param_m is None:
@@ -1128,6 +1153,10 @@ class BindingParser:
             'def_property': 'property',
             'def_readonly': 'readonly',
             'def_readwrite': 'readwrite',
+            'def_prop_ro': 'property',
+            'def_prop_rw': 'property',
+            'def_ro': 'readonly',
+            'def_rw': 'readwrite',
             'def': 'method',
         }
         collected: dict[str, Member] = {}
@@ -1144,15 +1173,15 @@ class BindingParser:
 
         for m in re.finditer(
             rf'{re.escape(handle)}\s*(?:\.def|\.def_static|\.def_property|'
-            rf'\.def_property_readonly|\.def_readonly|\.def_readwrite)',
+            rf'\.def_property_readonly|\.def_readonly|\.def_readwrite|\.def_prop_ro|\.def_prop_rw|\.def_ro|\.def_rw)',
             region,
         ):
             stmt_start = start + m.start()
             stmt_end = self._statement_end(text, stmt_start)
             stmt = text[stmt_start:stmt_end]
             for cm in re.finditer(
-                r'\.\s*(def_static|def_property_readonly|def_property|'
-                r'def_readonly|def_readwrite|def)\s*\(',
+                r'\.\s*(def_static|def_property_readonly|def_property|def_prop_ro|def_prop_rw|'
+                r'def_readonly|def_readwrite|def_ro|def_rw|def)\s*\(',
                 stmt,
             ):
                 kind = patterns[cm.group(1)]
@@ -1166,7 +1195,7 @@ class BindingParser:
                     continue
                 name = _python_name_from_string_arg(args[0])
                 if not name:
-                    if 'py::init' in args[0]:
+                    if _is_init(args[0]):
                         _record('__init__', 'method', '')
                     continue
                 _record(name, kind, self._doc_from_def_args(args))
@@ -1193,7 +1222,7 @@ class BindingParser:
                     continue
                 handle = args[0].strip()
                 # Skip the function definition itself (``Class& cls``).
-                if '&' in handle or re.match(r'^(?:Class|py::class_)', handle):
+                if '&' in handle or re.match(r'^(?:Class|py::class_|nb::class_)', handle):
                     continue
                 # Bare identifier only (the pybind class handle variable).
                 if not re.fullmatch(r'[A-Za-z_][\w]*', handle):

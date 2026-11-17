@@ -5,15 +5,29 @@
 #include <lasyten/block_backend/dtypes.h>
 #include <lasyten/lasyten.h>
 #include <lasyten/symmetries/sector.h>
-
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+#include <lasyten/tensors/tensor.h>
 
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace lasyten {
+
+/// ``list[list[Tensor | None]]`` -> `TensorBackend::from_grid` grid (``None`` becomes nullptr).
+inline std::vector<std::vector<TensorCPtr>>
+tensor_grid_from_python(py::object grid)
+{
+    std::vector<std::vector<TensorCPtr>> out;
+    for (auto row_h : py::reinterpret_borrow<py::iterable>(grid)) {
+        std::vector<TensorCPtr> row;
+        for (auto item : py::reinterpret_borrow<py::iterable>(row_h)) {
+            py::object obj = py::reinterpret_borrow<py::object>(item);
+            row.push_back(obj.is_none() ? nullptr : py::cast<TensorPtr>(obj));
+        }
+        out.push_back(std::move(row));
+    }
+    return out;
+}
 
 inline py::dict
 copy_kwargs(py::object obj)
@@ -81,7 +95,7 @@ inline SectorBlockFactoryFn
 sector_block_factory_from_python(py::function func)
 {
     return [func](std::vector<int64> const& shape, Sector const& coupled) {
-        return func(shape_as_tuple(shape), py::cast(coupled)).cast<BlockBackend::BlockPtr>();
+        return py::cast<BlockBackend::BlockPtr>(func(shape_as_tuple(shape), py::cast(coupled)));
     };
 }
 
@@ -90,7 +104,7 @@ block_unary_from_python(py::function func, py::object func_kwargs = py::none())
 {
     py::dict kwargs = copy_kwargs(func_kwargs);
     return [func, kwargs](BlockBackend::BlockPtr const& block) {
-        return func(py::cast(block), **kwargs).cast<BlockBackend::BlockPtr>();
+        return py::cast<BlockBackend::BlockPtr>(func(py::cast(block), **kwargs));
     };
 }
 
@@ -99,7 +113,7 @@ block_binary_from_python(py::function func, py::object func_kwargs = py::none())
 {
     py::dict kwargs = copy_kwargs(func_kwargs);
     return [func, kwargs](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
-        return func(py::cast(a), py::cast(b), **kwargs).cast<BlockBackend::BlockPtr>();
+        return py::cast<BlockBackend::BlockPtr>(func(py::cast(a), py::cast(b), **kwargs));
     };
 }
 
@@ -107,7 +121,7 @@ inline BlockToScalarFn
 block_to_scalar_from_python(py::function func)
 {
     return [func](BlockBackend::BlockPtr const& block) {
-        return func(py::cast(block)).cast<BlockBackend::Scalar>();
+        return py::cast<BlockBackend::Scalar>(func(py::cast(block)));
     };
 }
 
@@ -115,7 +129,7 @@ inline ScalarReduceFn
 scalar_reduce_from_python(py::function func)
 {
     return [func](std::vector<BlockBackend::Scalar> const& xs) {
-        return func(py::cast(xs)).cast<BlockBackend::Scalar>();
+        return py::cast<BlockBackend::Scalar>(func(py::cast(xs)));
     };
 }
 
@@ -125,7 +139,7 @@ dtype_map_from_python(py::object dtype_map)
     if (dtype_map.is_none()) {
         return std::nullopt;
     }
-    return [dtype_map](Dtype d) { return dtype_map(py::cast(d)).cast<Dtype>(); };
+    return [dtype_map](Dtype d) { return py::cast<Dtype>(dtype_map(py::cast(d))); };
 }
 
 /// Adapt a numpy-oriented bool function so backends can call it on Block objects.

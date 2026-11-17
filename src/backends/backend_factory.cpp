@@ -2,8 +2,13 @@
 #include <lasyten/backends/backend_factory.h>
 #include <lasyten/backends/fusion_tree_backend.h>
 #include <lasyten/backends/no_symmetry.h>
+#include <lasyten/block_backend/eigen.h>
+#if LASYTEN_WITH_NUMPY_BACKEND
 #include <lasyten/block_backend/numpy.h>
+#endif
+#if LASYTEN_WITH_TORCH_BACKEND
 #include <lasyten/block_backend/torch.h>
+#endif
 #include <lasyten/config.h>
 #include <lasyten/symmetries/factors/no_symmetry.h>
 #include <lasyten/tools.h>
@@ -17,20 +22,50 @@ namespace lasyten {
 
 namespace {
 
+/// Map a ``block_backend`` name to a (cached singleton) backend instance.
+///
+/// Preferred names:
+///   * ``"eigen"``  -- native C++ Eigen/LAPACK CPU backend (no Python needed; the long-term
+///                     default for ``"cpu"``).
+///   * ``"torch"``, ``"gpu"``, ``"apple_silicon"`` -- libtorch (GPU / ATen).
+///
+/// Transitional (convert_nanobind.md, leftover #5; compiled only with
+/// ``LASYTEN_WITH_NUMPY_BACKEND``, which needs ``LASYTEN_WITH_PYTHON``):
+///   * ``"numpy"``  -- NumpyBlockBackend (dispatches into numpy/scipy through the interpreter).
+///   * ``"cpu"``    -- still NumpyBlockBackend while the numpy backend is built, because
+///                     EigenBlockBackend has not passed the full test-suite yet. Without
+///                     ``LASYTEN_WITH_NUMPY_BACKEND`` it is EigenBlockBackend.
+/// ``ArrayApiBlockBackend`` is not reachable through this factory (construct it explicitly).
 std::shared_ptr<BlockBackend>
 make_block_backend(std::string const& block_backend)
 {
-    if (block_backend == "numpy" || block_backend == "cpu") {
+    if (block_backend == "eigen") {
+        return EigenBlockBackend::from_factory_shared("eigen");
+    }
+    if (block_backend == "cpu") {
+        // NumpyBlockBackend while it is built (TODO(#255): EigenBlockBackend once it has full
+        // test-suite parity), else EigenBlockBackend; see default_cpu_block_backend_shared().
+        return default_cpu_block_backend_shared();
+    }
+    if (block_backend == "numpy") {
+#if LASYTEN_WITH_NUMPY_BACKEND
         return NumpyBlockBackend::from_factory_shared("cpu");
+#else
+        throw NotImplemented(
+          "block backend \"numpy\" (compiled out: LASYTEN_WITH_NUMPY_BACKEND=OFF); use \"eigen\"");
+#endif
     }
-    if (block_backend == "torch") {
-        return TorchBlockBackend::from_factory_shared("cpu:0");
-    }
-    if (block_backend == "gpu") {
-        return TorchBlockBackend::from_factory_shared("cuda");
-    }
-    if (block_backend == "apple_silicon") {
+    if (block_backend == "torch" || block_backend == "gpu" || block_backend == "apple_silicon") {
+#if LASYTEN_WITH_TORCH_BACKEND
+        if (block_backend == "torch")
+            return TorchBlockBackend::from_factory_shared("cpu:0");
+        if (block_backend == "gpu")
+            return TorchBlockBackend::from_factory_shared("cuda");
         return TorchBlockBackend::from_factory_shared("mps");
+#else
+        throw NotImplemented(std::string("block backend ") + block_backend +
+                             " (compiled out: LASYTEN_WITH_PYTHON=OFF)");
+#endif
     }
     if (block_backend == "tensorflow" || block_backend == "jax" || block_backend == "tpu") {
         throw NotImplemented(std::string("block backend ") + block_backend);
@@ -97,37 +132,14 @@ make_tensor_backend(std::string const& tensor_backend,
 
 } // namespace
 
-py::object
-get_backend(py::object symmetry, py::object block_backend)
+namespace {
+
+/// Python-free core: ``tensor_backend`` / ``block_backend_str`` are already resolved names.
+TensorBackend::Ptr
+get_backend_by_name(std::string const& tensor_backend,
+                    std::string const& block_backend_str,
+                    Symmetry::Ptr const& sym_ptr)
 {
-    // --- hints from Python get_backend ---
-    // figure out minimal symmetry_backend that supports that symmetry
-    // ---
-    if (symmetry.is_none()) {
-        symmetry = py::cast(get_config().default_tensor_backend);
-    }
-    if (block_backend.is_none()) {
-        block_backend = py::cast(get_config().default_block_backend);
-    }
-
-    std::string tensor_backend;
-    Symmetry::Ptr sym_ptr;
-    if (py::isinstance<Symmetry>(symmetry)) {
-        sym_ptr = symmetry.cast<Symmetry::Ptr>();
-        if (is_no_symmetry(*sym_ptr)) {
-            tensor_backend = "no_symmetry";
-        } else if (sym_ptr->is_abelian() && sym_ptr->has_trivial_braid()) {
-            tensor_backend = "abelian";
-        } else {
-            tensor_backend = "fusion_tree";
-        }
-    } else if (py::isinstance<py::str>(symmetry)) {
-        tensor_backend = symmetry.cast<std::string>();
-    } else {
-        throw py::type_error("Invalid type for symmetry. Expected Symmetry or str");
-    }
-
-    std::string block_backend_str = block_backend.cast<std::string>();
     BackendCacheKey key{ tensor_backend, block_backend_str };
 
     {
@@ -135,7 +147,7 @@ get_backend(py::object symmetry, py::object block_backend)
         auto& cache = backend_cache();
         auto it = cache.find(key);
         if (it != cache.end()) {
-            return py::cast(it->second);
+            return it->second;
         }
     }
 
@@ -156,14 +168,62 @@ get_backend(py::object symmetry, py::object block_backend)
             backend = it->second;
         }
     }
-    return py::cast(backend);
+    return backend;
 }
+
+/// Simplest tensor backend that supports ``sym_ptr``.
+std::string
+tensor_backend_for_symmetry(Symmetry const& sym)
+{
+    if (is_no_symmetry(sym)) {
+        return "no_symmetry";
+    }
+    if (sym.is_abelian() && sym.has_trivial_braid()) {
+        return "abelian";
+    }
+    return "fusion_tree";
+}
+
+} // namespace
 
 TensorBackend::Ptr
 get_backend(Symmetry::Ptr symmetry, std::optional<std::string> block_backend)
 {
-    py::object bb = block_backend.has_value() ? py::cast(*block_backend) : py::none();
-    return get_backend(py::cast(std::move(symmetry)), bb).cast<TensorBackend::Ptr>();
+    std::string tensor_backend =
+      symmetry ? tensor_backend_for_symmetry(*symmetry) : get_config().default_tensor_backend;
+    std::string block_backend_str =
+      block_backend.has_value() ? *block_backend : get_config().default_block_backend;
+    return get_backend_by_name(tensor_backend, block_backend_str, symmetry);
 }
+
+#if LASYTEN_HAS_PYTHON
+py::object
+get_backend(py::object symmetry, py::object block_backend)
+{
+    // --- hints from Python get_backend ---
+    // figure out minimal symmetry_backend that supports that symmetry
+    // ---
+    if (symmetry.is_none()) {
+        symmetry = py::cast(get_config().default_tensor_backend);
+    }
+    if (block_backend.is_none()) {
+        block_backend = py::cast(get_config().default_block_backend);
+    }
+
+    std::string tensor_backend;
+    Symmetry::Ptr sym_ptr;
+    if (py::isinstance<Symmetry>(symmetry)) {
+        sym_ptr = py::cast<Symmetry::Ptr>(symmetry);
+        tensor_backend = tensor_backend_for_symmetry(*sym_ptr);
+    } else if (py::isinstance<py::str>(symmetry)) {
+        tensor_backend = py::cast<std::string>(symmetry);
+    } else {
+        throw py::type_error("Invalid type for symmetry. Expected Symmetry or str");
+    }
+
+    return py::cast(
+      get_backend_by_name(tensor_backend, py::cast<std::string>(block_backend), sym_ptr));
+}
+#endif // LASYTEN_HAS_PYTHON
 
 } // namespace lasyten

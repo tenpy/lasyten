@@ -5,7 +5,7 @@
 #include <lasyten/tools.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/decompositions.h"
 
@@ -27,7 +27,7 @@ py_leg_labels(py::object seq)
         if (item.is_none()) {
             out.push_back("");
         } else {
-            out.push_back(item.cast<std::string>());
+            out.push_back(py::cast<std::string>(item));
         }
     }
     return out;
@@ -48,7 +48,7 @@ py_opt_string(py::object obj)
     if (obj.is_none()) {
         return std::nullopt;
     }
-    return obj.cast<std::string>();
+    return py::cast<std::string>(obj);
 }
 
 py::object
@@ -63,26 +63,26 @@ entropy_numpy(py::object p, py::object n)
     }
     bool inf = false;
     try {
-        inf = std::isinf(n.cast<float64>());
+        inf = std::isinf(py::cast<float64>(n));
     } catch (...) {
         inf = false;
     }
     if (inf) {
         return -np.attr("log")(np.attr("max")(p));
     }
-    float64 n_f = n.cast<float64>();
+    float64 n_f = py::cast<float64>(n);
     return np.attr("log")(np.attr("sum")(p.attr("__pow__")(n))).attr("__truediv__")(1.0 - n_f);
 }
 
 } // namespace
 
 void
-bind_tensors_decompositions(py::module_& m)
+bind_tensors_decompositions(nb::module_& m)
 {
     m.def("apply_mask_DiagonalTensor",
           &apply_mask_DiagonalTensor,
-          py::arg("tensor"),
-          py::arg("mask"),
+          nb::arg("tensor"),
+          nb::arg("mask"),
           DOC(lasyten, apply_mask_DiagonalTensor));
 
     m.def(
@@ -93,10 +93,10 @@ bind_tensors_decompositions(py::module_& m)
                       new_leg_dual,
                       py_opt_string(sort));
       },
-      py::arg("tensor"),
-      py::arg("new_labels"),
-      py::arg("new_leg_dual") = false,
-      py::arg("sort") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("new_labels"),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("sort").none() = nb::none(),
       DOC(lasyten, eigh));
 
     m.def(
@@ -107,10 +107,10 @@ bind_tensors_decompositions(py::module_& m)
                      new_leg_dual,
                      py_opt_string(sort));
       },
-      py::arg("tensor"),
-      py::arg("new_labels"),
-      py::arg("new_leg_dual") = false,
-      py::arg("sort") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("new_labels"),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("sort").none() = nb::none(),
       DOC(lasyten, eig));
 
     m.def(
@@ -121,10 +121,10 @@ bind_tensors_decompositions(py::module_& m)
                           new_leg_dual,
                           py_opt_string(sort));
       },
-      py::arg("tensor"),
-      py::arg("new_labels"),
-      py::arg("new_leg_dual") = false,
-      py::arg("sort") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("new_labels"),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("sort").none() = nb::none(),
       DOC(lasyten, eigvalsh));
 
     m.def(
@@ -135,10 +135,10 @@ bind_tensors_decompositions(py::module_& m)
                          new_leg_dual,
                          py_opt_string(sort));
       },
-      py::arg("tensor"),
-      py::arg("new_labels"),
-      py::arg("new_leg_dual") = false,
-      py::arg("sort") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("new_labels"),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("sort").none() = nb::none(),
       DOC(lasyten, eigvals));
 
     m.def(
@@ -149,19 +149,19 @@ bind_tensors_decompositions(py::module_& m)
               if (n.is(py::none())) {
                   n_f = 1.;
               } else if (py::isinstance<py::float_>(n) || py::isinstance<py::int_>(n)) {
-                  n_f = n.cast<float64>();
+                  n_f = py::cast<float64>(n);
                   if (std::isinf(n_f)) {
                       n_f = std::numeric_limits<float64>::infinity();
                   }
               } else {
-                  n_f = n.cast<float64>();
+                  n_f = py::cast<float64>(n);
               }
-              return py::cast(entropy(p.cast<DiagonalTensorCPtr>(), n_f)).attr("to_numpy")();
+              return py::cast(entropy(py::cast<DiagonalTensorCPtr>(p), n_f)).attr("to_numpy")();
           }
           return entropy_numpy(std::move(p), std::move(n));
       },
-      py::arg("p"),
-      py::arg("n") = 1,
+      nb::arg("p"),
+      nb::arg("n") = 1,
       doc_plus(DOC(lasyten, entropy),
                R"pydoc(
 In Python, ``p`` may also be a NumPy array / sequence of floats. The DiagonalTensor path
@@ -173,10 +173,10 @@ returns a NumPy scalar via ``.to_numpy()``.
       [](TensorCPtr tensor, py::object new_labels, bool new_leg_dual, bool charge_leg_top) {
           return lq(std::move(tensor), py_opt_labels(new_labels), new_leg_dual, charge_leg_top);
       },
-      py::arg("tensor"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
-      py::arg("charge_leg_top") = true,
+      nb::arg("tensor"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("charge_leg_top") = true,
       DOC(lasyten, lq));
 
     m.def(
@@ -184,10 +184,10 @@ returns a NumPy scalar via ``.to_numpy()``.
       [](TensorCPtr tensor, py::object new_labels, bool new_leg_dual, bool charge_leg_top) {
           return qr(std::move(tensor), py_opt_labels(new_labels), new_leg_dual, charge_leg_top);
       },
-      py::arg("tensor"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
-      py::arg("charge_leg_top") = true,
+      nb::arg("tensor"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("charge_leg_top") = true,
       DOC(lasyten, qr));
 
     m.def(
@@ -203,19 +203,19 @@ returns a NumPy scalar via ``.to_numpy()``.
                      charge_leg_top,
                      py_opt_string(algorithm));
       },
-      py::arg("tensor"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
-      py::arg("charge_leg_top") = true,
-      py::arg("algorithm") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("charge_leg_top") = true,
+      nb::arg("algorithm").none() = nb::none(),
       DOC(lasyten, svd));
 
     m.def("svd_apply_mask",
           &svd_apply_mask,
-          py::arg("U"),
-          py::arg("S"),
-          py::arg("Vh"),
-          py::arg("mask"),
+          nb::arg("U"),
+          nb::arg("S"),
+          nb::arg("Vh"),
+          nb::arg("mask"),
           DOC(lasyten, svd_apply_mask));
 
     m.def(
@@ -230,13 +230,13 @@ returns a NumPy scalar via ``.to_numpy()``.
          py::object mask_labels) {
           std::optional<int64> chi_max_opt;
           if (!chi_max.is_none()) {
-              chi_max_opt = chi_max.cast<int64>();
+              chi_max_opt = py::cast<int64>(chi_max);
           }
-          int64 chi_min_v = chi_min.is_none() ? 1 : chi_min.cast<int64>();
+          int64 chi_min_v = chi_min.is_none() ? 1 : py::cast<int64>(chi_min);
           float64 degeneracy_tol_v =
-            degeneracy_tol.is_none() ? 0. : degeneracy_tol.cast<float64>();
-          float64 trunc_cut_v = trunc_cut.is_none() ? 0. : trunc_cut.cast<float64>();
-          float64 svd_min_v = svd_min.is_none() ? 0. : svd_min.cast<float64>();
+            degeneracy_tol.is_none() ? 0. : py::cast<float64>(degeneracy_tol);
+          float64 trunc_cut_v = trunc_cut.is_none() ? 0. : py::cast<float64>(trunc_cut);
+          float64 svd_min_v = svd_min.is_none() ? 0. : py::cast<float64>(svd_min);
           return truncate_singular_values(std::move(S),
                                           chi_max_opt,
                                           chi_min_v,
@@ -246,14 +246,14 @@ returns a NumPy scalar via ``.to_numpy()``.
                                           minimize_error,
                                           py_opt_labels(mask_labels));
       },
-      py::arg("S"),
-      py::arg("chi_max") = py::none(),
-      py::arg("chi_min") = 1,
-      py::arg("degeneracy_tol") = 0,
-      py::arg("trunc_cut") = 0,
-      py::arg("svd_min") = 0,
-      py::arg("minimize_error") = true,
-      py::arg("mask_labels") = py::none(),
+      nb::arg("S"),
+      nb::arg("chi_max").none() = nb::none(),
+      nb::arg("chi_min") = 1,
+      nb::arg("degeneracy_tol") = 0,
+      nb::arg("trunc_cut") = 0,
+      nb::arg("svd_min") = 0,
+      nb::arg("minimize_error") = true,
+      nb::arg("mask_labels").none() = nb::none(),
       DOC(lasyten, truncate_singular_values));
 
     m.def(
@@ -271,17 +271,17 @@ returns a NumPy scalar via ``.to_numpy()``.
          py::object svd_min) {
           std::optional<float64> normalize_opt;
           if (!normalize_to.is_none()) {
-              normalize_opt = normalize_to.cast<float64>();
+              normalize_opt = py::cast<float64>(normalize_to);
           }
           std::optional<int64> chi_max_opt;
           if (!chi_max.is_none()) {
-              chi_max_opt = chi_max.cast<int64>();
+              chi_max_opt = py::cast<int64>(chi_max);
           }
-          int64 chi_min_v = chi_min.is_none() ? 1 : chi_min.cast<int64>();
+          int64 chi_min_v = chi_min.is_none() ? 1 : py::cast<int64>(chi_min);
           float64 degeneracy_tol_v =
-            degeneracy_tol.is_none() ? 0. : degeneracy_tol.cast<float64>();
-          float64 trunc_cut_v = trunc_cut.is_none() ? 0. : trunc_cut.cast<float64>();
-          float64 svd_min_v = svd_min.is_none() ? 0. : svd_min.cast<float64>();
+            degeneracy_tol.is_none() ? 0. : py::cast<float64>(degeneracy_tol);
+          float64 trunc_cut_v = trunc_cut.is_none() ? 0. : py::cast<float64>(trunc_cut);
+          float64 svd_min_v = svd_min.is_none() ? 0. : py::cast<float64>(svd_min);
           return truncated_svd(std::move(tensor),
                                py_opt_labels(new_labels),
                                new_leg_dual,
@@ -294,17 +294,17 @@ returns a NumPy scalar via ``.to_numpy()``.
                                trunc_cut_v,
                                svd_min_v);
       },
-      py::arg("tensor"),
-      py::arg("new_labels") = py::none(),
-      py::arg("new_leg_dual") = false,
-      py::arg("charge_leg_top") = true,
-      py::arg("algorithm") = py::none(),
-      py::arg("normalize_to") = py::none(),
-      py::arg("chi_max") = py::none(),
-      py::arg("chi_min") = 1,
-      py::arg("degeneracy_tol") = 0,
-      py::arg("trunc_cut") = 0,
-      py::arg("svd_min") = 0,
+      nb::arg("tensor"),
+      nb::arg("new_labels").none() = nb::none(),
+      nb::arg("new_leg_dual") = false,
+      nb::arg("charge_leg_top") = true,
+      nb::arg("algorithm").none() = nb::none(),
+      nb::arg("normalize_to").none() = nb::none(),
+      nb::arg("chi_max").none() = nb::none(),
+      nb::arg("chi_min") = 1,
+      nb::arg("degeneracy_tol") = 0,
+      nb::arg("trunc_cut") = 0,
+      nb::arg("svd_min") = 0,
       DOC(lasyten, truncated_svd));
 }
 

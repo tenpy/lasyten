@@ -12,6 +12,7 @@ class NotImplemented : public std::logic_error
     NotImplemented(std::string name);
 };
 
+#if LASYTEN_HAS_PYTHON
 /// Format elements of an iterable as if it were a plain list.
 ///
 /// This means surrounding them with brackets and separating them by `', '`.
@@ -22,6 +23,12 @@ bool is_iterable(py::object a);
 
 /// If `a` is not iterable or a string, return [a], else return a.
 py::object to_iterable(py::object a);
+#endif // LASYTEN_HAS_PYTHON
+
+/// Python-free `format_like_list`: ``[a, b, c]`` of already formatted items.
+[[nodiscard]] std::string format_like_list(std::vector<std::string> const& items);
+/// Python-free `format_like_list` of integers (``str(int)`` of each item).
+[[nodiscard]] std::string format_like_list(std::vector<int64> const& items);
 
 /// Convert to a valid index into the given length, with python convention of negative indices from
 /// back

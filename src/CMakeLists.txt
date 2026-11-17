@@ -2,27 +2,27 @@
 # ## ADD SUB-DIRECTORIES
 # #####################################################################
 
-# Sources that do not *own* a Python-only backend implementation.
-# Many still compile against py:: APIs via public headers (see LASYTEN_WITH_PYTHON).
-target_sources(lasyten
-  PRIVATE
-  backends/tensor_backend.cpp
-  backends/no_symmetry.cpp
+# liblasyten sources are split in two lists (convert_nanobind.md, Phase 5):
+#
+#   LASYTEN_PYTHON_FREE_SOURCES  compile with LASYTEN_HAS_PYTHON=0, i.e. against the opaque
+#                                ``py::`` stubs of include/lasyten/detail/python_api.h
+#                                (Eigen backend, dtypes, config, symmetries, tools, ...). Always built.
+#   LASYTEN_PYTHON_API_SOURCES   still call ``.cast<T>()`` / ``py::array`` / ``py::cast`` /
+#                                ``py::isinstance`` in their implementations (tensors, backends,
+#                                Sector/FusionSymbol numpy glue). Built only with
+#                                LASYTEN_WITH_PYTHON=ON. This list shrinks as Phase 4/5 proceeds;
+#                                the root CMakeLists.txt prints it as a status message for OFF.
+
+set(LASYTEN_PYTHON_FREE_SOURCES
   backends/block_inds.cpp
-  backends/block_inds_numpy.cpp
-  backends/abelian.cpp
-  backends/fusion_tree_backend.cpp
-  backends/fusion_tree_mapping.cpp
   backends/fusion_tree_permute.cpp
-  backends/backend_factory.cpp
   block_backend/block_backend.cpp
   block_backend/dtypes.cpp
+  block_backend/eigen.cpp
   config.cpp
   symmetries/base_symmetry.cpp
   symmetries/symmetry_factor.cpp
   symmetries/symmetry.cpp
-  symmetries/sector_numpy.cpp
-  symmetries/fusion_symbol.cpp
   symmetries/sector_array.cpp
   symmetries/group.cpp
   symmetries/abelian_group.cpp
@@ -42,44 +42,88 @@ target_sources(lasyten
   symmetries/factors/su2_k_anyon_category.cpp
   symmetries/factors/su3_3_anyon_category.cpp
   symmetries/trees.cpp
-  symmetries/spaces.cpp
   tensors/labels.cpp
   tensors/vector_like.cpp
-  tensors/tensor.cpp
   tensors/direct_sum.cpp
-  tensors/symmetric_tensor.cpp
-  tensors/diagonal_tensor.cpp
-  tensors/mask.cpp
-  tensors/charged_tensor.cpp
   tensors/hidden_leg_tensor.cpp
-  tensors/helpers.cpp
-  tensors/constructors.cpp
   tensors/ops_elementwise.cpp
   tensors/ops_algebra.cpp
   tensors/ops_legs.cpp
-  tensors/decompositions.cpp
   tensors/sparse.cpp
-  tensors/krylov_based.cpp
   tensors/planar.cpp
   tools.cpp
   tools/cost_polynomials.cpp
   tools/mappings.cpp
   tools/misc.cpp
+  tools/hdf5_export_blocks.cpp
+  symmetries/fusion_symbol.cpp
+  # compile without Python (numpy-facing parts are under #if LASYTEN_HAS_PYTHON)
+  symmetries/sector_numpy.cpp
+  block_backend/block_backend_legs.cpp
   tools/hdf5_export.cpp
+  # Python-free C++ stack (NoSymmetry tensors on Eigen); Python-only parts are under
+  # #if LASYTEN_HAS_PYTHON
+  backends/tensor_backend.cpp
+  backends/no_symmetry.cpp
+  symmetries/spaces.cpp
+  tensors/tensor.cpp
+  tensors/symmetric_tensor.cpp
+  tensors/diagonal_tensor.cpp
+  tensors/mask.cpp
+  tensors/charged_tensor.cpp
+  tensors/helpers.cpp
+  tensors/constructors.cpp
+  tensors/decompositions.cpp
+  backends/backend_factory.cpp
+  tensors/krylov_based.cpp
+  backends/fusion_tree_mapping.cpp
+  backends/abelian.cpp
+  backends/fusion_tree_backend.cpp
 )
 
-# Python / pybind11-dependent TUs: NumpyBlockBackend (requires a Python
-# interpreter for numpy arrays), Torch/Array-API backends that expose py::array,
-# test-only _SU2 (pulls numpy), and models that store py::array / py::object.
+set(LASYTEN_PYTHON_API_SOURCES
+  backends/block_inds_numpy.cpp
+)
+
+target_sources(lasyten PRIVATE ${LASYTEN_PYTHON_FREE_SOURCES})
+
 if(LASYTEN_WITH_PYTHON)
+  target_sources(lasyten PRIVATE ${LASYTEN_PYTHON_API_SOURCES})
+endif()
+
+# Python-dispatch backends (convert_nanobind.md leftover #5): NumpyBlockBackend (needs a Python
+# interpreter for numpy arrays) and ArrayApiBlockBackend. Transitional: EigenBlockBackend is the
+# preferred CPU backend. Drop with -DLASYTEN_WITH_NUMPY_BACKEND=OFF (forced OFF without Python).
+if(LASYTEN_WITH_NUMPY_BACKEND)
   target_sources(lasyten
     PRIVATE
     block_backend/array_api.cpp
     block_backend/numpy.cpp
-    block_backend/torch.cpp
+  )
+endif()
+
+# TorchBlockBackend (GPU / ATen). torch.cpp still exposes py::array, hence Python-gated.
+if(LASYTEN_WITH_PYTHON)
+  target_sources(lasyten PRIVATE block_backend/torch.cpp)
+endif()
+
+# Test-only _SU2 (pulls numpy) and the models, which store py::array / py::object members.
+if(LASYTEN_WITH_PYTHON)
+  target_sources(lasyten
+    PRIVATE
     symmetries/factors/su2.cpp
     models/degrees_of_freedom.cpp
     models/sites.cpp
     models/couplings.cpp
   )
+endif()
+
+if(NOT LASYTEN_WITH_PYTHON)
+  list(JOIN LASYTEN_PYTHON_API_SOURCES "\n    " _lasyten_skipped_api)
+  list(LENGTH LASYTEN_PYTHON_API_SOURCES _lasyten_n_skipped_api)
+  list(LENGTH LASYTEN_PYTHON_FREE_SOURCES _lasyten_n_free)
+  message(STATUS
+    "LASYTEN_WITH_PYTHON=OFF: liblasyten = ${_lasyten_n_free} sources "
+    "(LASYTEN_PYTHON_FREE_SOURCES) + eigen backend; ${_lasyten_n_skipped_api} sources still need "
+    "Python and are skipped (LASYTEN_PYTHON_API_SOURCES):\n    ${_lasyten_skipped_api}")
 endif()

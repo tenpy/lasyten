@@ -48,12 +48,12 @@ int64
 py_object_to_int64(py::handle obj)
 {
     if (py::isinstance<py::int_>(obj)) {
-        return obj.cast<int64>();
+        return py::cast<int64>(obj);
     }
     if (py::hasattr(obj, "item")) {
-        return obj.attr("item")().cast<int64>();
+        return py::cast<int64>(obj.attr("item")());
     }
-    return py::module_::import("builtins").attr("int")(obj).cast<int64>();
+    return py::cast<int64>(py::module_::import("builtins").attr("int")(obj));
 }
 
 py::module_
@@ -78,9 +78,9 @@ SymmetricTensorPtr
 as_symmetric_tensor(py::object op)
 {
     if (py::isinstance<SymmetricTensor>(op)) {
-        return op.cast<SymmetricTensorPtr>();
+        return py::cast<SymmetricTensorPtr>(op);
     }
-    return op.cast<SymmetricTensorPtr>();
+    return py::cast<SymmetricTensorPtr>(op);
 }
 
 TensorProduct::Ptr
@@ -195,7 +195,7 @@ leg_symmetry(ElementarySpace::Ptr const& leg)
 bool
 py_bool(py::object const& obj)
 {
-    return obj.cast<bool>();
+    return py::to_bool(obj);
 }
 
 bool
@@ -232,7 +232,7 @@ int64
 infer_clock_q(py::array const& X, py::array const& Z)
 {
     auto np = numpy();
-    auto const dim = X.attr("shape").attr("__getitem__")(0).cast<int64>();
+    auto const dim = py::cast<int64>(X.attr("shape").attr("__getitem__")(0));
     auto I = np.attr("eye")(dim);
     for (int64 q = 2; q <= dim; ++q) {
         auto Xq = np.attr("linalg").attr("matrix_power")(X, q);
@@ -357,8 +357,8 @@ check_buffer_shape_3d(py::buffer_info const& buf,
 void
 check_square_matrix(py::object arr, int64 dim, std::string_view name)
 {
-    auto s0 = arr.attr("shape").attr("__getitem__")(0).cast<int64>();
-    auto s1 = arr.attr("shape").attr("__getitem__")(1).cast<int64>();
+    auto s0 = py::cast<int64>(arr.attr("shape").attr("__getitem__")(0));
+    auto s1 = py::cast<int64>(arr.attr("shape").attr("__getitem__")(1));
     if (s0 != dim || s1 != dim) {
         throw std::invalid_argument(
           std::format("{} must have shape ({}, {}), got ({}, {})", name, dim, dim, s0, s1));
@@ -782,14 +782,14 @@ Site::multiply_operators(std::vector<py::object> const& operators)
     }
     SymmetricTensorPtr op;
     if (py::isinstance<py::str>(operators[0])) {
-        op = get_op(operators[0].cast<std::string>());
+        op = get_op(py::cast<std::string>(operators[0]));
     } else {
         op = as_symmetric_tensor(operators[0]);
     }
     for (std::size_t i = 1; i < operators.size(); ++i) {
         SymmetricTensorPtr next_op;
         if (py::isinstance<py::str>(operators[i])) {
-            next_op = get_op(operators[i].cast<std::string>());
+            next_op = get_op(py::cast<std::string>(operators[i]));
         } else {
             next_op = as_symmetric_tensor(operators[i]);
         }
@@ -836,14 +836,14 @@ int64
 Site::state_index(py::object label) const
 {
     if (py::isinstance<py::str>(label)) {
-        auto key = label.cast<std::string>();
+        auto key = py::cast<std::string>(label);
         auto it = state_labels.find(key);
         if (it == state_labels.end()) {
             throw py::key_error(std::format("Label not found: {}", key));
         }
         return it->second;
     }
-    int64 res = label.cast<int64>();
+    int64 res = py::cast<int64>(label);
     auto d = static_cast<int64>(dim());
     if (!(-d <= res && res < d)) {
         throw std::invalid_argument("Index out of bounds");
@@ -1008,15 +1008,15 @@ py::array
 SpinDOF::spin_vector_from_Sp(py::array Sz, py::array Sp)
 {
     auto np = numpy();
-    auto dim = Sz.attr("shape").attr("__getitem__")(0).cast<int64>();
+    auto dim = py::cast<int64>(Sz.attr("shape").attr("__getitem__")(0));
     check_square_matrix(Sz, dim, "Sz");
     check_square_matrix(Sp, dim, "Sp");
     py::array Sm = np.attr("conj")(Sp.attr("T"));
     py::object Sp_obj = Sp;
     py::object Sm_obj = Sm;
-    py::array Sx = (py::float_(0.5) * (Sp_obj + Sm_obj)).cast<py::array>();
+    py::array Sx = py::cast<py::array>((py::float_(0.5) * (Sp_obj + Sm_obj)));
     py::array Sy =
-      (py::cast(std::complex<double>{ 0., 0.5 }) * (Sm_obj - Sp_obj)).cast<py::array>();
+      py::cast<py::array>((py::cast(std::complex<double>{ 0., 0.5 }) * (Sm_obj - Sp_obj)));
     return np.attr("stack")(py::make_tuple(Sx, Sy, Sz), py::arg("axis") = -1);
 }
 
@@ -1234,7 +1234,7 @@ OccupationDOF::test_sanity()
             py::object increment = np.attr("max")(BBd_obj) + py::int_(1);
             BBd_obj.attr("__setitem__")(py::make_tuple(mask, mask),
                                         py::object(np.attr("diag")(BBd_obj)[mask]) + increment);
-            BBd = BBd_obj.cast<py::array>();
+            BBd = py::cast<py::array>(BBd_obj);
         }
         check(np_allclose(BBd - py::cast(anti_commute_sign) * py::object(n_k), np.attr("eye")(d)),
               "OccupationDOF::test_sanity() failed");
@@ -1351,7 +1351,7 @@ int64
 OccupationDOF::get_species_idx(py::object species) const
 {
     if (py::isinstance<py::str>(species)) {
-        species = py::cast(species_name_to_idx.at(species.cast<std::string>()));
+        species = py::cast(species_name_to_idx.at(py::cast<std::string>(species)));
     }
     if (species.is_none()) {
         if (num_species > 1) {
@@ -1359,7 +1359,7 @@ OccupationDOF::get_species_idx(py::object species) const
         }
         species = py::int_(0);
     }
-    return to_valid_idx(species.cast<int64>(), num_species);
+    return to_valid_idx(py::cast<int64>(species), num_species);
 }
 
 BosonicDOF::BosonicDOF(ElementarySpace::Ptr leg,
@@ -1378,7 +1378,7 @@ BosonicDOF::BosonicDOF(ElementarySpace::Ptr leg,
     for (int64 k = 0; k < num_species; ++k) {
         py::array N_k =
           number_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), k));
-        double N_k_max_ = np.attr("max")(np.attr("diag")(N_k)).cast<double>();
+        double N_k_max_ = py::cast<double>(np.attr("max")(np.attr("diag")(N_k)));
         int64 N_k_max = static_cast<int64>(std::llround(N_k_max_));
         if (std::abs(N_k_max - N_k_max_) >= 1e-9) {
             throw std::invalid_argument("occupation eigenvalues must be integer");
@@ -1408,10 +1408,10 @@ BosonicDOF::test_sanity()
         check(np_allclose(N_k_rounded, N_k), "BosonicDOF::test_sanity() failed");
         check(np_allclose(np.attr("diag")(np.attr("diag")(N_k)), N_k),
               "BosonicDOF::test_sanity() failed");
-        check(np.attr("min")(N_k_rounded).cast<double>() == 0.,
+        check(py::cast<double>(np.attr("min")(N_k_rounded)) == 0.,
               "BosonicDOF::test_sanity() failed");
-        check(np.attr("max")(N_k_rounded).cast<double>() ==
-                Nmax.attr("__getitem__")(k).cast<double>(),
+        check(py::cast<double>(np.attr("max")(N_k_rounded)) ==
+                py::cast<double>(Nmax.attr("__getitem__")(k)),
               "BosonicDOF::test_sanity() failed");
     }
 }
@@ -1437,7 +1437,7 @@ BosonicDOF::conservation_law_to_symmetry(py::object conserve)
         return symmetry_from_factor(std::make_shared<NoSymmetry>());
     }
     if (py::isinstance<py::str>(conserve)) {
-        auto const c = conserve.cast<std::string>();
+        auto const c = py::cast<std::string>(conserve);
         if (c == "None" || c == "none") {
             return symmetry_from_factor(std::make_shared<NoSymmetry>());
         }
@@ -1454,7 +1454,7 @@ BosonicDOF::conservation_law_to_symmetry(py::object conserve)
         int64 num_no_sym = 0;
         for (py::ssize_t k = 0; k < py::len(conserve); ++k) {
             py::object conserve_k = conserve[py::int_(k)];
-            std::string ck = py::str(conserve_k).cast<std::string>();
+            std::string ck = py::cast<std::string>(py::str(conserve_k));
             if (ck == "N" || ck == "Nk" || ck == "N_k" || ck == "U(1)" || ck == "U1") {
                 sym_factors.push_back(
                   std::make_shared<U1>(std::format("species{}_occupation", k)));
@@ -1475,7 +1475,7 @@ BosonicDOF::conservation_law_to_symmetry(py::object conserve)
         return symmetry_from_factors(std::move(sym_factors));
     }
     throw std::invalid_argument(
-      std::format("Invalid `conserve`: {}", py::str(conserve).cast<std::string>()));
+      std::format("Invalid `conserve`: {}", py::cast<std::string>(py::str(conserve))));
 }
 
 std::pair<py::array, py::array>
@@ -1501,7 +1501,7 @@ BosonicDOF::creation_annihilation_ops_from_Nmax(py::array Nmax, int64 dim)
 {
     auto np = numpy();
     py::array Nmax_ = np.attr("asarray")(Nmax, py::dtype("int"));
-    if (!np.attr("allclose")(Nmax_, Nmax).cast<bool>()) {
+    if (!py::to_bool(np.attr("allclose")(Nmax_, Nmax))) {
         throw std::invalid_argument("Nmax must be integer-valued");
     }
     py::list creators_i;
@@ -1592,7 +1592,7 @@ FermionicDOF::FermionicDOF(ElementarySpace::Ptr leg,
     for (int64 k = 0; k < num_species; ++k) {
         py::array N_k =
           number_operators.attr("__getitem__")(py::make_tuple(py::slice(), py::slice(), k));
-        double N_k_max_ = np.attr("max")(np.attr("diag")(N_k)).cast<double>();
+        double N_k_max_ = py::cast<double>(np.attr("max")(np.attr("diag")(N_k)));
         int64 N_k_max = static_cast<int64>(std::llround(N_k_max_));
         if (std::abs(N_k_max - N_k_max_) >= 1e-9) {
             throw std::invalid_argument("occupation eigenvalues must be integer");
@@ -1619,7 +1619,7 @@ FermionicDOF::test_sanity()
         check(np_allclose(CC, np.attr("zeros_like")(CC)), "FermionicDOF::test_sanity() failed");
         check(np_allclose(CdCd, np.attr("zeros_like")(CdCd)),
               "FermionicDOF::test_sanity() failed");
-        check(np.attr("max")(N_k).cast<double>() <= 1., "FermionicDOF::test_sanity() failed");
+        check(py::cast<double>(np.attr("max")(N_k)) <= 1., "FermionicDOF::test_sanity() failed");
     }
 }
 
@@ -1681,7 +1681,7 @@ as_immutable_array(py::object a, py::object dtype)
     auto np = numpy();
     py::object arr = dtype.is_none() ? np.attr("asarray")(a) : np.attr("asarray")(a, dtype);
     arr.attr("setflags")(py::arg("write") = false);
-    return arr.cast<py::array>();
+    return py::cast<py::array>(arr);
 }
 
 namespace {

@@ -1,3 +1,9 @@
+# Docs / Read the Docs conda env. Prefer this over the root environment.yml when
+# you only need Sphinx; use the root file for a full editable install + tests.
+#
+# To also build the compiled extension for autodoc (optional; conf.py can fall
+# back to a generated lasyten/_core.py stub):
+#   pip install --no-build-isolation -e ..
 name: lasyten-docs
 channels:
   - conda-forge
@@ -6,9 +12,18 @@ dependencies:
   - pip
   - setuptools>=68.0.0
   - setuptools-scm
+  # C++ / nanobind extension (same stack as root environment.yml; needed if you
+  # pip-install lasyten rather than using the autodoc stub)
+  - nanobind>=3.0
+  - eigen  # Eigen/LAPACK BlockBackend
+  - scikit-build-core
   - numpy>=2.0
   - scipy
-  - doxygen  # Breathe C++ API + DOC() map for _core stubs
+  - openblas
+  - cmake
+  - cxx-compiler  # must match conda Python's libstdc++
+  - doxygen  # Breathe C++ API + DOC() headers under pybind/docstrings/
+  - pytorch  # required to link TorchBlockBackend when building _core
   # Testing not required for docs; keep sympy out to slim the env
 
   # building Sphinx docs
@@ -18,8 +33,8 @@ dependencies:
   - sphinx-copybutton
 
   # I/O (optional imports in the Python package)
-  - hdf5
-  - h5py
+  - hdf5=2.1  # temporary pin to avoid incompatible version (match root env)
+  - h5py=3.16
   - pyyaml
   - toml
 

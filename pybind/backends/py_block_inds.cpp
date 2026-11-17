@@ -1,16 +1,12 @@
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../ndarray_utils.h"
+#include "../py_lasyten_nanobind.h"
 #include "docstrings/backends/block_inds.h"
 
 #include "backends/casters.hpp"
 
 #include <lasyten/backends/block_inds.h>
 #include <lasyten/backends/block_inds_numpy.h>
-
-#include <pybind11/functional.h>
-#include <pybind11/numpy.h>
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
 
 #include "tools/hdf5_bind.h"
 #include <algorithm>
@@ -27,14 +23,24 @@ namespace lasyten {
 
 namespace {
 
-py::array_t<std::size_t>
-indices_to_numpy(std::vector<std::size_t> const& v)
+nb::object
+indices_to_numpy(std::vector<std::size_t> v)
 {
-    py::array_t<std::size_t> arr(static_cast<py::ssize_t>(v.size()));
-    if (!v.empty()) {
-        std::copy(v.begin(), v.end(), arr.mutable_data());
+    return nb::cast(ndarray_utils::vector_to_numpy_1d(std::move(v)));
+}
+
+nb::object
+block_inds_to_ndarray(BlockInds const& src)
+{
+    std::size_t const rows = src.nrows();
+    std::size_t const cols = src.ncols();
+    std::vector<int64> v(rows * cols);
+    for (std::size_t i = 0; i < rows; ++i) {
+        for (std::size_t j = 0; j < cols; ++j) {
+            v[i * cols + j] = src(i, j);
+        }
     }
-    return arr;
+    return nb::cast(ndarray_utils::vector_to_numpy_2d(std::move(v), rows, cols));
 }
 
 std::vector<std::size_t>
@@ -43,7 +49,7 @@ indices_from_py(py::handle key, std::size_t n_rows)
     try {
         if (!py::isinstance<py::slice>(key) && !py::isinstance<py::tuple>(key) &&
             !py::isinstance<py::list>(key) && !py::isinstance<py::array>(key)) {
-            auto i = key.cast<std::ptrdiff_t>();
+            auto i = py::cast<std::ptrdiff_t>(key);
             if (i < 0) {
                 i += static_cast<std::ptrdiff_t>(n_rows);
             }
@@ -55,7 +61,7 @@ indices_from_py(py::handle key, std::size_t n_rows)
     } catch (py::cast_error const&) {
     }
     if (py::isinstance<py::slice>(key)) {
-        auto sl = key.cast<py::slice>();
+        auto sl = py::cast<py::slice>(key);
         size_t start = 0, stop = 0, step = 0, slicelength = 0;
         if (!sl.compute(n_rows, &start, &stop, &step, &slicelength)) {
             throw py::error_already_set();
@@ -71,7 +77,7 @@ indices_from_py(py::handle key, std::size_t n_rows)
         throw py::type_error("BlockInds indices must be int, slice, or array");
     }
     if (arr.ndim() == 0) {
-        auto i = arr.cast<std::ptrdiff_t>();
+        auto i = py::cast<std::ptrdiff_t>(arr);
         if (i < 0) {
             i += static_cast<std::ptrdiff_t>(n_rows);
         }
@@ -137,37 +143,37 @@ block_inds_repr(BlockInds const& a)
     return oss.str();
 }
 
-std::optional<py::class_<BlockInds>> g_block_inds;
+std::optional<nb::class_<BlockInds>> g_block_inds;
 
 } // namespace
 
 void
-declare_block_inds(py::module_& m)
+declare_block_inds(nb::module_& m)
 {
-    g_block_inds = py::class_<BlockInds>(m, "BlockInds", DOC(lasyten, BlockInds));
+    g_block_inds = nb::class_<BlockInds>(m, "BlockInds", DOC(lasyten, BlockInds));
 }
 
 void
-bind_block_inds(py::module_& m)
+bind_block_inds(nb::module_& m)
 {
     (void)m;
     auto& cls = *g_block_inds;
-    cls.def(py::init<>())
-      .def(py::init([](py::object values) { return block_inds_from_numpy(values); }),
-           py::arg("values"),
+    cls.def(lasyten::ctor<decltype(cls)>())
+      .def(nb::new_([](py::object values) { return block_inds_from_numpy(values); }),
+           nb::arg("values"),
            "Construct from a 2D integer sequence or ndarray.")
       .def_static(
-        "empty", [](std::size_t ncols) { return BlockInds::empty(ncols); }, py::arg("ncols"))
+        "empty", [](std::size_t ncols) { return BlockInds::empty(ncols); }, nb::arg("ncols"))
       .def_static(
         "zeros",
         [](std::size_t nrows, std::size_t ncols) { return BlockInds::zeros(nrows, ncols); },
-        py::arg("nrows"),
-        py::arg("ncols"))
-      .def_property_readonly(
+        nb::arg("nrows"),
+        nb::arg("ncols"))
+      .def_prop_ro(
         "shape", [](BlockInds const& self) { return py::make_tuple(self.nrows(), self.ncols()); })
-      .def_property_readonly("nrows", &BlockInds::nrows)
-      .def_property_readonly("ncols", &BlockInds::ncols)
-      .def_property_readonly("ndim", [](BlockInds const&) { return 2; })
+      .def_prop_ro("nrows", &BlockInds::nrows)
+      .def_prop_ro("ncols", &BlockInds::ncols)
+      .def_prop_ro("ndim", [](BlockInds const&) { return 2; })
       .def("__len__", [](BlockInds const& self) { return self.nrows(); })
       .def("__repr__", &block_inds_repr)
       .def("__str__", &block_inds_repr)
@@ -176,7 +182,7 @@ bind_block_inds(py::module_& m)
            [](BlockInds const& self, py::object other) -> py::object {
                py::object self_np = block_inds_to_numpy(self);
                if (py::isinstance<BlockInds>(other)) {
-                   other = block_inds_to_numpy(other.cast<BlockInds>());
+                   other = block_inds_to_numpy(py::cast<BlockInds>(other));
                }
                return self_np.attr("__eq__")(other);
            })
@@ -184,18 +190,21 @@ bind_block_inds(py::module_& m)
            [](BlockInds const& self, py::object other) -> py::object {
                py::object self_np = block_inds_to_numpy(self);
                if (py::isinstance<BlockInds>(other)) {
-                   other = block_inds_to_numpy(other.cast<BlockInds>());
+                   other = block_inds_to_numpy(py::cast<BlockInds>(other));
                }
                return self_np.attr("__ne__")(other);
            })
       .def(
         "__array__",
         [](BlockInds const& self, py::object /*dtype*/, py::object /*copy*/) {
-            return block_inds_to_numpy(self);
+            return block_inds_to_ndarray(self);
         },
-        py::arg("dtype") = py::none(),
-        py::arg("copy") = py::none())
-      .def("to_numpy", &block_inds_to_numpy)
+        nb::arg("dtype").none() = nb::none(),
+        nb::arg("copy").none() = nb::none())
+      .def(
+        "to_numpy",
+        [](BlockInds const& self) { return block_inds_to_ndarray(self); },
+        "Return a copy as a 2D ``int64`` NumPy array (``nb::ndarray``).")
       .def("lexsort_indices",
            [](BlockInds const& self) { return indices_to_numpy(self.lexsort_indices()); })
       .def("sorted",
@@ -208,29 +217,29 @@ bind_block_inds(py::module_& m)
         [](BlockInds const& self, bool include_len) {
             return indices_to_numpy(self.find_row_differences(include_len));
         },
-        py::arg("include_len") = false)
+        nb::arg("include_len") = false)
       .def(
         "take",
         [](BlockInds const& self, py::object indices) {
             return self.take(indices_from_py(indices, self.nrows()));
         },
-        py::arg("indices"))
-      .def("concat", &BlockInds::concat, py::arg("other"))
+        nb::arg("indices"))
+      .def("concat", &BlockInds::concat, nb::arg("other"))
       .def("reverse_columns", &BlockInds::reverse_columns)
-      .def("repeat_columns", &BlockInds::repeat_columns, py::arg("times"))
-      .def("insert_column", &BlockInds::insert_column, py::arg("col"), py::arg("fill") = 0)
+      .def("repeat_columns", &BlockInds::repeat_columns, nb::arg("times"))
+      .def("insert_column", &BlockInds::insert_column, nb::arg("col"), nb::arg("fill") = 0)
       .def("__getitem__",
            [](BlockInds const& self, py::object key) -> py::object {
                // ``arr[:, ::-1]`` / ``arr[rows, cols]``
                if (py::isinstance<py::tuple>(key)) {
-                   py::tuple t = key.cast<py::tuple>();
+                   py::tuple t = py::to_tuple(key);
                    if (t.size() != 2) {
                        throw py::type_error("BlockInds 2D indexing expects two indices");
                    }
                    // column-only slice with full rows: arr[:, cols]
                    bool rows_all = py::isinstance<py::slice>(t[0]);
                    if (rows_all) {
-                       auto sl = t[0].cast<py::slice>();
+                       auto sl = py::cast<py::slice>(t[0]);
                        size_t start = 0, stop = 0, step = 0, slicelength = 0;
                        if (!sl.compute(self.nrows(), &start, &stop, &step, &slicelength)) {
                            throw py::error_already_set();
@@ -245,11 +254,11 @@ bind_block_inds(py::module_& m)
                                if (py::isinstance<py::ellipsis>(t[1])) {
                                    return py::cast(taken);
                                }
-                               return py::cast(taken.take_columns(
-                                 col_indices_from_slice(t[1].cast<py::slice>(), taken.ncols())));
+                               return py::cast(taken.take_columns(col_indices_from_slice(
+                                 py::cast<py::slice>(t[1]), taken.ncols())));
                            }
                            if (py::isinstance<py::int_>(t[1])) {
-                               auto c = t[1].cast<std::ptrdiff_t>();
+                               auto c = py::cast<std::ptrdiff_t>(t[1]);
                                if (c < 0) {
                                    c += static_cast<std::ptrdiff_t>(taken.ncols());
                                }
@@ -267,7 +276,7 @@ bind_block_inds(py::module_& m)
                        // full row range: column select only
                        if (py::isinstance<py::ellipsis>(t[1]) ||
                            (py::isinstance<py::slice>(t[1]) && [&] {
-                               auto sl = t[1].cast<py::slice>();
+                               auto sl = py::cast<py::slice>(t[1]);
                                size_t start = 0, stop = 0, step = 0, slicelength = 0;
                                sl.compute(self.ncols(), &start, &stop, &step, &slicelength);
                                return start == 0 && stop == self.ncols() && step == 1;
@@ -276,10 +285,10 @@ bind_block_inds(py::module_& m)
                        }
                        if (py::isinstance<py::slice>(t[1])) {
                            return py::cast(self.take_columns(
-                             col_indices_from_slice(t[1].cast<py::slice>(), self.ncols())));
+                             col_indices_from_slice(py::cast<py::slice>(t[1]), self.ncols())));
                        }
                        if (py::isinstance<py::int_>(t[1])) {
-                           auto c = t[1].cast<std::ptrdiff_t>();
+                           auto c = py::cast<std::ptrdiff_t>(t[1]);
                            if (c < 0) {
                                c += static_cast<std::ptrdiff_t>(self.ncols());
                            }
@@ -293,8 +302,8 @@ bind_block_inds(py::module_& m)
                    }
                    // scalar element: arr[i, j]
                    if (py::isinstance<py::int_>(t[0]) && py::isinstance<py::int_>(t[1])) {
-                       auto r = t[0].cast<std::ptrdiff_t>();
-                       auto c = t[1].cast<std::ptrdiff_t>();
+                       auto r = py::cast<std::ptrdiff_t>(t[0]);
+                       auto c = py::cast<std::ptrdiff_t>(t[1]);
                        if (r < 0) {
                            r += static_cast<std::ptrdiff_t>(self.nrows());
                        }
@@ -324,7 +333,8 @@ bind_block_inds(py::module_& m)
                            }
                            return py::cast(taken);
                        }
-                       auto cols = col_indices_from_slice(t[1].cast<py::slice>(), taken.ncols());
+                       auto cols =
+                         col_indices_from_slice(py::cast<py::slice>(t[1]), taken.ncols());
                        // full column range on a single integer row → 1D numpy
                        if (rows.size() == 1 && py::isinstance<py::int_>(t[0]) &&
                            cols.size() == taken.ncols()) {
@@ -341,7 +351,7 @@ bind_block_inds(py::module_& m)
                    if (py::isinstance<py::int_>(t[1])) {
                        auto rows = indices_from_py(t[0], self.nrows());
                        BlockInds taken = self.take(rows);
-                       auto c = t[1].cast<std::ptrdiff_t>();
+                       auto c = py::cast<std::ptrdiff_t>(t[1]);
                        if (c < 0) {
                            c += static_cast<std::ptrdiff_t>(taken.ncols());
                        }
@@ -380,7 +390,7 @@ bind_block_inds(py::module_& m)
                if (idx.size() == 1 && !py::isinstance<py::slice>(key) &&
                    !py::isinstance<py::array>(key) && !py::isinstance<py::list>(key)) {
                    try {
-                       (void)key.cast<std::ptrdiff_t>();
+                       (void)py::cast<std::ptrdiff_t>(key);
                        auto row = self.row(idx[0]);
                        py::array_t<int64> arr(static_cast<py::ssize_t>(row.size()));
                        if (!row.empty()) {
@@ -394,16 +404,16 @@ bind_block_inds(py::module_& m)
            })
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5_const<BlockInds>(),
-           py::arg("hdf5_saver"),
-           py::arg("h5gr"),
-           py::arg("subpath"))
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"))
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<BlockInds>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 
-    py::implicitly_convertible<py::array, BlockInds>();
+    nb::implicitly_convertible<py::array, BlockInds>();
 }
 
 } // namespace lasyten
