@@ -7,8 +7,8 @@ name: Wheels (cp312-abi3)
 # The macOS matrix entry is the Py_LIMITED_API / abi3 build check from leftover #2.
 #
 # Also: ``cibuildwheel`` on Linux using ``[tool.cibuildwheel]`` in pyproject.toml
-# (manylinux + CPU torch). Marked continue-on-error until Torch/HDF5 bundling is
-# fully sorted for manylinux images.
+# (manylinux + CPU torch). auditwheel excludes libtorch* (runtime dep on ``torch``);
+# continue-on-error until a green manylinux run confirms repair/HDF5 are solid.
 
 on:
   push:
@@ -91,8 +91,9 @@ jobs:
     name: cibuildwheel (linux)
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    # Optional until manylinux Torch auditwheel/RPATH is fully hardened; micromamba
-    # abi3-wheel jobs above are the required Stable ABI check.
+    # Optional until a green manylinux repair is confirmed; micromamba abi3-wheel
+    # jobs above are the required Stable ABI check. Torch sonames are --exclude'd
+    # in [tool.cibuildwheel.linux] (depend on the ``torch`` package instead).
     continue-on-error: true
     steps:
       - name: Checkout

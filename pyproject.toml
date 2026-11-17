@@ -36,7 +36,9 @@ dependencies = [
     "numpy",
     "scipy",
     "pyyaml",
-    "torch",  # required: C++ TorchBlockBackend links libtorch; prefer conda-forge pytorch
+    # Required: C++ TorchBlockBackend links libtorch. Wheels exclude libtorch*
+    # from auditwheel and resolve via the installed torch package (+ RPATH).
+    "torch",
 ]
 
 [project.optional-dependencies]
@@ -133,6 +135,9 @@ testpaths = ["tests"]
 # Build with CPython >= 3.14 (requires-python); scikit-build-core tags abi3 via wheel.py-api.
 # Torch/HDF5/Eigen make plain manylinux awkward — CI uses micromamba hosts (see
 # .github/workflows/wheels.yml) and optionally cibuildwheel with the settings below.
+# Do not vendor libtorch into the wheel: ``torch`` is a runtime dependency and
+# ``_core`` already has RPATH ``$ORIGIN/../torch/lib``. auditwheel --exclude keeps
+# those sonames external (see repair-wheel-command on linux).
 [tool.cibuildwheel]
 build = "cp314-*"
 skip = "pp* *-musllinux_* *i686* *win32*"
@@ -150,10 +155,27 @@ before-all = [
 ]
 # Eigen3_DIR is set via CIBW_ENVIRONMENT in .github/workflows/wheels.yml (FindEigen3 NO_MODULE).
 before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm cmake ninja"
+# Exclude Torch sonames: they come from the ``torch`` PyPI/conda package at runtime.
+# Bundling them fails (libs not on the linker path) and would bloat the wheel anyway.
+# (Must be one string: list values are joined with ``&&``.)
+repair-wheel-command = """
+  auditwheel repair -w {dest_dir} {wheel} \
+    --exclude libtorch.so \
+    --exclude libtorch_cpu.so \
+    --exclude libtorch_cuda.so \
+    --exclude libtorch_python.so \
+    --exclude libtorch_global_deps.so \
+    --exclude libc10.so \
+    --exclude libc10_cuda.so \
+    --exclude libshm.so
+"""
 
 [tool.cibuildwheel.macos]
 before-all = "brew install eigen hdf5 openblas doxygen || true"
 before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm cmake ninja"
+# delocate has no auditwheel-style --exclude; skip repair so Torch is not vendored.
+# Runtime resolution uses INSTALL_RPATH ``$ORIGIN/../torch/lib`` (and ``import torch``).
+repair-wheel-command = ""
 
 
 [tool.ruff]
