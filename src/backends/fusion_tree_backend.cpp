@@ -472,6 +472,8 @@ struct MaskPieces
 {
     std::vector<BlockBackend::BlockPtr> blocks;
     std::vector<int64> large_leg_block_inds;
+    /// If non-empty, used as block_inds[:, 0] instead of ``arange`` (dual reorder).
+    std::vector<int64> small_leg_block_inds;
     std::vector<Sector> sectors;
     std::vector<int64> multiplicities;
     std::vector<int64> basis_perm_kept;
@@ -482,10 +484,13 @@ struct MaskPieces
              int64 large_block_ind,
              Sector sector,
              std::optional<std::vector<int64>> const& large_basis_perm,
-             std::array<int64, 2> const& large_slice)
+             std::array<int64, 2> const& large_slice,
+             int64 sector_dim = 1)
     {
         if (large_basis_perm) {
-            auto const keep = bb.block_to_bool_vector(block);
+            // FusionTree mask blocks are multiplicity-sized; dense slices are mult * sector_dim.
+            auto const tiled = sector_dim > 1 ? bb.tile(block, sector_dim) : block;
+            auto const keep = bb.block_to_bool_vector(tiled);
             for (std::size_t k = 0; k < keep.size(); ++k) {
                 if (keep[k]) {
                     basis_perm_kept.push_back(
@@ -517,7 +522,8 @@ finish_mask(MaskPieces&& pieces,
             Symmetry::Ptr const& symmetry,
             bool is_dual,
             bool has_basis_perm,
-            std::string device)
+            std::string device,
+            bool sectors_are_defining = true)
 {
     SectorArray sectors = SectorArray::empty(symmetry->sector_ind_len);
     std::optional<std::vector<int64>> basis_perm_opt = std::nullopt;
@@ -532,15 +538,51 @@ finish_mask(MaskPieces&& pieces,
         if (has_basis_perm) {
             basis_perm_opt = rank_data(pieces.basis_perm_kept);
         }
-        std::vector<int64> arange(sectors.size());
-        std::iota(arange.begin(), arange.end(), int64{ 0 });
+        std::vector<int64> small_inds;
+        if (pieces.small_leg_block_inds.empty()) {
+            small_inds.resize(sectors.size());
+            std::iota(small_inds.begin(), small_inds.end(), int64{ 0 });
+        } else {
+            if (pieces.small_leg_block_inds.size() != pieces.blocks.size()) {
+                throw std::invalid_argument(
+                  "finish_mask: small_leg_block_inds length must match blocks");
+            }
+            small_inds = std::move(pieces.small_leg_block_inds);
+        }
+        // When ``sectors`` are defining sectors, Mask (co)domains (TensorProducts) store a
+        // lexsorted ``sector_decomposition``. For dual legs that is ``sorted(dual(defining))``,
+        // not defining order — remap so sanity / contract match. Truncate passes TP sectors
+        // instead and must skip this remap (``sectors_are_defining == false``).
+        if (is_dual && sectors_are_defining) {
+            auto const duals = symmetry->dual_sectors(sectors);
+            auto const perm = duals.lexsort_indices();
+            std::vector<int64> defining_to_tp(perm.size());
+            for (std::size_t j = 0; j < perm.size(); ++j)
+                defining_to_tp[perm[j]] = static_cast<int64>(j);
+            for (auto& idx : small_inds) {
+                if (idx < 0 || static_cast<std::size_t>(idx) >= defining_to_tp.size()) {
+                    throw std::invalid_argument("finish_mask: small_leg block index out of range");
+                }
+                idx = defining_to_tp[static_cast<std::size_t>(idx)];
+            }
+        }
         block_inds = BlockInds::column_stack(std::vector<std::span<const int64>>{
-          std::span<const int64>(arange), std::span<const int64>(pieces.large_leg_block_inds) });
+          std::span<const int64>(small_inds),
+          std::span<const int64>(pieces.large_leg_block_inds) });
     }
+    // Lexsort: dual remaps / large-bi sorts may leave rows unsorted.
     auto data =
-      make_data(Dtype::Bool, std::move(device), std::move(pieces.blocks), block_inds, true);
-    auto small_leg = std::make_shared<ElementarySpace>(
-      symmetry, std::move(sectors), pieces.multiplicities, is_dual, basis_perm_opt);
+      make_data(Dtype::Bool, std::move(device), std::move(pieces.blocks), block_inds, false);
+    ElementarySpace::Ptr small_leg;
+    if (sectors_are_defining) {
+        small_leg = std::make_shared<ElementarySpace>(
+          symmetry, std::move(sectors), pieces.multiplicities, is_dual, basis_perm_opt);
+    } else {
+        // Match Python truncate_singular_values: sectors are domain.sector_decomposition.
+        small_leg = ElementarySpace::from_sector_decomposition(
+          symmetry, std::move(sectors), pieces.multiplicities, is_dual, basis_perm_opt);
+        small_leg->set_basis_perm(std::nullopt);
+    }
     return { std::move(data), std::move(small_leg) };
 }
 
@@ -2845,8 +2887,9 @@ FusionTreeBackend::truncate_singular_values(DiagonalTensorCPtr S,
               slc);
     }
     bool const is_dual = space_is_dual(*S->leg());
+    // sectors are ``S.domain.sector_decomposition`` (TP order), not defining sectors.
     auto [mask_data, small_leg] =
-      finish_mask(std::move(m), S->symmetry, is_dual, false, S_data->device);
+      finish_mask(std::move(m), S->symmetry, is_dual, false, S_data->device, false);
     return { wrap(mask_data), small_leg, err, new_norm };
 }
 
@@ -3644,14 +3687,14 @@ FusionTreeBackend::partial_trace(SymmetricTensorCPtr tensor,
         if (new_data->blocks.empty()) {
             auto s = zero_scalar_of(*block_backend, dt);
             auto block = scalar_block_of(*block_backend, s);
-            return { wrap(make_data(dt, data->device, { block }, zeros_i64(1, 0), true)),
+            return { wrap(make_data(dt, data->device, { block }, zeros_i64(1, 2), true)),
                      nullptr,
                      nullptr };
         }
         if (new_data->blocks.size() == 1) {
             auto s = block_backend->item(new_data->blocks[0]);
             auto block = scalar_block_of(*block_backend, s);
-            return { wrap(make_data(dt, data->device, { block }, zeros_i64(1, 0), true)),
+            return { wrap(make_data(dt, data->device, { block }, zeros_i64(1, 2), true)),
                      nullptr,
                      nullptr };
         }
@@ -3771,11 +3814,9 @@ FusionTreeBackend::get_element(SymmetricTensorCPtr a, std::vector<int64> idcs)
     std::vector<std::vector<int64>> pairs;
     pairs.reserve(a_legs.size());
     for (std::size_t i = 0; i < a_legs.size(); ++i) {
-        auto es = as_space(a_legs[i])->as_ElementarySpace();
-        if (!es) {
-            throw std::invalid_argument("get_element: expected ElementarySpace flat legs");
-        }
-        auto [b, w] = es->parse_index(flat_ordered[i]);
+        // Use parse_leg_index (as_elementary_space), not as_ElementarySpace(): the latter
+        // defaults is_dual=false and flips dual legs, yielding the wrong sector slices.
+        auto [b, w] = parse_leg_index(a_legs[i], flat_ordered[i]);
         pairs.push_back({ b, w });
     }
     BlockInds pos = BlockInds::from_rows(pairs);
@@ -4152,23 +4193,32 @@ FusionTreeBackend::diagonal_to_mask(DiagonalTensorCPtr tens)
         pieces.multiplicities.push_back(mult);
     }
     if (!pieces.blocks.empty() && !is_sorted) {
+        // Defining sectors must be sorted for ElementarySpace; keep blocks/bi in sync.
         SectorArray sectors(pieces.sectors);
         auto const perm = sectors.lexsort_indices();
         std::vector<Sector> new_secs;
         std::vector<int64> new_mults;
+        std::vector<BlockBackend::BlockPtr> new_blocks;
+        std::vector<int64> new_large_bi;
         std::vector<std::vector<int64>> new_ranks;
         new_secs.reserve(perm.size());
         new_mults.reserve(perm.size());
+        new_blocks.reserve(perm.size());
+        new_large_bi.reserve(perm.size());
         if (basis_perm)
             new_ranks.reserve(perm.size());
         for (auto pi : perm) {
             new_secs.push_back(pieces.sectors[pi]);
             new_mults.push_back(pieces.multiplicities[pi]);
+            new_blocks.push_back(std::move(pieces.blocks[pi]));
+            new_large_bi.push_back(pieces.large_leg_block_inds[pi]);
             if (basis_perm)
                 new_ranks.push_back(basis_perm_ranks_per_block[pi]);
         }
         pieces.sectors = std::move(new_secs);
         pieces.multiplicities = std::move(new_mults);
+        pieces.blocks = std::move(new_blocks);
+        pieces.large_leg_block_inds = std::move(new_large_bi);
         basis_perm_ranks_per_block = std::move(new_ranks);
     }
     if (basis_perm) {
@@ -4212,13 +4262,15 @@ FusionTreeBackend::mask_binary_operand(MaskCPtr mask1, MaskCPtr mask2, BlockBina
             }
             slc = large.slices->at(si);
         }
+        int64 const sec_dim = basis_perm ? mask1->symmetry->sector_dim(defining[si]) : int64{ 1 };
         m.add(*block_backend,
               std::move(new_block),
               mult,
               static_cast<int64>(si),
               defining[si],
               basis_perm,
-              slc);
+              slc,
+              sec_dim);
     }
     auto [data, small_leg] = finish_mask(
       std::move(m), mask1->symmetry, space_is_dual(large), basis_perm.has_value(), mask1->device);
@@ -4239,13 +4291,11 @@ FusionTreeBackend::mask_from_block(BlockBackend::BlockPtr a, Space::Ptr large_le
         if (!large_es) {
             throw std::invalid_argument("mask_from_block: large_leg must be an ElementarySpace");
         }
-        auto perm = large_leg->sector_decomposition.lexsort_indices();
-        SectorArray sorted_duals;
+        auto [sorted_duals, perm] = large_leg->sector_decomposition.sorted();
         std::vector<int64> multis;
-        for (auto pi : perm) {
-            sorted_duals.push_back(large_leg->sector_decomposition[pi]);
+        multis.reserve(perm.size());
+        for (auto pi : perm)
             multis.push_back(large_leg->multiplicities[pi]);
-        }
         dual_domain = std::make_shared<TensorProduct>(
           std::vector<Leg::Ptr>{ Leg{ large_es } }, large_leg->symmetry, sorted_duals, multis);
     }
@@ -4282,7 +4332,15 @@ FusionTreeBackend::mask_from_block(BlockBackend::BlockPtr a, Space::Ptr large_le
         m.sectors.push_back(sector);
         m.multiplicities.push_back(mult / dim);
     }
+    // basis_perm_kept must follow defining-sector / slice order (not large-bi order).
+    if (basis_perm) {
+        for (auto const& chunk : basis_perm_chunks)
+            m.basis_perm_kept.insert(m.basis_perm_kept.end(), chunk.begin(), chunk.end());
+    }
     if (!is_sorted && !m.blocks.empty()) {
+        // Sort rows by large-leg (domain) index for FusionTreeData, but keep
+        // block_inds[:, 0] pointing at the original defining-sector slots so
+        // sectors/multiplicities (still in defining order) stay aligned.
         std::vector<std::size_t> perm(m.large_leg_block_inds.size());
         std::iota(perm.begin(), perm.end(), std::size_t{ 0 });
         std::stable_sort(perm.begin(), perm.end(), [&](std::size_t i, std::size_t j) {
@@ -4296,14 +4354,9 @@ FusionTreeBackend::mask_from_block(BlockBackend::BlockPtr a, Space::Ptr large_le
                 out.push_back(std::move(vec[pi]));
             vec = std::move(out);
         };
+        m.small_leg_block_inds.assign(perm.begin(), perm.end());
         reorder(m.blocks);
         reorder(m.large_leg_block_inds);
-        if (basis_perm)
-            reorder(basis_perm_chunks);
-    }
-    if (basis_perm) {
-        for (auto const& chunk : basis_perm_chunks)
-            m.basis_perm_kept.insert(m.basis_perm_kept.end(), chunk.begin(), chunk.end());
     }
     auto [data, small_leg] = finish_mask(std::move(m),
                                          large_leg->symmetry,
@@ -4394,13 +4447,15 @@ FusionTreeBackend::mask_unary_operand(MaskCPtr mask, BlockUnaryFn func)
             }
             slc = large.slices->at(si);
         }
+        int64 const sec_dim = basis_perm ? mask->symmetry->sector_dim(defining[si]) : int64{ 1 };
         m.add(*block_backend,
               std::move(new_block),
               mult,
               static_cast<int64>(si),
               defining[si],
               basis_perm,
-              slc);
+              slc,
+              sec_dim);
     }
     auto [data, small_leg] = finish_mask(std::move(m),
                                          mask->symmetry,
