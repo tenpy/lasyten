@@ -9,7 +9,9 @@ repos:
         exclude: tfi_cylinder.yaml
       - id: check-json
       - id: check-added-large-files
-        args: [ --maxkb=600 ]
+        # HDF5 IO fixtures under tests/python_tests/tools/data/ are intentionally
+        # a few hundred KB once LegPipe / ChargedTensor / HiddenLegTensor are included.
+        args: [ --maxkb=1024 ]
       - id: check-merge-conflict
       - id: debug-statements
       - id: check-symlinks
