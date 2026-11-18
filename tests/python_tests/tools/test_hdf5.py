@@ -222,3 +222,36 @@ def test_hdf5_symmetry_extra_params_are_distinguished(tmp_path):
         assert la != lb
         assert type(la) is type(a)
         assert type(lb) is type(b)
+
+
+@pytest.mark.filterwarnings(r'ignore:Hdf5Saver.* object of type.*:UserWarning')
+def test_hdf5_leg_pipe_roundtrip(tmp_path):
+    """Plain LegPipe (and nested pipes / TensorProduct factors) roundtrip via HDF5."""
+    S = lasyten.symmetries
+    symmetry = S.NoSymmetry().as_Symmetry()
+    a = lasyten.ElementarySpace.from_trivial_sector(2, symmetry=symmetry)
+    b = lasyten.ElementarySpace.from_trivial_sector(3, symmetry=symmetry, is_dual=True)
+    pipe = lasyten.LegPipe([a, b], is_dual=True, combine_cstyle=False)
+    nested = lasyten.LegPipe([pipe, a], is_dual=False, combine_cstyle=True)
+    product = lasyten.TensorProduct([nested, b])
+
+    loaded = _hdf5_roundtrip(
+        {'pipe': pipe, 'nested': nested, 'product': product},
+        tmp_path,
+        'leg_pipe.hdf5',
+    )
+    for key, orig in [('pipe', pipe), ('nested', nested)]:
+        got = loaded[key]
+        assert type(got) is type(orig)
+        assert got == orig
+        assert got.is_dual == orig.is_dual
+        assert got.combine_cstyle == orig.combine_cstyle
+        assert got.num_legs == orig.num_legs
+        assert got.dim == orig.dim
+        got.test_sanity()
+
+    got_prod = loaded['product']
+    assert type(got_prod) is type(product)
+    assert got_prod == product
+    assert got_prod.num_factors == product.num_factors
+    assert isinstance(got_prod.factors[0], lasyten.LegPipe)

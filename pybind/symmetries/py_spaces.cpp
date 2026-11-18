@@ -464,7 +464,7 @@ the sector multiplicities.)pydoc")
       .def_ro("num_legs", &LegPipe::num_legs)
       .def_rw("combine_cstyle", &LegPipe::combine_cstyle);
 
-    // Pickle (beyond HDF5, which has no schema for a plain LegPipe): ``LegPipe(legs, ...)``.
+    // Pickle state matches HDF5: ``LegPipe(legs, is_dual, combine_cstyle)``.
     lasyten::pickle::def_reduce_ctor(pipe, [](LegPipe const& self) {
         return nb::make_tuple(nb::cast(self.legs), self.is_dual, self.combine_cstyle);
     });
@@ -503,7 +503,17 @@ the sector multiplicities.)pydoc")
         },
         nb::keep_alive<0, 1>())
       .def("__repr__", [](LegPipe const& self) { return self.repr(); })
-      .def("repr", &LegPipe::repr, nb::arg("show_symmetry") = true, nb::arg("one_line") = false);
+      .def("repr", &LegPipe::repr, nb::arg("show_symmetry") = true, nb::arg("one_line") = false)
+      .def("save_hdf5",
+           lasyten::hdf5::wrap_save_hdf5_const<LegPipe>(),
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"))
+      .def_static("from_hdf5",
+                  lasyten::hdf5::wrap_from_hdf5<LegPipe>(),
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 
     bind_elementary_space(m);
     bind_direct_sum_space(m);

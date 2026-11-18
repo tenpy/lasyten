@@ -1219,6 +1219,51 @@ LegPipe::shared_pipe()
     return shared_from_this();
 }
 
+void
+LegPipe::save_hdf5(lasyten::hdf5::Saver& saver,
+                   HighFive::Group& h5gr,
+                   std::string const& subpath) const
+{
+    // Mirror pickle / ctor state: legs + is_dual + combine_cstyle. Symmetry, dim, and
+    // basis_perm are recomputed by the constructor.
+    HighFive::Group leg_g;
+    std::string leg_sub;
+    saver.save_sequence_begin(subpath + "legs",
+                              tenpy_hdf5::REPR_LIST,
+                              static_cast<std::int64_t>(legs.size()),
+                              leg_g,
+                              leg_sub);
+    lasyten::hdf5::Saver leg_saver(leg_g);
+    for (std::size_t i = 0; i < legs.size(); ++i) {
+        hdf5_export::save_leg(leg_saver, std::to_string(i), legs[i]);
+    }
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "is_dual", is_dual);
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "combine_cstyle", combine_cstyle);
+}
+
+LegPipe::Ptr
+LegPipe::from_hdf5(lasyten::hdf5::Loader& loader,
+                   HighFive::Group& h5gr,
+                   std::string const& subpath)
+{
+    hid_t legs_id = loader.open(subpath + "legs");
+    auto const n = tenpy_hdf5::h5_get_attr_int64(legs_id, tenpy_hdf5::ATTR_LEN).value_or(0);
+    HighFive::Group legs_g = tenpy_hdf5::group_from_hid(legs_id);
+    lasyten::hdf5::Loader legs_loader(legs_g);
+    std::vector<Leg> legs_in;
+    legs_in.reserve(static_cast<std::size_t>(n));
+    for (std::int64_t i = 0; i < n; ++i) {
+        legs_in.push_back(hdf5_export::load_leg(legs_loader, std::to_string(i)));
+    }
+    auto const is_dual_attr = tenpy_hdf5::h5_get_attr_int64(h5gr.getId(), "is_dual");
+    bool const is_dual_ = is_dual_attr.value_or(0) != 0;
+    auto const combine_attr = tenpy_hdf5::h5_get_attr_int64(h5gr.getId(), "combine_cstyle");
+    bool const combine_cstyle_ = combine_attr.value_or(0) != 0;
+    auto obj = std::make_shared<LegPipe>(std::move(legs_in), is_dual_, combine_cstyle_);
+    loader.memorize_load(h5gr.getId(), std::static_pointer_cast<void>(obj));
+    return obj;
+}
+
 std::string
 LegPipe::repr(bool show_symmetry, bool one_line) const
 {
