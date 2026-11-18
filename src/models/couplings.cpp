@@ -7,6 +7,7 @@
 #include <lasyten/tensors/constructors.h>
 #include <lasyten/tensors/mask.h>
 #include <lasyten/tensors/ops_algebra.h>
+#include <lasyten/tensors/ops_legs.h>
 #include <lasyten/tensors/planar.h>
 #include <lasyten/tools.h>
 
@@ -641,14 +642,69 @@ Coupling::to_tensor() const
     return as_symmetric(permute_legs(res, codom_labels, dom_labels, std::nullopt, false));
 }
 
+std::vector<SymmetricTensorPtr>
+dagger_factorization(std::vector<SymmetricTensorPtr> const& factorization, bool flip_boundary_legs)
+{
+    static std::vector<std::string> const expected_labels = { "wL", "p", "wR", "p*" };
+    std::size_t const n = factorization.size();
+    std::vector<SymmetricTensorPtr> res;
+    res.reserve(n);
+    for (auto const& W : factorization) {
+        if (!W) {
+            throw std::invalid_argument("dagger_factorization: tensors must not be null");
+        }
+        if (W->num_codomain_legs() != 2 || W->num_domain_legs() != 2) {
+            throw std::invalid_argument(
+              "dagger_factorization: tensors must have 2 codomain and 2 domain legs");
+        }
+        auto const labels = W->labels.as_list();
+        for (std::size_t j = 0; j < expected_labels.size(); ++j) {
+            if (labels[j] != expected_labels[j]) {
+                throw std::invalid_argument(
+                  "dagger_factorization: tensor labels must be ['wL', 'p', 'wR', 'p*']");
+            }
+        }
+        // `dagger` gives the labels [p, wR*, p*, wL*] (it reverses the leg order and dualizes all
+        // legs). Cyclic permutation (i.e. bending only, no braids) restores the standard order.
+        TensorPtr Wd = planar_permute_legs(
+          dagger(TensorCPtr{ W }),
+          std::vector<LegRef>{ LegRef{ std::string("wL*") }, LegRef{ std::string("p") } },
+          std::vector<LegRef>{ LegRef{ std::string("p*") }, LegRef{ std::string("wR*") } });
+        Wd->labels = LegLabelList{ "wL", "p", "wR", "p*" };
+        res.push_back(as_symmetric(std::move(Wd)));
+    }
+    if (n == 0) {
+        return res;
+    }
+    // `dagger` dualized all virtual legs. Flip the interior bonds back with the pair function,
+    // which is a gauge transformation, i.e. keeps the contraction exact.
+    for (std::size_t i = 0; i + 1 < n; ++i) {
+        if (!(res[i]->get_leg("wR") == res[i + 1]->get_leg("wL").dual())) {
+            throw std::invalid_argument(
+              std::format("dagger_factorization: the wR leg of tensor {} is not dual to the wL "
+                          "leg of tensor {}",
+                          i,
+                          i + 1));
+        }
+        auto [A2, B2] = flip_bond_duality(
+          res[i], res[i + 1], LegRef{ std::string("wR") }, LegRef{ std::string("wL") });
+        res[i] = as_symmetric(std::move(A2));
+        res[i + 1] = as_symmetric(std::move(B2));
+    }
+    if (flip_boundary_legs) {
+        // The outer legs are not contracted with another tensor of the chain (they are dummy legs
+        // of a finite chain, or contracted with the other end of an infinite chain, which is
+        // flipped as well). Flip them on their own. For n == 1, these are both legs of tensor 0.
+        res.front() = as_symmetric(flip_leg_duality(res.front(), LegRef{ std::string("wL") }));
+        res.back() = as_symmetric(flip_leg_duality(res.back(), LegRef{ std::string("wR") }));
+    }
+    return res;
+}
+
 Coupling
 Coupling::dagger(std::optional<std::string> new_name) const
 {
-    // TODO: optimize. This is essentially `MPO.dagger()`: dagger each factorization tensor,
-    //  permute its legs and flip the arrows of the virtual legs. Flipping arrows is not well
-    //  supported yet, so we go via the full tensor for now.
-    SymmetricTensorPtr res = as_symmetric(lasyten::dagger(TensorCPtr{ to_tensor() }));
-    return from_tensor(res, sites, new_name ? new_name : name);
+    return Coupling(sites, dagger_factorization(factorization), new_name ? new_name : name);
 }
 
 py::array

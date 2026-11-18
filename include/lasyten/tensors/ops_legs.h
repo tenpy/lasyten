@@ -268,6 +268,81 @@ void check_same_legs(TensorCPtr t1, TensorCPtr t2);
   std::optional<int64> target_codomain_pos = std::nullopt,
   std::optional<int64> target_domain_pos = std::nullopt);
 
+/// Flip the duality of a bond between two contracted legs (a gauge transformation).
+///
+/// `A` and `B` share a contractible pair of legs, ``A.get_leg(leg_A) == B.get_leg(leg_B).dual``.
+/// The result ``A2, B2`` has the same contraction,
+///
+///     tdot(A, B, leg_A, leg_B) == tdot(A2, B2, leg_A, leg_B)
+///
+/// (or the planar version of it, there are no braids involved), but the bond is represented by
+/// the *isomorphic* space with opposite ``is_dual``: ``A2.get_leg(leg_A).is_dual`` is
+/// ``!A.get_leg(leg_A).is_dual``, and ``B2`` likewise. The sectors of the leg are not changed,
+/// i.e. only the convention how the bond space is written down changes. Each leg stays on its
+/// side, i.e. in the codomain or in the domain of its tensor, and all labels are preserved.
+///
+/// One end of the bond gets the isomorphism @f$ Z_a : a^* \to \bar{a} @f$ (see
+/// `BaseSymmetry::Z_iso`), the other its inverse. They cancel, so this is a gauge transformation
+/// of the bond, comparable to `move_hidden_leg`; `flip_leg_duality` alone does not cancel and
+/// changes the tensor. Bending the leg cannot achieve this, since a bent leg is listed as the
+/// same space.
+///
+/// The typical use case is an MPO that was conjugated tensor by tensor: ``dagger`` dualizes all
+/// virtual legs, and this function brings them back to the convention of the original MPO, such
+/// that the two can be added or compared.
+///
+/// Internally, each leg is combined into a one-leg pipe with opposite duality and flattened
+/// again, as in `move_hidden_leg`. `LegPipe` bond legs are flattened to `ElementarySpace`s; on the
+/// `FusionTreeBackend`, nested pipes that are dual raise a `NotImplementedError` (from
+/// `flatten_pipe_leg`). A `DirectSumSpace` bond stays a `DirectSumSpace` with the same summands
+/// and `summand_labels`, but with each summand flipped (see
+/// `ElementarySpace::with_opposite_duality`).
+///
+/// @note Only the contraction of the pair is guaranteed to be preserved. The public basis order
+///     of the flipped leg (its ``basis_perm``) is not, and for non-abelian or anyonic symmetries
+///     flipping a single tensor twice differs from the original by the Frobenius-Schur
+///     indicators of the bond sectors. Both are irrelevant for virtual bonds.
+///
+/// @param A,B The tensors, both `SymmetricTensor`s without hidden legs. They may be the same
+///     object if `leg_A` and `leg_B` are different legs of it (both ends of the bond on one
+///     tensor, e.g. the wrap bond of an infinite MPO with a one-site unit cell). Then both legs
+///     are flipped on that tensor, which is returned twice, such that tracing the two legs gives
+///     the same result before and after.
+/// @param leg_A,leg_B The legs to flip.
+/// @returns ``(A2, B2)`` as described above.
+///
+/// @see flip_leg_duality, move_hidden_leg, flatten_pipe_leg
+[[nodiscard]] std::pair<TensorPtr, TensorPtr> flip_bond_duality(TensorCPtr A,
+                                                                TensorCPtr B,
+                                                                LegRef leg_A,
+                                                                LegRef leg_B);
+
+/// Flip the duality (``is_dual``) of a single leg of a tensor.
+///
+/// Replaces the leg by the isomorphic space with opposite ``is_dual``. Concretely, it applies a
+/// specific unitary isomorphism to that leg: the ``Z`` isomorphism @f$ Z_a : a^* \to \bar{a} @f$,
+/// block by block on the sectors ``a`` (see `BaseSymmetry::Z_iso`). The sectors are not changed.
+/// Labels and the position of the leg (codomain / domain) are preserved.
+///
+/// @warning This *changes the tensor* by ``Z``, except on a leg with only the trivial sector,
+///     where ``Z`` is the identity and only ``is_dual`` changes (e.g. the dummy legs of a finite
+///     MPO). Keeping a network consistent is up to the caller: every tensor that shares the leg,
+///     explicitly or implicitly (e.g. MPS, MPO and environments on one virtual bond), needs the
+///     same flip. For one explicitly contracted pair, `flip_bond_duality` does this as a gauge
+///     transformation. Contractions with the conjugate tensor, such as the norm, are unchanged,
+///     since ``Z`` is unitary.
+///
+/// For a leg that is a `LegPipe`, the result is the flattened `ElementarySpace` with opposite
+/// duality. A `DirectSumSpace` leg stays a `DirectSumSpace` with the same summands and
+/// `summand_labels`, but with each summand flipped.
+///
+/// @param tensor A `SymmetricTensor` without hidden legs.
+/// @param which_leg The leg to flip.
+/// @returns The tensor with the flipped leg.
+///
+/// @see flip_bond_duality, dagger_factorization
+[[nodiscard]] TensorPtr flip_leg_duality(TensorCPtr tensor, LegRef which_leg);
+
 /// Permute the legs of a tensor by braiding legs and bending lines.
 ///
 /// Graphically (note that we ignore the `levels` graphically and do not draw braid

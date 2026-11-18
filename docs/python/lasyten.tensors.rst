@@ -131,6 +131,10 @@ Functions
 
 .. autofunction:: lasyten.tensors.eye
 
+.. autofunction:: lasyten.tensors.flip_bond_duality
+
+.. autofunction:: lasyten.tensors.flip_leg_duality
+
 .. autofunction:: lasyten.tensors.get_same_device
 
 .. autofunction:: lasyten.tensors.imag

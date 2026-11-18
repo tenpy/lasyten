@@ -14,6 +14,7 @@
 #include <lasyten/tensors/labels.h>
 #include <lasyten/tensors/mask.h>
 #include <lasyten/tensors/ops_algebra.h>
+#include <lasyten/tensors/planar.h>
 #include <lasyten/tensors/symmetric_tensor.h>
 #include <lasyten/tensors/tensor.h>
 #include <lasyten/tools.h>
@@ -1818,6 +1819,83 @@ move_hidden_leg(HiddenLegTensorCPtr A,
         throw std::runtime_error("move_hidden_leg: expected HiddenLegTensor result for B");
     }
     return { std::move(A_out), std::move(B_out) };
+}
+
+TensorPtr
+flip_leg_duality(TensorCPtr tensor, LegRef which_leg)
+{
+    if (!tensor) {
+        throw std::invalid_argument("flip_leg_duality() requires a non-null Tensor");
+    }
+    auto sym = std::dynamic_pointer_cast<SymmetricTensor const>(tensor);
+    if (!sym) {
+        throw std::invalid_argument("flip_leg_duality requires a SymmetricTensor.");
+    }
+    if (HiddenLegTensor::has_hidden_leg_labels(tensor->labels.as_list())) {
+        throw NotImplemented("flip_leg_duality for tensors with hidden legs");
+    }
+    int64 const idx = leg_idx(tensor, which_leg);
+    auto const labels = tensor->labels.as_list();
+    auto const orig_leg = tensor->get_leg(idx);
+    // a pipe leg is replaced by its flat `ElementarySpace` first (no-op for other legs)
+    TensorPtr cur = flatten_pipe_leg_at(tensor, idx);
+    bool const was_dual = cur->get_leg(idx).is_dual();
+    // a one-leg group keeps its position, so no bending is needed. Combining it into a pipe with
+    // the opposite duality and flattening that pipe gives the isomorphic space with opposite
+    // `is_dual`; `flatten_pipe_leg_at` takes care of the (Frobenius-Schur) signs.
+    auto combined = planar_combine_legs(
+      cur, std::vector<std::vector<LegRef>>{ { LegRef{ idx } } }, PipeDualities{ !was_dual });
+    TensorPtr res = flatten_pipe_leg_at(combined, idx);
+    res->labels = labels;
+    auto dss = orig_leg.is_pipe()
+                 ? nullptr
+                 : std::dynamic_pointer_cast<DirectSumSpace>(orig_leg.as_elementary_space());
+    if (dss) {
+        // Keep the direct-sum structure (e.g. the summand labels of MPO bonds). The flipped
+        // `DirectSumSpace` has the same internal structure as the flat leg that we got from the
+        // pipe, so the data of the tensor is valid for it and only the leg object is replaced.
+        auto target = dss->with_opposite_duality();
+        auto const flat_leg = res->get_leg(idx);
+        [[maybe_unused]] auto flat = flat_leg.is_pipe() ? nullptr : flat_leg.as_elementary_space();
+        assert(target && flat && target->is_dual == flat->is_dual &&
+               target->sector_decomposition == flat->sector_decomposition &&
+               target->multiplicities == flat->multiplicities &&
+               "flip_leg_duality: the flipped direct sum space must match the flipped leg");
+        res = replace_legs_space(std::move(res), idx, Leg{ target });
+    }
+    return res;
+}
+
+std::pair<TensorPtr, TensorPtr>
+flip_bond_duality(TensorCPtr A, TensorCPtr B, LegRef leg_A, LegRef leg_B)
+{
+    if (!A || !B) {
+        throw std::invalid_argument("flip_bond_duality() requires non-null Tensor arguments");
+    }
+    int64 const idx_A = leg_idx(A, leg_A);
+    int64 const idx_B = leg_idx(B, leg_B);
+    bool const same_tensor = A.get() == B.get();
+    if (same_tensor && idx_A == idx_B) {
+        throw std::invalid_argument("flip_bond_duality: if A and B are the same tensor, leg_A and "
+                                    "leg_B must be different legs.");
+    }
+    if (!(A->get_leg(idx_A) == B->get_leg(idx_B).dual())) {
+        throw std::invalid_argument(
+          "flip_bond_duality: leg_A and leg_B are not contractible (must be duals).");
+    }
+    if (same_tensor) {
+        // Both ends of the bond are legs of one tensor (e.g. the wrap bond of a one-site unit
+        // cell). Flip both of them there; the position of the legs does not change.
+        auto T = flip_leg_duality(flip_leg_duality(A, LegRef{ idx_A }), LegRef{ idx_B });
+        assert(T->get_leg(idx_A) == T->get_leg(idx_B).dual() &&
+               "flip_bond_duality: the flipped legs must be contractible");
+        return { T, T };
+    }
+    auto A2 = flip_leg_duality(A, LegRef{ idx_A });
+    auto B2 = flip_leg_duality(B, LegRef{ idx_B });
+    assert(A2->get_leg(idx_A) == B2->get_leg(idx_B).dual() &&
+           "flip_bond_duality: the flipped legs must be contractible");
+    return { std::move(A2), std::move(B2) };
 }
 
 namespace {

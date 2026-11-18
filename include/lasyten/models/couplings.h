@@ -18,6 +18,45 @@ namespace lasyten {
 /// Recursively turn the output of the ``_*_to_dict`` helpers into hashable nested tuples.
 [[nodiscard]] py::object freeze(py::object obj);
 
+/// Hermitian conjugate of an MPO-like chain of tensors, tensor by tensor.
+///
+/// Each tensor of `factorization` must have labels ``['wL', 'p', 'wR', 'p*']`` with two codomain
+/// and two domain legs, as the `Coupling::factorization` and the ``W`` tensors of an MPO. The
+/// product of the (contracted) tensors is an operator ``O = sum_{a} W_0[a_0, a_1] W_1[a_1, a_2]
+/// ...``, where every term acts on different sites and the terms commute. Hence the hermitian
+/// conjugate is ``O^dagger = sum_{a} W_0[a_0, a_1]^dagger W_1[a_1, a_2]^dagger ...`` with the
+/// *same* virtual indices, i.e. only the physical legs are transposed (and the entries
+/// conjugated). Note that this does *not* exchange ``wL`` and ``wR``.
+///
+/// The conjugate tensors are brought back to the standard leg order and labels by planar leg
+/// permutations (no braids, i.e. this works for fermions and anyons). The virtual legs, which
+/// are dualized by `dagger`, are flipped back: each interior bond ``(i, i + 1)`` with
+/// `flip_bond_duality` (a gauge transformation of the bond), and, if `flip_boundary_legs` is
+/// true, the outer ``wL`` of the first and the outer ``wR`` of the last tensor with
+/// `flip_leg_duality`. The sectors of the
+/// virtual legs are the conjugated ones, since e.g. the dagger of ``S+`` is ``S-``, and
+/// the ``summand_labels`` of ``DirectSumSpace`` legs are kept. This is crucial for combining the
+/// result with the original chain, e.g. to add an MPO and its hermitian conjugate. The cost is
+/// linear in the number of tensors; in contrast to going via the contracted (dense) operator it
+/// does not grow exponentially.
+///
+/// @param factorization The tensors, one per site.
+/// @param flip_boundary_legs Whether to also flip the two outer virtual legs, ``wL`` of the first
+///     and ``wR`` of the last tensor (for a single tensor: both of its virtual legs). For an MPO
+///     this does not change the operator: in an infinite chain the two legs form the wrap bond,
+///     so flipping both is a gauge transformation, and the dummy legs of a finite MPO carry only
+///     the trivial sector, on which ``Z`` is the identity. It only decides their duality: with
+///     ``true``, all virtual legs have the dualities of the input, as needed to add or compare
+///     the result with the original chain or to contract it with environments built for the
+///     input; ``false`` keeps the outer legs as dualized by `dagger`, which matches environments
+///     that are daggered as well.
+/// @returns The tensors of the hermitian conjugate chain, same length and labels as the input.
+///
+/// @see Coupling::dagger, flip_bond_duality, flip_leg_duality
+[[nodiscard]] std::vector<SymmetricTensorPtr> dagger_factorization(
+  std::vector<SymmetricTensorPtr> const& factorization,
+  bool flip_boundary_legs = true);
+
 /// A coupling is an operator on a few `Site` s, factorized as one tensor per site.
 ///
 /// A coupling represents an operator of the following form::

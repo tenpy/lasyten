@@ -15,7 +15,7 @@ namespace {
 py::object
 not_implemented()
 {
-    return py::module_::import("builtins").attr("NotImplemented");
+    return py::reinterpret_borrow<py::object>(Py_NotImplemented);
 }
 
 } // namespace
@@ -26,6 +26,12 @@ bind_models_couplings(nb::module_& m)
     m.def("freeze", &freeze, nb::arg("obj"), DOC(lasyten, freeze));
 
     m.def("space_to_dict", &space_to_dict, nb::arg("space"));
+
+    m.def("dagger_factorization",
+          &dagger_factorization,
+          nb::arg("factorization"),
+          nb::arg("flip_boundary_legs") = true,
+          DOC(lasyten, dagger_factorization));
 
     nb::class_<Coupling> coupling(m, "Coupling");
     coupling.doc() = DOC(lasyten, Coupling);

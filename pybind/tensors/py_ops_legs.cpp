@@ -369,6 +369,32 @@ In Python, ``axis_A`` / ``axis_B`` are ``int | str``; optional position args use
 )pydoc"));
 
     m.def(
+      "flip_bond_duality",
+      [](TensorCPtr A, TensorCPtr B, py::object leg_A, py::object leg_B) {
+          return flip_bond_duality(
+            std::move(A), std::move(B), py_as_leg_ref(leg_A), py_as_leg_ref(leg_B));
+      },
+      nb::arg("A"),
+      nb::arg("B"),
+      nb::arg("leg_A"),
+      nb::arg("leg_B"),
+      doc_plus(DOC(lasyten, flip_bond_duality),
+               R"pydoc(
+In Python, ``leg_A`` / ``leg_B`` are ``int | str``.
+)pydoc"));
+
+    m.def(
+      "flip_leg_duality",
+      [](TensorCPtr tensor, py::object which_leg) {
+          return flip_leg_duality(std::move(tensor), py_as_leg_ref(which_leg));
+      },
+      nb::arg("tensor"),
+      nb::arg("which_leg"),
+      doc_plus(DOC(lasyten, flip_leg_duality),
+               R"pydoc(
+In Python, ``which_leg`` is ``int | str``.
+)pydoc"));
+    m.def(
       "permute_legs",
       [](TensorCPtr tensor,
          py::object codomain,
