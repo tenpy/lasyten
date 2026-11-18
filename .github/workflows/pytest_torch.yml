@@ -28,7 +28,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v6
       with:
-        # external/hdf5_io: CMake (LASYTEN_WITH_HDF5) and the Python hdf5_io package
+        # external/hdf5_io: CMake (LASYTEN_WITH_HDF5) and the Python tenpy_hdf5 (tenpy-hdf5) package
         submodules: true
 
     - name: Set up micromamba
@@ -39,7 +39,7 @@ jobs:
 
     - name: Build and install
       # build deps (scikit-build-core, cmake, ...) come from environment.yml
-      # hdf5_io is not on PyPI yet; install the git submodule (needed for lasyten.tools.hdf5_io)
+      # Install tenpy-hdf5 from the git submodule (needed for lasyten.tools.hdf5_io)
       run: |
         pip install --no-build-isolation -e ./external/hdf5_io
         pip install --no-build-isolation -e .

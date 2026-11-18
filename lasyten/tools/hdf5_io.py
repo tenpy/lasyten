@@ -1,12 +1,12 @@
 """HDF5 import/export (TeNPy format).
 
-This module re-exports the standalone ``hdf5_io`` package (C++/pybind11
-implementation). Install it via ``pip install hdf5_io`` or the lasyten ``[io]`` extra.
+This module re-exports the standalone ``tenpy_hdf5`` package (C++/nanobind
+implementation). Install it via ``pip install tenpy-hdf5`` or the lasyten ``[io]`` extra.
 """
 # Copyright (C) TeNPy Developers, Apache license
 
-from hdf5_io import *  # noqa: F403
-from hdf5_io import (  # noqa: F401
+from tenpy_hdf5 import *  # noqa: F403
+from tenpy_hdf5 import (  # noqa: F401
     ATTR_CLASS,
     ATTR_FORMAT,
     ATTR_LEN,

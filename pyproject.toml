@@ -43,7 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # users:
-io = ["h5py", "hdf5_io"]
+io = ["h5py", "tenpy-hdf5"]
 # gpu was previously ["torch"]; torch is now a hard dependency (see above)
 # dev:
 test = ["pytest>=6.0", "sympy", "lasyten[io]"]

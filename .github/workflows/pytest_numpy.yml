@@ -29,7 +29,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v6
       with:
-        # external/hdf5_io: CMake (LASYTEN_WITH_HDF5) and the Python hdf5_io package
+        # external/hdf5_io: CMake (LASYTEN_WITH_HDF5) and the Python tenpy_hdf5 (tenpy-hdf5) package
         # external/SUN_symbols: required symbols for tests
         submodules: true
 
@@ -45,7 +45,7 @@ jobs:
     - name: Build and install
       # build deps (scikit-build-core, cmake, pytorch, ...) come from environment.yml
       # --no-build-isolation avoids pip pulling a CUDA torch wheel that needs the CUDA toolkit
-      # hdf5_io is not on PyPI yet; install the git submodule first so lasyten[io]/test] can resolve it
+      # Install tenpy-hdf5 from the git submodule so lasyten[io]/test] can resolve it
       run: |
         pip install --no-build-isolation -e ./external/hdf5_io
         pip install --no-build-isolation -e ".[test]"
