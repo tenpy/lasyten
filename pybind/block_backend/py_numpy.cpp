@@ -2,6 +2,7 @@
 #include "docstrings/block_backend/numpy.h"
 // NOTE: this file is #included from py_block_backend.cpp
 
+#include "ndarray_dispatch.h"
 #include "py_trampolines.hpp"
 #include "tools/hdf5_bind.h"
 #include <lasyten/block_backend/numpy.h>
@@ -9,46 +10,82 @@
 namespace lasyten {
 
 void
-bind_block_backend_numpy(py::module_& m)
+bind_block_backend_numpy(nb::module_& m)
 {
 
-    py::class_<NumpyBlockBackend, BlockBackend, py::smart_holder> numpy_block_backend(
-      m, "NumpyBlockBackend");
+    nb::class_<NumpyBlockBackend, BlockBackend> numpy_block_backend(m, "NumpyBlockBackend");
     numpy_block_backend.doc() = DOC(lasyten, NumpyBlockBackend);
     numpy_block_backend.def_static(
       "from_factory",
       &NumpyBlockBackend::from_factory,
-      py::arg("device") = "cpu",
-      py::return_value_policy::reference,
+      nb::arg("device") = "cpu",
+      nb::rv_policy::reference,
       "Get the backend instance for the given device (nearly-singleton per device).");
     numpy_block_backend.def_static("from_hdf5",
                                    lasyten::hdf5::wrap_from_hdf5<NumpyBlockBackend>(),
-                                   py::arg("hdf5_loader"),
-                                   py::arg("h5gr"),
-                                   py::arg("subpath"),
+                                   nb::arg("hdf5_loader"),
+                                   nb::arg("h5gr"),
+                                   nb::arg("subpath"),
                                    "Load a NumpyBlockBackend from an HDF5 file.");
+    numpy_block_backend.def(
+      "block_from_ndarray",
+      [](NumpyBlockBackend& self,
+         eigen_ndarray::AnyDeviceArray arr,
+         std::optional<Dtype> dtype,
+         std::optional<std::string> device) {
+          return ndarray_dispatch::block_from_ndarray(self, arr, dtype, std::move(device));
+      },
+      nb::arg("arr"),
+      nb::arg("dtype") = nb::none(),
+      nb::arg("device") = nb::none(),
+      "Import a CPU array into a Numpy block (zero-copy when already a NumPy array).");
+    numpy_block_backend.def(
+      "to_ndarray",
+      [](NumpyBlockBackend& self,
+         nb::object block,
+         bool writable,
+         std::optional<std::string> framework) {
+          auto& b = nb::cast<BlockBackend::Block&>(block);
+          return ndarray_dispatch::block_to_ndarray(
+            self, b, block, writable, std::move(framework));
+      },
+      nb::arg("block"),
+      nb::arg("writable") = true,
+      nb::arg("framework") = nb::none(),
+      "Zero-copy array view (framework=numpy/torch/jax/tensorflow; default numpy). "
+      "writable=False clears the writeable flag for NumPy.");
 
-    py::class_<NumpyBlockBackend::Block, BlockBackend::Block, py::smart_holder>(
+    nb::class_<NumpyBlockBackend::Block, BlockBackend::Block>(
       numpy_block_backend, "BlockCls", "Block that holds a numpy array in a py::object.")
-      .def(py::init<py::array>(), py::arg("arr"))
+      .def(lasyten::ctor_for<NumpyBlockBackend::Block, py::array>(), nb::arg("arr"))
+      .def(
+        "to_ndarray",
+        [](nb::object self, bool writable, std::optional<std::string> framework) {
+            auto& b = nb::cast<BlockBackend::Block&>(self);
+            return ndarray_dispatch::block_to_ndarray(
+              *b.get_backend(), b, self, writable, std::move(framework));
+        },
+        nb::arg("writable") = true,
+        nb::arg("framework") = nb::none(),
+        "Zero-copy array view of the stored array (optional framework tag).")
       .def("to_numpy",
-           py::overload_cast<>(&NumpyBlockBackend::Block::to_numpy, py::const_),
-           py::return_value_policy::reference_internal)
+           nb::overload_cast<>(&NumpyBlockBackend::Block::to_numpy, nb::const_),
+           nb::rv_policy::reference_internal)
       .def("to_numpy",
-           py::overload_cast<Dtype>(&NumpyBlockBackend::Block::to_numpy, py::const_),
-           py::arg("dtype"),
-           py::return_value_policy::reference_internal)
+           nb::overload_cast<Dtype>(&NumpyBlockBackend::Block::to_numpy, nb::const_),
+           nb::arg("dtype"),
+           nb::rv_policy::reference_internal)
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5<NumpyBlockBackend::Block>(),
-           py::arg("hdf5_saver"),
-           py::arg("h5gr"),
-           py::arg("subpath"),
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"),
            "Save block (numpy array) to HDF5.")
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<NumpyBlockBackend::Block>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"),
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"),
                   "Load block from HDF5.");
     // NOTE: don't immplment __array__ since we don't want to allow Blocks to cast to numpy arrays
     // except via NOTE: no __mul__, __add__ etc since we have Block*Scalar defined in

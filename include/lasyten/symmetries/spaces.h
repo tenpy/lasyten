@@ -98,10 +98,12 @@ class Leg
     [[nodiscard]] std::vector<int64> _flat_leg_permutation(int64 offset = 0) const;
     [[nodiscard]] std::string ascii_arrow() const;
 
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] py::object apply_basis_perm(py::object arr,
                                               int64 axis = 0,
                                               bool inverse = false,
                                               bool pre_compose = false) const;
+#endif // LASYTEN_HAS_PYTHON
 
     bool operator==(Leg const& other) const;
     bool operator!=(Leg const& other) const { return !(*this == other); }
@@ -260,10 +262,12 @@ class LegPipe : public std::enable_shared_from_this<LegPipe>
     [[nodiscard]] bool is_pipe() const { return true; }
     [[nodiscard]] bool is_abelian_leg_pipe() const { return false; }
 
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] py::object apply_basis_perm(py::object arr,
                                               int64 axis = 0,
                                               bool inverse = false,
                                               bool pre_compose = false) const;
+#endif // LASYTEN_HAS_PYTHON
 
     bool operator==(LegPipe const& other) const;
 
@@ -397,8 +401,9 @@ class ElementarySpace : public Space
     /// Loses the product (pipe) structure and results in a plain `ElementarySpace`.
     ///
     /// @param blockmask For every basis state of self, in the public basis order, if it
-    ///     should be kept (``True``) or discarded (``False``).
-    [[nodiscard]] virtual Ptr take_slice(py::array blockmask) const;
+    ///     should be kept (``true``) or discarded (``false``). Python-free; the Python binding
+    ///     converts any array-like of bool.
+    [[nodiscard]] virtual Ptr take_slice(std::vector<bool> const& blockmask) const;
 
     /// A space isomorphic to self with opposite ``is_dual`` attribute.
     ///
@@ -422,10 +427,12 @@ class ElementarySpace : public Space
     virtual void set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm);
     [[nodiscard]] bool has_custom_basis_perm() const noexcept { return _basis_perm.has_value(); }
 
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] virtual py::object apply_basis_perm(py::object arr,
                                                       int64 axis = 0,
                                                       bool inverse = false,
                                                       bool pre_compose = false) const;
+#endif // LASYTEN_HAS_PYTHON
 
     /// True for `AbelianLegPipe` (composed pipe structure).
     [[nodiscard]] virtual bool is_pipe() const { return false; }
@@ -527,7 +534,7 @@ class DirectSumSpace : public ElementarySpace
 
     Space::Ptr drop_symmetry(std::optional<std::vector<int64>> which = std::nullopt) override;
 
-    ElementarySpace::Ptr take_slice(py::array blockmask) const override;
+    ElementarySpace::Ptr take_slice(std::vector<bool> const& blockmask) const override;
 
     ElementarySpace::Ptr with_opposite_duality() const override;
 
@@ -954,7 +961,7 @@ class AbelianLegPipe : public ElementarySpace
 
     void set_inverse_basis_perm(std::optional<std::vector<int64>> inverse_basis_perm) override;
 
-    ElementarySpace::Ptr take_slice(py::array blockmask) const override;
+    ElementarySpace::Ptr take_slice(std::vector<bool> const& blockmask) const override;
 
     ElementarySpace::Ptr with_opposite_duality() const override;
     bool operator==(Space const& other) const override;
@@ -1116,57 +1123,70 @@ parse_inputs_drop_symmetry_public(std::optional<std::vector<int64>> which, Symme
 
 } // namespace lasyten
 
-#include <pybind11/cast.h>
+#include <lasyten/detail/python_api.h>
 
-namespace pybind11::detail {
+#if LASYTEN_HAS_PYTHON
+NAMESPACE_BEGIN(NB_NAMESPACE)
+NAMESPACE_BEGIN(detail)
 
-/// Accept `ElementarySpace` / `LegPipe` shared_ptrs from Python; unwrap to the held object on
-/// cast.
+/// ``Leg`` is a value-type handle (not a bound class). Accept ``ElementarySpace`` / ``LegPipe``
+/// from Python (and ``None`` as the empty leg); unwrap to the held object on cast. Python exposes
+/// ``Leg`` as an ABC that registers the concrete types.
 ///
-/// C++ `Leg` is a value-type handle (not a bound polymorphic class). Python exposes `Leg` as an
-/// ABC that registers the concrete types.
+/// Defined here (not in ``pybind/``) so that liblasyten TUs and the bindings convert ``Leg``
+/// identically.
 template<>
 struct type_caster<lasyten::Leg>
 {
-    PYBIND11_TYPE_CASTER(lasyten::Leg, const_name("Leg"));
+    NB_TYPE_CASTER(lasyten::Leg, const_name("Leg"))
 
-    bool load(handle src, bool convert)
+    bool from_python(handle src, uint32_t flags, cleanup_list* cleanup) noexcept
     {
         if (src.is_none()) {
             value = lasyten::Leg(nullptr);
             return true;
         }
-        (void)convert;
-        try {
-            if (isinstance<lasyten::ElementarySpace>(src)) {
-                value = lasyten::Leg(src.cast<std::shared_ptr<lasyten::ElementarySpace>>());
+        flags &= ~(uint32_t)cast_flags::convert;
+        {
+            make_caster<std::shared_ptr<lasyten::ElementarySpace>> c;
+            if (c.from_python(src, flags, cleanup)) {
+                value = lasyten::Leg(c.operator std::shared_ptr<lasyten::ElementarySpace>&());
                 return true;
             }
-            if (isinstance<lasyten::LegPipe>(src)) {
-                value = lasyten::Leg(src.cast<std::shared_ptr<lasyten::LegPipe>>());
+        }
+        {
+            make_caster<std::shared_ptr<lasyten::LegPipe>> c;
+            if (c.from_python(src, flags, cleanup)) {
+                value = lasyten::Leg(c.operator std::shared_ptr<lasyten::LegPipe>&());
                 return true;
             }
-        } catch (cast_error const&) {
-            return false;
-        } catch (std::exception const&) {
-            return false;
         }
         return false;
     }
 
-    static handle cast(lasyten::Leg const& src, return_value_policy policy, handle parent)
+    static handle from_cpp(lasyten::Leg const& src,
+                           rv_policy policy,
+                           cleanup_list* cleanup) noexcept
     {
         if (!src) {
-            return none().inc_ref();
+            return none().release();
         }
         if (auto es = src.as_elementary_space()) {
-            return pybind11::cast(std::move(es), policy, parent).release();
+            return make_caster<std::shared_ptr<lasyten::ElementarySpace>>::from_cpp(
+              es, policy, cleanup);
         }
         if (auto pipe = src.as_leg_pipe()) {
-            return pybind11::cast(std::move(pipe), policy, parent).release();
+            return make_caster<std::shared_ptr<lasyten::LegPipe>>::from_cpp(pipe, policy, cleanup);
         }
-        return none().inc_ref();
+        return none().release();
     }
 };
 
-} // namespace pybind11::detail
+/// ``None`` is the empty ``Leg``.
+template<>
+struct has_arg_defaults<lasyten::Leg> : std::true_type
+{};
+
+NAMESPACE_END(detail)
+NAMESPACE_END(NB_NAMESPACE)
+#endif // LASYTEN_HAS_PYTHON

@@ -1,10 +1,10 @@
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 using namespace lasyten;
 
-PYBIND11_MODULE(_core, m)
+NB_MODULE(_core, m)
 {
-    m.doc() = "LASyTen python bindings using pybind11"; // optional module docstring
+    m.doc() = "LASyTen python bindings using nanobind"; // optional module docstring
 
     bind_tools(m);
     bind_cost_polynomials(m);

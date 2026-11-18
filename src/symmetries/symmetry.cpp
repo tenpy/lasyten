@@ -121,12 +121,20 @@ Symmetry::Symmetry(std::vector<SymmetryFactor::Ptr> factors_in)
     for (auto const& f : factors) {
         // Python subclasses often set fusion_tensor_dtype as a class attribute; the C++
         // optional member may still be empty. Read via the Python object.
+#if LASYTEN_HAS_PYTHON
         py::object dt_py = py::cast(f).attr("fusion_tensor_dtype");
         if (dt_py.is_none()) {
             any_none = true;
             break;
         }
-        dtypes.push_back(dt_py.cast<Dtype>());
+        dtypes.push_back(py::cast<Dtype>(dt_py));
+#else
+        if (!f->fusion_tensor_dtype.has_value()) {
+            any_none = true;
+            break;
+        }
+        dtypes.push_back(*f->fusion_tensor_dtype);
+#endif
     }
     if (any_none || factors.empty()) {
         fusion_tensor_dtype = std::nullopt;

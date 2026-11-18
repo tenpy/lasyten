@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <format>
+#include <lasyten/detail/python_api.h>
 #include <numeric>
-#include <pybind11/numpy.h>
 #include <stdexcept>
 #include <utility>
 
@@ -12,6 +12,35 @@ namespace lasyten {
 NotImplemented::NotImplemented(std::string name)
   : std::logic_error(std::format("Not implemented: {}", name)) {};
 
+std::string
+format_like_list(std::vector<std::string> const& items)
+{
+    std::string result = "[";
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) {
+            result += ", ";
+        }
+        result += items[i];
+    }
+    result += "]";
+    return result;
+}
+
+std::string
+format_like_list(std::vector<int64> const& items)
+{
+    std::string result = "[";
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) {
+            result += ", ";
+        }
+        result += std::to_string(items[i]);
+    }
+    result += "]";
+    return result;
+}
+
+#if LASYTEN_HAS_PYTHON
 /// Format elements of an iterable as if it were a plain list.
 std::string
 format_like_list(py::iterable it)
@@ -21,7 +50,7 @@ format_like_list(py::iterable it)
     for (auto&& item : it) {
         if (!first)
             result += ", ";
-        result += py::str(item).cast<std::string>();
+        result += py::cast<std::string>(py::str(item));
         first = false;
     }
     result += "]";
@@ -51,6 +80,7 @@ to_iterable(py::object a)
     result[0] = a;
     return result;
 }
+#endif // LASYTEN_HAS_PYTHON
 
 int64
 to_valid_idx(int64 idx, int64 length)

@@ -3,7 +3,7 @@
 #include <lasyten/tensors/tensor.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 #include "py_factory_parse.hpp"
 
 #include "docstrings/tensors/constructors.h"
@@ -15,7 +15,7 @@
 namespace lasyten {
 
 void
-bind_tensors_constructors(py::module_& m)
+bind_tensors_constructors(nb::module_& m)
 {
     m.def(
       "eye",
@@ -27,7 +27,7 @@ bind_tensors_constructors(py::module_& m)
          bool diagonal) {
           std::optional<std::string> device_opt;
           if (!device.is_none()) {
-              device_opt = device.cast<std::string>();
+              device_opt = py::cast<std::string>(device);
           }
           auto init = py_parse_diag(leg, std::move(backend), labels);
           return eye(py_as_space_leg(leg),
@@ -37,12 +37,12 @@ bind_tensors_constructors(py::module_& m)
                      std::move(device_opt),
                      diagonal);
       },
-      py::arg("leg"),
-      py::arg("backend") = py::none(),
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = Dtype::Float64,
-      py::arg("device") = py::none(),
-      py::arg("diagonal") = true,
+      nb::arg("leg"),
+      nb::arg("backend").none() = nb::none(),
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype") = Dtype::Float64,
+      nb::arg("device").none() = nb::none(),
+      nb::arg("diagonal") = true,
       DOC(lasyten, eye));
 
     m.def(
@@ -57,14 +57,14 @@ bind_tensors_constructors(py::module_& m)
          bool understood_braiding) {
           std::optional<Dtype> dtype_opt;
           if (!dtype.is_none()) {
-              dtype_opt = dtype.cast<Dtype>();
+              dtype_opt = py::cast<Dtype>(dtype);
           }
           std::optional<std::string> device_opt;
           if (!device.is_none()) {
-              device_opt = device.cast<std::string>();
+              device_opt = py::cast<std::string>(device);
           }
           if (py::isinstance<Tensor>(obj)) {
-              auto t = obj.cast<TensorCPtr>();
+              auto t = py::cast<TensorCPtr>(obj);
               auto cod = tensor_product_from_python(codomain, t->symmetry);
               TensorProduct::Ptr dom;
               if (!domain.is_none()) {
@@ -93,14 +93,14 @@ bind_tensors_constructors(py::module_& m)
                                  device_opt,
                                  understood_braiding));
       },
-      py::arg("obj"),
-      py::arg("codomain"),
-      py::arg("domain") = py::none(),
-      py::arg("backend") = py::none(),
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::arg("device") = py::none(),
-      py::arg("understood_braiding") = false,
+      nb::arg("obj"),
+      nb::arg("codomain"),
+      nb::arg("domain").none() = nb::none(),
+      nb::arg("backend").none() = nb::none(),
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
+      nb::arg("understood_braiding") = false,
       doc_plus(DOC(lasyten, tensor),
                R"pydoc(
 Also accepts a dense block (second C++ overload). ``None`` for optional arguments
@@ -120,37 +120,37 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
           std::optional<int64> domain_pos_opt;
           std::string label_opt = "";
           if (!legs_pos.is_none()) {
-              legs_pos_opt = legs_pos.cast<int64>();
+              legs_pos_opt = py::cast<int64>(legs_pos);
           }
           if (!codomain_pos.is_none()) {
-              codomain_pos_opt = codomain_pos.cast<int64>();
+              codomain_pos_opt = py::cast<int64>(codomain_pos);
           }
           if (!domain_pos.is_none()) {
-              domain_pos_opt = domain_pos.cast<int64>();
+              domain_pos_opt = py::cast<int64>(domain_pos);
           }
           if (!label.is_none()) {
-              label_opt = label.cast<std::string>();
+              label_opt = py::cast<std::string>(label);
           }
-          return add_trivial_leg(tens.cast<TensorCPtr>(),
+          return add_trivial_leg(py::cast<TensorCPtr>(tens),
                                  legs_pos_opt,
                                  codomain_pos_opt,
                                  domain_pos_opt,
                                  std::move(label_opt),
                                  is_dual);
       },
-      py::arg("tens"),
-      py::arg("legs_pos") = py::none(),
-      py::kw_only(),
-      py::arg("codomain_pos") = py::none(),
-      py::arg("domain_pos") = py::none(),
-      py::arg("label") = py::none(),
-      py::arg("is_dual") = false,
+      nb::arg("tens"),
+      nb::arg("legs_pos").none() = nb::none(),
+      nb::kw_only(),
+      nb::arg("codomain_pos").none() = nb::none(),
+      nb::arg("domain_pos").none() = nb::none(),
+      nb::arg("label").none() = nb::none(),
+      nb::arg("is_dual") = false,
       DOC(lasyten, add_trivial_leg));
 
     m.def(
       "zero_like",
-      [](py::object tensor) { return zero_like(tensor.cast<TensorCPtr>()); },
-      py::arg("tensor"),
+      [](py::object tensor) { return zero_like(py::cast<TensorCPtr>(tensor)); },
+      nb::arg("tensor"),
       DOC(lasyten, zero_like));
 
     m.def(
@@ -164,14 +164,14 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
          std::optional<std::vector<ElementarySpace::Ptr>> col_summands) {
           std::optional<Dtype> dtype_opt;
           if (!dtype.is_none()) {
-              dtype_opt = dtype.cast<Dtype>();
+              dtype_opt = py::cast<Dtype>(dtype);
           }
           std::vector<std::vector<TensorPtr>> g;
           for (auto row_h : py::reinterpret_borrow<py::iterable>(grid)) {
               std::vector<TensorPtr> row;
               for (auto item : py::reinterpret_borrow<py::iterable>(row_h)) {
                   py::object obj = py::reinterpret_borrow<py::object>(item);
-                  row.push_back(obj.is_none() ? nullptr : obj.cast<TensorPtr>());
+                  row.push_back(obj.is_none() ? nullptr : py::cast<TensorPtr>(obj));
               }
               g.push_back(std::move(row));
           }
@@ -187,14 +187,14 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
           }
           return HiddenLegTensor::maybe_wrap(std::dynamic_pointer_cast<SymmetricTensor>(res));
       },
-      py::arg("grid"),
-      py::arg("labels") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::kw_only(),
-      py::arg("row_labels") = py::none(),
-      py::arg("col_labels") = py::none(),
-      py::arg("row_summands") = py::none(),
-      py::arg("col_summands") = py::none(),
+      nb::arg("grid"),
+      nb::arg("labels").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::kw_only(),
+      nb::arg("row_labels").none() = nb::none(),
+      nb::arg("col_labels").none() = nb::none(),
+      nb::arg("row_summands").none() = nb::none(),
+      nb::arg("col_summands").none() = nb::none(),
       doc_plus(DOC(lasyten, tensor_from_grid),
                R"pydoc(
 In Python, ``grid`` is ``list[list[SymmetricTensor | None]]`` (``None`` = zero cell);
@@ -211,34 +211,37 @@ In Python, ``grid`` is ``list[list[SymmetricTensor | None]]`` (``None`` = zero c
          py::object col_leg) {
           auto as_summand_ref = [](py::object obj) -> DirectSumSpace::SummandRef {
               if (py::isinstance<py::str>(obj)) {
-                  return obj.cast<std::string>();
+                  return py::cast<std::string>(obj);
               }
-              return obj.cast<int64>();
+              return py::cast<int64>(obj);
           };
           LegRef row_ref = int64{ 0 };
           LegRef col_ref = int64{ -1 };
           if (!row_leg.is_none()) {
               if (py::isinstance<py::str>(row_leg)) {
-                  row_ref = row_leg.cast<std::string>();
+                  row_ref = py::cast<std::string>(row_leg);
               } else {
-                  row_ref = row_leg.cast<int64>();
+                  row_ref = py::cast<int64>(row_leg);
               }
           }
           if (!col_leg.is_none()) {
               if (py::isinstance<py::str>(col_leg)) {
-                  col_ref = col_leg.cast<std::string>();
+                  col_ref = py::cast<std::string>(col_leg);
               } else {
-                  col_ref = col_leg.cast<int64>();
+                  col_ref = py::cast<int64>(col_leg);
               }
           }
-          return tensor_grid_cell(
-            tensor.cast<TensorCPtr>(), as_summand_ref(row), as_summand_ref(col), row_ref, col_ref);
+          return tensor_grid_cell(py::cast<TensorCPtr>(tensor),
+                                  as_summand_ref(row),
+                                  as_summand_ref(col),
+                                  row_ref,
+                                  col_ref);
       },
-      py::arg("tensor"),
-      py::arg("row"),
-      py::arg("col"),
-      py::arg("row_leg") = py::none(),
-      py::arg("col_leg") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("row"),
+      nb::arg("col"),
+      nb::arg("row_leg").none() = nb::none(),
+      nb::arg("col_leg").none() = nb::none(),
       doc_plus(DOC(lasyten, tensor_grid_cell),
                R"pydoc(
 In Python, ``row`` / ``col`` accept ``int | str`` (a summand label, resolved via
@@ -256,9 +259,9 @@ In Python, ``row`` / ``col`` accept ``int | str`` (a summand label, resolved via
               std::vector<DirectSumSpace::SummandRef> out;
               for (auto item : py::reinterpret_borrow<py::iterable>(seq)) {
                   if (py::isinstance<py::str>(item)) {
-                      out.emplace_back(item.cast<std::string>());
+                      out.emplace_back(py::cast<std::string>(item));
                   } else {
-                      out.emplace_back(item.cast<int64>());
+                      out.emplace_back(py::cast<int64>(item));
                   }
               }
               return out;
@@ -268,21 +271,21 @@ In Python, ``row`` / ``col`` accept ``int | str`` (a summand label, resolved via
                   return default_idx;
               }
               if (py::isinstance<py::str>(obj)) {
-                  return obj.cast<std::string>();
+                  return py::cast<std::string>(obj);
               }
-              return obj.cast<int64>();
+              return py::cast<int64>(obj);
           };
-          return tensor_subgrid(tensor.cast<TensorCPtr>(),
+          return tensor_subgrid(py::cast<TensorCPtr>(tensor),
                                 as_summand_refs(rows),
                                 as_summand_refs(cols),
                                 as_leg_ref(row_leg, 0),
                                 as_leg_ref(col_leg, -1));
       },
-      py::arg("tensor"),
-      py::arg("rows"),
-      py::arg("cols"),
-      py::arg("row_leg") = py::none(),
-      py::arg("col_leg") = py::none(),
+      nb::arg("tensor"),
+      nb::arg("rows"),
+      nb::arg("cols"),
+      nb::arg("row_leg").none() = nb::none(),
+      nb::arg("col_leg").none() = nb::none(),
       doc_plus(DOC(lasyten, tensor_subgrid),
                R"pydoc(
 In Python, ``rows`` / ``cols`` are sequences of ``int | str`` (summand labels).
@@ -294,16 +297,16 @@ In Python, ``rows`` / ``cols`` are sequences of ``int | str`` (summand labels).
           auto as_leg_ref = [](py::handle item) -> LegRef {
               py::object obj = py::reinterpret_borrow<py::object>(item);
               if (py::isinstance<py::str>(obj)) {
-                  return obj.cast<std::string>();
+                  return py::cast<std::string>(obj);
               }
-              return obj.cast<int64>();
+              return py::cast<int64>(obj);
           };
           auto as_summand_ref = [](py::handle item) -> DirectSumSpace::SummandRef {
               py::object obj = py::reinterpret_borrow<py::object>(item);
               if (py::isinstance<py::str>(obj)) {
-                  return obj.cast<std::string>();
+                  return py::cast<std::string>(obj);
               }
-              return obj.cast<int64>();
+              return py::cast<int64>(obj);
           };
           std::vector<LegRef> leg_refs;
           for (auto item : py::reinterpret_borrow<py::iterable>(legs)) {
@@ -314,12 +317,12 @@ In Python, ``rows`` / ``cols`` are sequences of ``int | str`` (summand labels).
               cell_refs.push_back(as_summand_ref(item));
           }
           return grid_project(
-            tensor.cast<TensorCPtr>(), std::move(leg_refs), std::move(cell_refs), squeeze);
+            py::cast<TensorCPtr>(tensor), std::move(leg_refs), std::move(cell_refs), squeeze);
       },
-      py::arg("tensor"),
-      py::arg("legs"),
-      py::arg("cells"),
-      py::arg("squeeze") = false,
+      nb::arg("tensor"),
+      nb::arg("legs"),
+      nb::arg("cells"),
+      nb::arg("squeeze") = false,
       doc_plus(DOC(lasyten, grid_project),
                R"pydoc(
 In Python, ``legs`` and ``cells`` are parallel sequences of ``str | int`` values.

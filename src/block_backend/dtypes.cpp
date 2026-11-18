@@ -5,12 +5,14 @@ namespace lasyten {
 
 namespace dtype {
 
+#if LASYTEN_HAS_PYTHON
 py::module_&
 numpy_module()
 {
     static py::module_& np = leak_py_object(py::module_::import("numpy"));
     return np;
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::string
 repr(Dtype dtype)
@@ -91,6 +93,7 @@ eps(Dtype dtype)
                          std::to_string(n_bits));
 }
 
+#if LASYTEN_HAS_PYTHON
 py::object
 to_numpy_dtype(Dtype dtype)
 {
@@ -135,6 +138,8 @@ from_numpy_dtype(py::object numpy_dtype)
     throw std::invalid_argument("unknown numpy dtype");
 }
 
+#endif // LASYTEN_HAS_PYTHON
+
 Dtype
 common(const std::vector<Dtype>& dtypes)
 {
@@ -155,6 +160,7 @@ common(const std::vector<Dtype>& dtypes)
     return res;
 }
 
+#if LASYTEN_HAS_PYTHON
 py::object
 convert_python_scalar(Dtype dtype, py::object value)
 {
@@ -162,15 +168,15 @@ convert_python_scalar(Dtype dtype, py::object value)
         // bool: accept True, False, 0, 1
         if (value.equal(py::cast(true)) || value.equal(py::cast(false)) ||
             value.equal(py::cast(0)) || value.equal(py::cast(1)))
-            return py::cast(bool(value.cast<int64>()));
+            return py::cast(bool(py::cast<int64>(value)));
         throw std::invalid_argument("Type incompatible with dtype bool");
     }
     if (is_real(dtype)) {
         try {
-            return py::cast(value.cast<float64>());
+            return py::cast(py::cast<float64>(value));
         } catch (const py::cast_error&) {
             try {
-                return py::cast(static_cast<float64>(value.cast<int64>()));
+                return py::cast(static_cast<float64>(py::cast<int64>(value)));
             } catch (const py::cast_error&) {
                 throw std::invalid_argument("Type incompatible with real dtype");
             }
@@ -178,10 +184,10 @@ convert_python_scalar(Dtype dtype, py::object value)
     }
     // complex
     try {
-        return py::cast(value.cast<complex128>());
+        return py::cast(py::cast<complex128>(value));
     } catch (const py::cast_error&) {
         try {
-            return py::cast(complex128(value.cast<float64>(), 0));
+            return py::cast(complex128(py::cast<float64>(value), 0));
         } catch (const py::cast_error&) {
             throw std::invalid_argument("Type incompatible with complex dtype");
         }
@@ -223,6 +229,7 @@ one_scalar(Dtype dtype)
         return py::cast(static_cast<float64>(1.0));
     return py::cast(complex128(1.0, 0.0));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 } // namespace dtype
 

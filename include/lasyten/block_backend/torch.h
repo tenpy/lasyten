@@ -1,6 +1,11 @@
 #pragma once
 
 #include <lasyten/block_backend/block_backend.h>
+#include <lasyten/detail/python_api.h>
+
+#if !LASYTEN_HAS_PYTHON
+#error "TorchBlockBackend is only built with LASYTEN_WITH_PYTHON=ON (torch.cpp still uses py::)"
+#endif
 #include <lasyten/tools/hdf5.h>
 #include <memory>
 #include <optional>
@@ -27,7 +32,7 @@ class TorchBlockBackend : public BlockBackend
 {
   public:
     /// Block that holds a torch::Tensor.
-    class PYBIND11_EXPORT Block : public BlockBackend::Block
+    class LASYTEN_EXPORT Block : public BlockBackend::Block
     {
       public:
         explicit Block(torch::Tensor tensor);

@@ -82,7 +82,7 @@ tensor_from_py_object(py::object a)
     if (py::isinstance<py::array>(a))
         return tensor_from_numpy_array(py::reinterpret_borrow<py::array>(a));
     py::module_ np = py::module_::import("numpy");
-    return tensor_from_numpy_array(np.attr("asarray")(a).cast<py::array>());
+    return tensor_from_numpy_array(py::cast<py::array>(np.attr("asarray")(a)));
 }
 
 torch::Device
@@ -280,11 +280,12 @@ torch::Tensor
 tensor_from_py_value(py::object value, torch::Device device)
 {
     if (py::isinstance<TorchBlockBackend::Block>(value))
-        return value.cast<TorchBlockBackend::Block&>().tensor().to(device);
+        return py::cast<TorchBlockBackend::Block&>(value).tensor().to(device);
     if (py::isinstance<BlockBackend::Block>(value))
-        return tensor_from_numpy_array(value.cast<BlockBackend::Block&>().to_numpy()).to(device);
+        return tensor_from_numpy_array(py::cast<BlockBackend::Block&>(value).to_numpy())
+          .to(device);
     if (py::isinstance<BlockBackend::Scalar>(value)) {
-        auto block = value.cast<BlockBackend::Scalar&>()._block();
+        auto block = py::cast<BlockBackend::Scalar&>(value)._block();
         if (auto const* tb = dynamic_cast<TorchBlockBackend::Block const*>(block.get()))
             return tb->tensor().to(device);
         return tensor_from_numpy_array(block->to_numpy()).to(device);
@@ -316,7 +317,7 @@ TorchBlockBackend::Block::get_item(py::object key) const
     // Escape hatch: index via numpy (Ellipsis / None / exotic keys).
     py::array arr = to_numpy();
     if (py::isinstance<BlockBackend::Block>(key))
-        key = key.cast<BlockBackend::Block&>().to_numpy();
+        key = py::cast<BlockBackend::Block&>(key).to_numpy();
     py::object result = arr.attr("__getitem__")(key);
     return std::make_shared<const TorchBlockBackend::Block>(
       tensor_from_py_object(result).to(tensor_.device()));
@@ -329,7 +330,7 @@ TorchBlockBackend::Block::get_item(py::object key)
         return get_item(std::span<const BlockIndex>(*idcs));
     py::array arr = to_numpy();
     if (py::isinstance<BlockBackend::Block>(key))
-        key = key.cast<BlockBackend::Block&>().to_numpy();
+        key = py::cast<BlockBackend::Block&>(key).to_numpy();
     py::object result = arr.attr("__getitem__")(key);
     return wrap(tensor_from_py_object(result).to(tensor_.device()));
 }
@@ -353,11 +354,11 @@ TorchBlockBackend::Block::set_item(py::object key, py::object value)
     if (auto idcs = BlockBackend::try_py_key_to_block_indices(key)) {
         torch::Tensor val = tensor_from_py_value(value, tensor_.device()).to(tensor_.options());
         if (py::isinstance<BlockBackend::Block>(value)) {
-            set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Block&>());
+            set_item(std::span<const BlockIndex>(*idcs), py::cast<BlockBackend::Block&>(value));
             return;
         }
         if (py::isinstance<BlockBackend::Scalar>(value)) {
-            set_item(std::span<const BlockIndex>(*idcs), value.cast<BlockBackend::Scalar&>());
+            set_item(std::span<const BlockIndex>(*idcs), py::cast<BlockBackend::Scalar&>(value));
             return;
         }
         // Non-Block Python value: build a temporary torch block.
@@ -366,7 +367,7 @@ TorchBlockBackend::Block::set_item(py::object key, py::object value)
         return;
     }
     if (py::isinstance<BlockBackend::Block>(key))
-        key = key.cast<BlockBackend::Block&>().to_numpy();
+        key = py::cast<BlockBackend::Block&>(key).to_numpy();
     py::array arr = to_numpy();
     torch::Tensor val = tensor_from_py_value(value, tensor_.device()).to(tensor_.options());
     py::object np_val = TorchBlockBackend::Block(val.detach().cpu()).to_numpy();
@@ -774,7 +775,7 @@ TorchBlockBackend::as_block(py::object a,
 {
     std::string dev = as_device(device);
     if (py::isinstance<TorchBlockBackend::Block>(a)) {
-        BlockPtr block = a.cast<BlockPtr>();
+        BlockPtr block = py::cast<BlockPtr>(a);
         if (dtype_opt)
             block = to_dtype(block, *dtype_opt);
         if (block->device() != dev)
@@ -782,7 +783,7 @@ TorchBlockBackend::as_block(py::object a,
         return block;
     }
     if (py::isinstance<BlockBackend::Block>(a)) {
-        BlockPtr block = a.cast<BlockPtr>();
+        BlockPtr block = py::cast<BlockPtr>(a);
         return block_from_numpy(block->to_numpy(), dtype_opt, dev);
     }
     torch::Tensor t = tensor_from_py_object(a).to(parse_device(dev));
@@ -1461,7 +1462,7 @@ TorchBlockBackend::apply_leg_permutations(const BlockCPtr& block,
     for (auto const& p : perms)
         ix_parts.append(p);
     py::object ix = np.attr("ix_")(*ix_parts);
-    py::array result = a[ix].cast<py::array>();
+    py::array result = py::cast<py::array>(a[ix]);
     return wrap(tensor_from_numpy_array(result).to(tens(block).device()));
 }
 

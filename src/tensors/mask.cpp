@@ -27,11 +27,13 @@ namespace lasyten {
 
 namespace {
 
+#if LASYTEN_HAS_PYTHON
 [[nodiscard]] py::object
 py_bool_dtype()
 {
     return py::reinterpret_borrow<py::object>((PyObject*)&PyBool_Type);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 ElementarySpace::Ptr
 as_elementary_space(Space::Ptr obj)
@@ -58,28 +60,28 @@ as_leg_cptr(Space::Ptr const& space)
     return leg_from_space(space);
 }
 
-/// Invert each bool entry of a block (replaces ``operator.invert`` via numpy).
+/// Invert each bool entry of a block (``block == False``, elementwise).
 BlockUnaryFn
 adapt_block_bool_invert(std::shared_ptr<BlockBackend> bb)
 {
     return [bb](BlockBackend::BlockPtr const& block) {
-        py::array arr = bb->to_numpy(block, py_bool_dtype());
-        py::array_t<bool, py::array::c_style | py::array::forcecast> flat =
-          py::array_t<bool, py::array::c_style | py::array::forcecast>::ensure(arr).reshape(
-            { -1 });
-        py::array_t<bool> out(flat.size());
-        auto src = flat.unchecked<1>();
-        auto dst = out.mutable_unchecked<1>();
-        for (py::ssize_t i = 0; i < src.shape(0); ++i) {
-            dst(i) = !src(i);
-        }
-        auto info = arr.request();
-        std::vector<py::ssize_t> shape(static_cast<std::size_t>(info.ndim));
-        for (py::ssize_t d = 0; d < info.ndim; ++d) {
-            shape[static_cast<std::size_t>(d)] = info.shape[d];
-        }
-        return bb->as_block(out.reshape(shape), Dtype::Bool, block->device());
+        auto const falses = bb->zeros(bb->get_shape(block), Dtype::Bool, block->device());
+        return (*block) == (*falses);
     };
+}
+
+/// ``diag < cutoff`` (elementwise), a bool DiagonalTensor.
+DiagonalTensorCPtr
+diag_less_than(DiagonalTensor::Ptr const& diag, float64 cutoff)
+{
+    auto bb = diag->backend->block_backend;
+    BlockUnaryFn less = [bb, cutoff](BlockBackend::BlockPtr const& block) {
+        auto const ones =
+          bb->ones_block(bb->get_shape(block), bb->get_dtype(block), block->device());
+        auto const c = bb->mul(cutoff, ones);
+        return (*block) < (*c);
+    };
+    return diag->_elementwise_unary(std::move(less));
 }
 
 int64
@@ -284,16 +286,13 @@ Mask::test_sanity() const
     } else {
         auto mask_block =
           backend->mask_to_block(std::static_pointer_cast<Mask const>(shared_from_this()));
-        auto mask_np = backend->block_backend->to_numpy(mask_block, py_bool_dtype());
-        auto mask_bool =
-          py::array_t<bool, py::array::c_style | py::array::forcecast>::ensure(mask_np);
-        auto mbuf = mask_bool.unchecked<1>();
+        auto const mbuf = backend->block_backend->block_to_bool_vector(mask_block);
         auto const& pi_1 = large->basis_perm();
         auto const& pi_2_inv = small->inverse_basis_perm();
         std::vector<int64> kept_ranks;
-        kept_ranks.reserve(static_cast<std::size_t>(mbuf.shape(0)));
-        for (py::ssize_t i = 0; i < mbuf.shape(0); ++i) {
-            if (mbuf(i)) {
+        kept_ranks.reserve(mbuf.size());
+        for (std::size_t i = 0; i < mbuf.size(); ++i) {
+            if (mbuf[i]) {
                 kept_ranks.push_back(pi_1[static_cast<std::size_t>(i)]);
             }
         }
@@ -337,7 +336,7 @@ Mask::from_block_mask(BlockBackend::BlockPtr block_mask,
                       large_leg->symmetry->repr()));
     }
     backend = resolve_backend(std::move(backend), large_leg);
-    auto block = backend->block_backend->as_block(py::cast(block_mask), Dtype::Bool, device);
+    auto block = backend->block_backend->convert_block(block_mask, Dtype::Bool, device);
     block =
       backend->block_backend->apply_basis_perm(block, { as_leg_cptr(large_leg) }, /*inv=*/false);
     auto [data_out, small_leg] = backend->mask_from_block(block, large_leg);
@@ -364,6 +363,7 @@ Mask::from_DiagonalTensor(DiagonalTensorCPtr diag)
                                   diag->device);
 }
 
+#if LASYTEN_HAS_PYTHON
 Mask::Ptr
 Mask::from_indices(py::object indices,
                    Space::Ptr large_leg,
@@ -389,6 +389,7 @@ Mask::from_indices(py::object indices,
     return from_block_mask(
       block, std::move(large_leg), std::move(backend), std::move(labels), device);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 Mask::Ptr
 Mask::from_random(Space::Ptr large_leg_in,
@@ -397,8 +398,12 @@ Mask::from_random(Space::Ptr large_leg_in,
                   float64 p_keep,
                   int64 min_keep,
                   std::optional<LegLabelList> labels,
-                  std::optional<std::string> device,
-                  py::object np_random)
+                  std::optional<std::string> device
+#if LASYTEN_HAS_PYTHON
+                  ,
+                  py::object np_random
+#endif
+)
 {
     // --- hints from Python Mask.from_random ---
     // diagonal entries are uniform in [-1, 1].
@@ -417,8 +422,7 @@ Mask::from_random(Space::Ptr large_leg_in,
         auto diag =
           DiagonalTensor::from_random_uniform(large_leg, backend, labels, Dtype::Float32, device);
         float64 cutoff = 2. * p_keep - 1.; // diagonal entries are uniform in [-1, 1].
-        auto res =
-          from_DiagonalTensor(py::cast(diag).attr("__lt__")(cutoff).cast<DiagonalTensorCPtr>());
+        auto res = from_DiagonalTensor(diag_less_than(diag, cutoff));
 
         if (sum_multiplicities(*res->small_leg()) >= min_keep) {
             return res;
@@ -442,15 +446,13 @@ Mask::from_random(Space::Ptr large_leg_in,
         if (p_keep > 1.) {
             p_keep = 1.;
         }
-        res = from_DiagonalTensor(
-          py::cast(diag).attr("__lt__")(2. * p_keep - 1.).cast<DiagonalTensorCPtr>());
+        res = from_DiagonalTensor(diag_less_than(diag, 2. * p_keep - 1.));
         for (int i = 0; i < 20; ++i) {
             if (sum_multiplicities(*res->small_leg()) >= min_keep) {
                 return res;
             }
             p_keep = 0.5 * (p_keep + 1.); // step halfway towards 100%
-            res = from_DiagonalTensor(
-              py::cast(diag).attr("__lt__")(2. * p_keep - 1.).cast<DiagonalTensorCPtr>());
+            res = from_DiagonalTensor(diag_less_than(diag, 2. * p_keep - 1.));
         }
         throw std::runtime_error("Could not fulfill min_keep");
     }
@@ -467,15 +469,22 @@ Mask::from_random(Space::Ptr large_leg_in,
     }
 
     auto small_leg_cap = small_leg;
+#if LASYTEN_HAS_PYTHON
     auto np_random_cap = np_random;
+#endif
     auto bb = backend->block_backend;
-    SectorBlockFactoryFn func = [small_leg_cap, np_random_cap, bb, device](
-                                  std::vector<int64> const& shape, Sector const& coupled) {
+    SectorBlockFactoryFn func = [small_leg_cap,
+#if LASYTEN_HAS_PYTHON
+                                 np_random_cap,
+#endif
+                                 bb,
+                                 device](std::vector<int64> const& shape, Sector const& coupled) {
         int64 num_keep = small_leg_cap->sector_multiplicity(coupled);
         auto block = bb->zeros(shape, Dtype::Bool, device);
         auto true_s = bb->as_scalar(true);
         std::vector<int64> which;
         which.reserve(static_cast<std::size_t>(num_keep));
+#if LASYTEN_HAS_PYTHON
         if (!np_random_cap.is_none()) {
             auto choice = np_random_cap.attr("choice")(
               shape[0], py::arg("size") = num_keep, py::arg("replace") = false);
@@ -485,7 +494,9 @@ Mask::from_random(Space::Ptr large_leg_in,
             for (py::ssize_t i = 0; i < buf.shape(0); ++i) {
                 which.push_back(buf(i));
             }
-        } else {
+        } else
+#endif
+        {
             // Native sample without replacement (Fisher–Yates partial shuffle).
             std::vector<int64> pool(static_cast<std::size_t>(shape[0]));
             std::iota(pool.begin(), pool.end(), int64{ 0 });
@@ -744,11 +755,13 @@ Mask::as_block_mask()
       res, { as_leg_cptr(large_leg()) }, /*inv=*/true);
 }
 
+#if LASYTEN_HAS_PYTHON
 py::array
 Mask::as_numpy_mask()
 {
     return backend->block_backend->to_numpy(as_block_mask(), py_bool_dtype());
 }
+#endif // LASYTEN_HAS_PYTHON
 
 Tensor::Ptr
 Mask::to_backend(TensorBackend::Ptr new_backend,
@@ -776,18 +789,21 @@ Mask::to_backend(TensorBackend::Ptr new_backend,
     auto device_s = new_backend->block_backend->as_device(
       device_opt.has_value() ? device_opt : std::optional<std::string>{ device });
     TensorBackend::DataPtr new_data;
+#if LASYTEN_HAS_PYTHON // FusionTreeBackend / AbelianBackend are only built with Python
     if (std::dynamic_pointer_cast<FusionTreeBackend>(backend) &&
         std::dynamic_pointer_cast<FusionTreeBackend>(new_backend)) {
         new_data =
           backend->to_block_backend(data, new_backend->block_backend, Dtype::Bool, device_s);
-    } else {
+    } else
+#endif
+    {
         auto old_mask =
           backend->mask_to_block(std::static_pointer_cast<Mask const>(shared_from_this()));
-        auto new_mask =
-          new_backend->block_backend->as_block(py::cast(old_mask), Dtype::Bool, device_s);
+        auto new_mask = new_backend->block_backend->convert_block(old_mask, Dtype::Bool, device_s);
         auto [data_out, unused_small] = new_backend->mask_from_block(new_mask, large_leg());
         (void)unused_small;
         new_data = std::move(data_out);
+#if LASYTEN_HAS_PYTHON
         if (std::dynamic_pointer_cast<AbelianBackend>(new_backend) && !is_projection) {
             // mask_from_block assumes projection mask -> swap block_inds for inclusion
             auto abd = std::dynamic_pointer_cast<AbelianBackendData>(new_data);
@@ -795,6 +811,7 @@ Mask::to_backend(TensorBackend::Ptr new_backend,
             int64 cols[] = { 1, 0 };
             abd->block_inds = abd->block_inds.take_columns_i64(cols);
         }
+#endif
     }
     return std::make_shared<Mask>(new_data,
                                   as_space(domain->factors[0]),
@@ -831,16 +848,13 @@ Mask::to_dense_block(std::optional<std::vector<std::variant<int64, std::string>>
     Dtype dt = dtype_opt.value_or(Dtype::Bool);
     auto bb = backend->block_backend;
     auto res = bb->zeros({ m, n }, dt);
-    auto one = (dt == Dtype::Bool) ? bb->as_scalar(true) : bb->as_scalar(py::int_(1), dt);
+    auto one = (dt == Dtype::Bool) ? bb->as_scalar(true) : bb->as_scalar(complex128{ 1.0 }, dt);
 
     auto mask_block = as_block_mask();
-    auto mask_np = bb->to_numpy(mask_block, py_bool_dtype());
-    auto mask_bool = py::array_t<bool, py::array::c_style | py::array::forcecast>::ensure(mask_np);
-    auto info = mask_bool.request();
-    auto const* ptr = static_cast<bool const*>(info.ptr);
+    auto const mask_values = bb->block_to_bool_vector(mask_block);
     std::vector<int64> kept;
-    for (py::ssize_t i = 0; i < info.size; ++i) {
-        if (ptr[i]) {
+    for (std::size_t i = 0; i < mask_values.size(); ++i) {
+        if (mask_values[i]) {
             kept.push_back(static_cast<int64>(i));
         }
     }
@@ -866,6 +880,7 @@ Mask::to_dense_block(std::optional<std::vector<std::variant<int64, std::string>>
     return res;
 }
 
+#if LASYTEN_HAS_PYTHON
 py::array
 Mask::to_numpy(std::optional<std::vector<std::variant<int64, std::string>>> leg_order,
                py::object numpy_dtype,
@@ -881,8 +896,9 @@ Mask::to_numpy(std::optional<std::vector<std::variant<int64, std::string>>> leg_
     auto block = to_dense_block(std::move(leg_order), dt, understood_braiding);
     std::optional<py::object> np_dt =
       numpy_dtype.is_none() ? std::nullopt : std::optional<py::object>{ numpy_dtype };
-    return backend->block_backend->to_numpy(block, np_dt).cast<py::array>();
+    return py::cast<py::array>(backend->block_backend->to_numpy(block, np_dt));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 void
 Mask::save_hdf5(lasyten::hdf5::Saver& saver,

@@ -1,7 +1,7 @@
 #include <lasyten/tensors/labels.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 #include "../tools/hdf5_bind.h"
 
 #include "docstrings/tensors/labels.h"
@@ -22,24 +22,24 @@ as_leg_label(py::handle obj)
     if (obj.is_none()) {
         return "";
     }
-    return obj.cast<std::string>();
+    return py::cast<std::string>(obj);
 }
 
 std::vector<int64>
 py_indices(LegLabels const& self, py::object idcs)
 {
     if (py::isinstance<py::str>(idcs)) {
-        return { self.index(idcs.cast<std::string>()) };
+        return { self.index(py::cast<std::string>(idcs)) };
     }
     if (py::isinstance<py::int_>(idcs)) {
-        return { self.index(idcs.cast<int64>()) };
+        return { self.index(py::cast<int64>(idcs)) };
     }
     std::vector<std::variant<int64, std::string>> parsed;
     for (auto item : py::reinterpret_borrow<py::iterable>(to_iterable(idcs))) {
         if (py::isinstance<py::str>(item)) {
-            parsed.emplace_back(item.cast<std::string>());
+            parsed.emplace_back(py::cast<std::string>(item));
         } else {
-            parsed.emplace_back(item.cast<int64>());
+            parsed.emplace_back(py::cast<int64>(item));
         }
     }
     return self.indices(parsed);
@@ -49,9 +49,9 @@ int64
 py_index(LegLabels const& self, py::object idx)
 {
     if (py::isinstance<py::str>(idx)) {
-        return self.index(idx.cast<std::string>());
+        return self.index(py::cast<std::string>(idx));
     }
-    return self.index(idx.cast<int64>());
+    return self.index(py::cast<int64>(idx));
 }
 
 std::vector<std::string>
@@ -60,24 +60,24 @@ args_as_strings(py::args const& args)
     std::vector<std::string> out;
     out.reserve(args.size());
     for (auto a : args) {
-        out.push_back(a.cast<std::string>());
+        out.push_back(py::cast<std::string>(a));
     }
     return out;
 }
 
-std::optional<py::class_<LegLabels, py::smart_holder>> g_labelled_legs;
+std::optional<nb::class_<LegLabels>> g_labelled_legs;
 
 } // namespace
 
 void
-declare_tensors_labels(py::module_& m)
+declare_tensors_labels(nb::module_& m)
 {
-    g_labelled_legs = py::class_<LegLabels, py::smart_holder>(m, "LegLabels");
+    g_labelled_legs = nb::class_<LegLabels>(m, "LegLabels");
     (*g_labelled_legs).doc() = DOC(lasyten, LegLabels);
 }
 
 void
-bind_tensors_labels(py::module_& m)
+bind_tensors_labels(nb::module_& m)
 {
     m.attr("CONTRACT_SYMBOL") = CONTRACT_SYMBOL;
     m.attr("LEG_SELECT_SYMBOL") = LEG_SELECT_SYMBOL;
@@ -99,15 +99,15 @@ bind_tensors_labels(py::module_& m)
           if (!py::isinstance<py::str>(label)) {
               return false;
           }
-          return is_valid_leg_label(std::string{ label.cast<std::string>() });
+          return is_valid_leg_label(std::string{ py::cast<std::string>(label) });
       },
-      py::arg("label"),
+      nb::arg("label"),
       DOC(lasyten, is_valid_leg_label));
 
     m.def("_combine_leg_labels",
           &_combine_leg_labels,
-          py::arg("labels"),
-          py::arg("offset") = 0,
+          nb::arg("labels"),
+          nb::arg("offset") = 0,
           DOC(lasyten, _combine_leg_labels));
 
     m.def(
@@ -115,31 +115,31 @@ bind_tensors_labels(py::module_& m)
       [](py::object label, py::object num) {
           std::optional<int64> n;
           if (!num.is_none()) {
-              n = num.cast<int64>();
+              n = py::cast<int64>(num);
           }
           return _split_leg_label(as_leg_label(label), n);
       },
-      py::arg("label"),
-      py::arg("num") = py::none(),
+      nb::arg("label"),
+      nb::arg("num").none() = nb::none(),
       DOC(lasyten, _split_leg_label));
 
     m.def(
       "_dual_leg_label",
       [](py::object label) { return _dual_leg_label(as_leg_label(label)); },
-      py::arg("label"),
+      nb::arg("label"),
       DOC(lasyten, _dual_leg_label));
 
     m.def(
-      "_dual_label_list", &_dual_label_list, py::arg("labels"), DOC(lasyten, _dual_label_list));
+      "_dual_label_list", &_dual_label_list, nb::arg("labels"), DOC(lasyten, _dual_label_list));
 
     m.def(
       "_get_matching_labels",
       [](LegLabelList const& labels1, LegLabelList const& labels2, int64 /*stacklevel*/) {
           return _get_matching_labels(labels1, labels2);
       },
-      py::arg("labels1"),
-      py::arg("labels2"),
-      py::arg("stacklevel") = 1,
+      nb::arg("labels1"),
+      nb::arg("labels2"),
+      nb::arg("stacklevel") = 1,
       doc_plus(DOC(lasyten, _get_matching_labels),
                R"pydoc(
 The ``stacklevel`` argument is Python-only (accepted for API compatibility; unused).
@@ -148,9 +148,9 @@ In Python, unset labels are empty strings (``""``).
 
     auto& labelled_legs = *g_labelled_legs;
 
-    labelled_legs.def(py::init<LegLabelList>(), py::arg("labels"))
-      .def_property_readonly("num_legs", &LegLabels::num_legs)
-      .def_property_readonly("is_fully_labelled", &LegLabels::is_fully_labelled)
+    labelled_legs.def(lasyten::ctor<decltype(labelled_legs), LegLabelList>(), nb::arg("labels"))
+      .def_prop_ro("num_legs", &LegLabels::num_legs)
+      .def_prop_ro("is_fully_labelled", &LegLabels::is_fully_labelled)
       .def("as_list", &LegLabels::as_list, DOC(lasyten, LegLabels, as_list))
       .def("test_sanity", &LegLabels::test_sanity)
       .def(
@@ -158,21 +158,22 @@ In Python, unset labels are empty strings (``""``).
         [](LegLabels& self, LegLabelList labels) -> LegLabels& {
             return self.set(std::move(labels));
         },
-        py::arg("labels"),
-        py::return_value_policy::reference,
+        nb::arg("labels"),
+        nb::rv_policy::reference,
         DOC(lasyten, LegLabels, set))
       .def(
         "update",
         [](LegLabels& self, std::map<std::string, std::string> const& mapping) -> LegLabels& {
             return self.update(mapping);
         },
-        py::arg("mapping"),
-        py::return_value_policy::reference,
+        nb::arg("mapping"),
+        nb::rv_policy::reference,
         DOC(lasyten, LegLabels, update))
-      .def("index", &py_index, py::arg("idx"), DOC(lasyten, LegLabels, index))
-      .def("indices", &py_indices, py::arg("idcs"), DOC(lasyten, LegLabels, indices))
+      .def("index", &py_index, nb::arg("idx"), DOC(lasyten, LegLabels, index))
+      .def("indices", &py_indices, nb::arg("idcs"), DOC(lasyten, LegLabels, indices))
       .def("has",
-           [](LegLabels const& self, py::args args) {
+           [](LegLabels const& self, nb::args args_nb) {
+               auto args = pyargs(args_nb);
                if (args.size() == 0) {
                    throw py::value_error("has() requires at least one label");
                }
@@ -181,26 +182,28 @@ In Python, unset labels are empty strings (``""``).
       .def(
         "are",
         [](LegLabels const& self,
-           py::args args,
+           nb::args args_nb,
            bool planar,
            bool check_hidden,
            bool check_charged) {
+            auto args = pyargs(args_nb);
             return self.are(args_as_strings(args), planar, check_hidden, check_charged);
         },
-        py::kw_only(),
-        py::arg("planar") = false,
-        py::arg("check_hidden") = false,
-        py::arg("check_charged") = false,
+        nb::arg("labels"),
+        nb::kw_only(),
+        nb::arg("planar") = false,
+        nb::arg("check_hidden") = false,
+        nb::arg("check_charged") = false,
         DOC(lasyten, LegLabels, are))
       .def("__len__", &LegLabels::size)
       .def("__getitem__",
            [](LegLabels const& self, py::object key) -> py::object {
                if (py::isinstance<py::str>(key)) {
-                   return py::cast(
-                     static_cast<std::string const&>(self[self.index(key.cast<std::string>())]));
+                   return py::cast(static_cast<std::string const&>(
+                     self[self.index(py::cast<std::string>(key))]));
                }
                if (py::isinstance<py::int_>(key)) {
-                   return py::cast(static_cast<std::string const&>(self[key.cast<int64>()]));
+                   return py::cast(static_cast<std::string const&>(self[py::cast<int64>(key)]));
                }
                throw py::type_error("LegLabels indices must be int or str");
            })
@@ -208,9 +211,9 @@ In Python, unset labels are empty strings (``""``).
            [](LegLabels& self, py::object key, py::object value) {
                std::string lab = as_leg_label(value);
                if (py::isinstance<py::str>(key)) {
-                   self[key.cast<std::string>()] = std::move(lab);
+                   self[py::cast<std::string>(key)] = std::move(lab);
                } else if (py::isinstance<py::int_>(key)) {
-                   self[key.cast<int64>()] = std::move(lab);
+                   self[py::cast<int64>(key)] = std::move(lab);
                } else {
                    throw py::type_error("LegLabels indices must be int or str");
                }
@@ -220,31 +223,31 @@ In Python, unset labels are empty strings (``""``).
                if (!py::isinstance<py::str>(key)) {
                    return false;
                }
-               return self.has(key.cast<std::string>());
+               return self.has(py::cast<std::string>(key));
            })
       .def(
         "__eq__",
         [](LegLabels const& self, py::object other) {
             if (py::isinstance<LegLabels>(other)) {
-                return self == other.cast<LegLabels const&>();
+                return self == py::cast<LegLabels const&>(other);
             }
             try {
-                return self == other.cast<LegLabelList>();
+                return self == py::cast<LegLabelList>(other);
             } catch (py::cast_error const&) {
                 return false;
             }
         },
-        py::is_operator())
+        nb::is_operator())
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5_const<LegLabels>(),
-           py::arg("hdf5_saver"),
-           py::arg("h5gr"),
-           py::arg("subpath"))
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"))
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<LegLabels>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 }
 
 } // namespace lasyten

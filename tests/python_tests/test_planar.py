@@ -1515,6 +1515,16 @@ def test_PlanarLinearOperator(symmetry, np_random):
     assert H_theta.codomain_labels == ['vL', 'p0', 'p1', 'vR']
     assert H_theta.domain_labels == []
 
+    # TeNPy EffectiveH overrides adjoint; C++ wrappers must reach the Python method via the
+    # PlanarLinearOperator trampoline (PyLinearOperator::adjoint is not in the dynamic type).
+    class AdjointProbe(TwoSiteEffectiveH):
+        def adjoint(self):
+            return self
+
+    probe = AdjointProbe(Lp=Lp, W0=W0, W1=W1, Rp=Rp)
+    wrapped = lasy.sparse.ShiftedLinearOperator(probe, 0.0)
+    assert wrapped.adjoint().original_operator is probe
+
     # ===========================================
     # compare to manual contraction, using planar routines
     # ===========================================

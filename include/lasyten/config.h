@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <limits>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <lasyten/lasyten.h>
@@ -116,17 +117,28 @@ class LasytenConfig
     void set_option(const std::string& key, bool value);
     void set_option(const std::string& key, float64 value);
 
+#if LASYTEN_HAS_PYTHON
     void update(py::dict options);
+#endif // LASYTEN_HAS_PYTHON
     void update(const LasytenConfig& other);
     void update_from_env();
     /// Apply options from an already-parsed mapping (no YAML parsing in C++).
     /// Python bindings load YAML via ``yaml.safe_load`` then call this / ``update``.
+#if LASYTEN_HAS_PYTHON
     void update_from_mapping(py::dict options);
+#endif // LASYTEN_HAS_PYTHON
     /// Load a flat ``key: value`` YAML-ish config file with a minimal C++ parser
     /// (no PyYAML). Full YAML documents should go through the pybind ``update_from_yaml``.
     void update_from_file(const std::string& filename);
 
+    /// Python-free typed access to an option (``std::variant`` of bool / int64 / float64 /
+    /// string). Throws ``py::key_error`` for unknown keys.
+    using OptionValue = std::variant<bool, int64, float64, std::string>;
+    OptionValue get_option_value(const std::string& key) const;
+
+#if LASYTEN_HAS_PYTHON
     py::object get_option(const std::string& key) const;
+#endif // LASYTEN_HAS_PYTHON
 
     std::string str() const;
 
@@ -150,10 +162,12 @@ void set_option(const std::string& key, const std::string& value);
 void set_option(const std::string& key, int64 value);
 void set_option(const std::string& key, bool value);
 void set_option(const std::string& key, float64 value);
+#if LASYTEN_HAS_PYTHON
 void set_option(const std::string& key, py::handle value);
 void set_options(py::dict options);
 
 py::object get_option(const std::string& key);
+#endif // LASYTEN_HAS_PYTHON
 
 void restore_defaults(bool use_user_file = true,
                       bool use_local_file = true,

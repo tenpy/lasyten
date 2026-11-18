@@ -1,16 +1,22 @@
+/// FusionTreeBackend implementation.
+///
+/// With ``LASYTEN_WITH_PYTHON=OFF``, the FusionTreeBackend surface is native C++; remaining
+/// ``NotImplemented`` calls are intentional always-stubs, ``basis_perm`` branches, or LegPipe
+/// mask paths. See ``docs/cpp_conversion/convert_FusionTreeBackend.md``.
+
 #include <lasyten/backends/fusion_tree_backend.h>
 #include <lasyten/backends/fusion_tree_mapping.h>
 #include <lasyten/backends/fusion_tree_permute.h>
+#include <lasyten/symmetries/sector.h>
 #include <lasyten/tensors/diagonal_tensor.h>
 #include <lasyten/tensors/mask.h>
 #include <lasyten/tensors/symmetric_tensor.h>
 
-#include <lasyten/backends/block_inds_numpy.h>
 #include <lasyten/config.h>
-#include <lasyten/symmetries/sector_numpy.h>
 #include <lasyten/symmetries/trees.h>
 #include <lasyten/tools.h>
 #include <lasyten/tools/lru_cache.h>
+#include <lasyten/tools/misc.h>
 #include <lasyten/tools/warn.h>
 
 #include <algorithm>
@@ -41,45 +47,6 @@
 #include <lasyten/tools/hdf5_export.h>
 
 namespace lasyten {
-
-namespace {
-
-[[nodiscard]] py::object
-py_bool_dtype()
-{
-    return py::reinterpret_borrow<py::object>((PyObject*)&PyBool_Type);
-}
-
-[[nodiscard]] std::pair<int64, int64>
-parse_leg_index(ElementarySpace::Ptr const& leg, int64 idx)
-{
-    if (!leg) {
-        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
-    }
-    return leg->parse_index(idx);
-}
-
-[[nodiscard]] std::pair<int64, int64>
-parse_leg_index(Space::Ptr const& leg, int64 idx)
-{
-    auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
-    if (!es) {
-        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
-    }
-    return es->parse_index(idx);
-}
-
-[[nodiscard]] std::pair<int64, int64>
-parse_leg_index(Leg const& leg, int64 idx)
-{
-    auto es = leg.as_elementary_space();
-    if (!es) {
-        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
-    }
-    return es->parse_index(idx);
-}
-
-} // namespace
 
 FusionTreeData::FusionTreeData(BlockInds block_inds_,
                                std::vector<BlockBackend::BlockPtr> blocks_,
@@ -218,189 +185,99 @@ zeros_i64(std::size_t rows, std::size_t cols)
     return BlockInds::zeros(rows, cols);
 }
 
-BlockInds
-asarray_i64(py::object obj)
+using AxisSlice = BlockBackend::AxisSlice;
+using BlockIndexVec = std::vector<BlockBackend::BlockIndex>;
+
+[[nodiscard]] AxisSlice
+slice_of(int64 start, int64 stop)
 {
-    return block_inds_from_numpy(obj);
+    return AxisSlice{ start, stop, std::nullopt };
 }
 
-py::array_t<int64>
-asarray_i64_1d(py::object obj)
+[[nodiscard]] AxisSlice
+axis_slice_from_index_slice(IndexSlice slc)
 {
-    auto arr = py::array_t<int64, py::array::c_style | py::array::forcecast>::ensure(obj);
-    if (!arr) {
-        throw std::invalid_argument("asarray_i64_1d: expected array-like");
-    }
-    if (arr.ndim() == 0) {
-        py::array_t<int64> out(1);
-        out.mutable_at(0) = arr.at();
-        return out;
-    }
-    if (arr.ndim() != 1) {
-        return arr.reshape({ -1 });
-    }
-    return arr;
+    return AxisSlice{ slc.start, slc.stop, std::nullopt };
 }
 
-py::array_t<int64>
-i64_vec_to_numpy(std::vector<int64> const& v)
+[[nodiscard]] AxisSlice
+axis_all()
 {
-    py::array_t<int64> arr(static_cast<py::ssize_t>(v.size()));
-    auto buf = arr.mutable_unchecked<1>();
-    for (std::size_t i = 0; i < v.size(); ++i)
-        buf(static_cast<py::ssize_t>(i)) = v[i];
-    return arr;
+    return BlockBackend::AxisSlice::all();
 }
 
-py::array_t<int64>
-asarray_i64_np(py::object obj)
+[[nodiscard]] AxisSlice
+leg_slice(Space const& space, int64 idx)
 {
-    auto arr = py::array_t<int64, py::array::c_style | py::array::forcecast>::ensure(obj);
-    if (!arr) {
-        throw std::invalid_argument("asarray_i64_np: expected array-like");
+    if (!space.slices) {
+        throw std::invalid_argument("FusionTreeBackend: space has no slices");
     }
-    return arr;
+    auto const& s = space.slices->at(static_cast<std::size_t>(idx));
+    return slice_of(s[0], s[1]);
 }
 
-std::vector<int64>
-asarray_i64_vec(py::object obj)
+[[nodiscard]] BlockIndexVec
+concat_slice_axes(std::vector<AxisSlice> const& j1, std::vector<AxisSlice> const& j2)
 {
-    auto arr = asarray_i64_1d(obj);
-    auto buf = arr.unchecked<1>();
-    std::vector<int64> out(static_cast<std::size_t>(buf.shape(0)));
-    for (py::ssize_t i = 0; i < buf.shape(0); ++i)
-        out[static_cast<std::size_t>(i)] = buf(i);
+    BlockIndexVec out;
+    out.reserve(j1.size() + j2.size());
+    for (auto const& s : j1)
+        out.push_back(s);
+    for (auto const& s : j2)
+        out.push_back(s);
     return out;
-}
-
-std::vector<int64>
-rank_concat(py::object parts)
-{
-    std::vector<int64> all;
-    for (auto item : parts) {
-        auto chunk = asarray_i64_vec(py::reinterpret_borrow<py::object>(item));
-        all.insert(all.end(), chunk.begin(), chunk.end());
-    }
-    return rank_data(all);
-}
-
-[[nodiscard]] py::array_t<int64>
-zeros_i64_array(std::vector<py::ssize_t> const& shape)
-{
-    py::array_t<int64> arr(shape);
-    if (arr.size() > 0) {
-        std::fill(arr.mutable_data(), arr.mutable_data() + arr.size(), int64{ 0 });
-    }
-    return arr;
-}
-
-py::array_t<int64>
-take_rows(py::array_t<int64> const& arr, py::array const& perm)
-{
-    auto p = py::array_t<int64, py::array::c_style | py::array::forcecast>::ensure(perm);
-    auto pbuf = p.unchecked<1>();
-    if (arr.ndim() == 1) {
-        auto abuf = arr.unchecked<1>();
-        py::array_t<int64> out(pbuf.shape(0));
-        auto obuf = out.mutable_unchecked<1>();
-        for (py::ssize_t i = 0; i < pbuf.shape(0); ++i)
-            obuf(i) = abuf(pbuf(i));
-        return out;
-    }
-    if (arr.ndim() != 2) {
-        throw std::invalid_argument("take_rows: expected 1D or 2D array");
-    }
-    auto abuf = arr.unchecked<2>();
-    py::array_t<int64> out({ pbuf.shape(0), abuf.shape(1) });
-    auto obuf = out.mutable_unchecked<2>();
-    for (py::ssize_t i = 0; i < pbuf.shape(0); ++i) {
-        auto r = pbuf(i);
-        for (py::ssize_t c = 0; c < abuf.shape(1); ++c)
-            obuf(i, c) = abuf(r, c);
-    }
-    return out;
-}
-
-SectorArray
-as_sector_array_from_list(py::list const& sectors)
-{
-    // Match Python ``as_sector_array([])`` → ``SectorArray.from_sector(Sector([]))``.
-    if (sectors.empty()) {
-        return SectorArray::from_sector(Sector::zeros(0));
-    }
-    std::vector<Sector> out;
-    out.reserve(static_cast<std::size_t>(sectors.size()));
-    for (auto h : sectors)
-        out.push_back(h.cast<Sector>());
-    return SectorArray(std::move(out));
-}
-
-void
-iter_common_noncommon_sorted_1d(
-  std::vector<int64> const& a,
-  std::vector<int64> const& b,
-  std::function<void(std::optional<std::ptrdiff_t>, std::optional<std::ptrdiff_t>)> const& yield)
-{
-    std::size_t i = 0;
-    std::size_t j = 0;
-    while (i < a.size() || j < b.size()) {
-        if (j >= b.size() || (i < a.size() && a[i] < b[j])) {
-            yield(static_cast<std::ptrdiff_t>(i), std::nullopt);
-            ++i;
-        } else if (i >= a.size() || (j < b.size() && b[j] < a[i])) {
-            yield(std::nullopt, static_cast<std::ptrdiff_t>(j));
-            ++j;
-        } else {
-            yield(static_cast<std::ptrdiff_t>(i), static_cast<std::ptrdiff_t>(j));
-            ++i;
-            ++j;
-        }
-    }
-}
-
-py::slice
-slice_from_index_slice(IndexSlice slc)
-{
-    return py::slice(slc.start, slc.stop, 1);
-}
-
-/// Flatten two lists of per-leg slices into a single numpy index tuple ``(*j1, *j2)``.
-/// ``py::make_tuple(*j1, *j2)`` does not unpack lists the way Python does.
-py::tuple
-concat_slice_lists(py::list const& j1, py::list const& j2)
-{
-    py::tuple out(j1.size() + j2.size());
-    for (py::ssize_t i = 0; i < j1.size(); ++i)
-        out[static_cast<std::size_t>(i)] = j1[i];
-    for (py::ssize_t i = 0; i < j2.size(); ++i)
-        out[static_cast<std::size_t>(j1.size() + i)] = j2[i];
-    return out;
-}
-
-py::slice
-slice_pair(py::object pair)
-{
-    return py::slice(pair.attr("__getitem__")(0).cast<py::ssize_t>(),
-                     pair.attr("__getitem__")(1).cast<py::ssize_t>(),
-                     1);
 }
 
 BlockBackend::BlockPtr
-b_get(BlockBackend::BlockPtr const& b, py::object key)
+b_get(BlockBackend::BlockPtr const& b, BlockIndexVec const& key)
 {
-    return b->get_item(key);
+    return b->get_item(std::span<BlockBackend::BlockIndex const>(key));
 }
 
 void
-b_set(BlockBackend::BlockPtr const& b, py::object key, BlockBackend::BlockPtr const& v)
+b_set(BlockBackend::BlockPtr const& b, BlockIndexVec const& key, BlockBackend::BlockPtr const& v)
 {
-    b->set_item(key, py::cast(v));
+    b->set_item(std::span<BlockBackend::BlockIndex const>(key), *v);
 }
 
 void
-b_set_add(BlockBackend::BlockPtr const& b, py::object key, BlockBackend::BlockPtr const& v)
+b_set_add(BlockBackend::BlockPtr const& b,
+          BlockIndexVec const& key,
+          BlockBackend::BlockPtr const& v)
 {
     b_set(b, key, (*b_get(b, key)) + (*v));
+}
+
+BlockBackend::Scalar
+zero_scalar_of(BlockBackend& bb, Dtype dtype)
+{
+    return bb.as_scalar(complex128{ 0. }, dtype);
+}
+
+[[nodiscard]] BlockBackend::BlockPtr
+scalar_block_of(BlockBackend& bb, BlockBackend::Scalar const& s)
+{
+    return std::const_pointer_cast<BlockBackend::Block>(s._block());
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Leg const& leg, int64 idx)
+{
+    auto es = leg.as_elementary_space();
+    if (!es) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return es->parse_index(idx);
+}
+
+[[nodiscard]] std::pair<int64, int64>
+parse_leg_index(Space::Ptr const& leg, int64 idx)
+{
+    auto es = std::dynamic_pointer_cast<ElementarySpace>(leg);
+    if (!es) {
+        throw std::invalid_argument("parse_index requires an ElementarySpace leg");
+    }
+    return es->parse_index(idx);
 }
 
 bool
@@ -430,29 +307,15 @@ prod_int(std::vector<int64> const& v)
 }
 
 std::vector<int64>
-tp_mults(py::object tp)
+mults_of(Leg::Ptr const& leg)
 {
-    return tp.attr("multiplicities").cast<std::vector<int64>>();
+    return as_space(leg)->multiplicities;
 }
 
 std::vector<int64>
-legs_flat_leg_permutation(py::object legs)
+tp_mults(TensorProduct::Ptr const& tp)
 {
-    std::vector<int64> out;
-    int64 offset = 0;
-    for (py::handle h : legs) {
-        auto leg = h.cast<Leg::Ptr>();
-        auto part_perm = leg._flat_leg_permutation(offset);
-        out.insert(out.end(), part_perm.begin(), part_perm.end());
-        offset += leg.num_flat_legs();
-    }
-    return out;
-}
-
-int64
-nsec(py::object leg)
-{
-    return leg.attr("num_sectors").cast<int64>();
+    return tp->multiplicities;
 }
 
 int64
@@ -462,29 +325,50 @@ nsec(Leg::Ptr const& leg)
 }
 
 std::vector<int64>
-mults_of(py::object leg)
+legs_flat_leg_permutation(std::vector<Leg::Ptr> const& legs)
 {
-    return leg.attr("multiplicities").cast<std::vector<int64>>();
-}
-
-py::object
-take_rows_obj(py::object arr, py::object perm)
-{
-    auto a = py::array_t<int64, py::array::c_style | py::array::forcecast>::ensure(arr);
-    auto p = py::array_t<int64, py::array::c_style | py::array::forcecast>::ensure(perm);
-    return take_rows(a, p);
+    std::vector<int64> out;
+    int64 offset = 0;
+    for (auto const& leg : legs) {
+        auto part_perm = leg._flat_leg_permutation(offset);
+        out.insert(out.end(), part_perm.begin(), part_perm.end());
+        offset += leg.num_flat_legs();
+    }
+    return out;
 }
 
 std::vector<BlockBackend::BlockPtr>
-permute_blocks(std::vector<BlockBackend::BlockPtr> const& blocks, py::array const& perm)
+permute_blocks(std::vector<BlockBackend::BlockPtr> const& blocks,
+               std::span<std::size_t const> perm)
 {
-    auto p = perm.cast<py::array_t<int64>>();
-    auto buf = p.unchecked<1>();
     std::vector<BlockBackend::BlockPtr> out;
-    out.reserve(static_cast<std::size_t>(buf.shape(0)));
-    for (py::ssize_t i = 0; i < buf.shape(0); ++i)
-        out.push_back(blocks[static_cast<std::size_t>(buf(i))]);
+    out.reserve(perm.size());
+    for (std::size_t i : perm)
+        out.push_back(blocks[i]);
     return out;
+}
+
+void
+iter_common_noncommon_sorted_1d(
+  std::vector<int64> const& a,
+  std::vector<int64> const& b,
+  std::function<void(std::optional<std::ptrdiff_t>, std::optional<std::ptrdiff_t>)> const& yield)
+{
+    std::size_t i = 0;
+    std::size_t j = 0;
+    while (i < a.size() || j < b.size()) {
+        if (j >= b.size() || (i < a.size() && a[i] < b[j])) {
+            yield(static_cast<std::ptrdiff_t>(i), std::nullopt);
+            ++i;
+        } else if (i >= a.size() || (j < b.size() && b[j] < a[i])) {
+            yield(std::nullopt, static_cast<std::ptrdiff_t>(j));
+            ++j;
+        } else {
+            yield(static_cast<std::ptrdiff_t>(i), static_cast<std::ptrdiff_t>(j));
+            ++i;
+            ++j;
+        }
+    }
 }
 
 std::vector<std::uint8_t>
@@ -495,6 +379,371 @@ flat_are_dual(TensorProduct::Ptr tp)
         out.push_back(static_cast<std::uint8_t>(leg.is_dual()));
     return out;
 }
+
+/// Build flat-leg target indices from leg permutation idcs (permute_legs).
+std::tuple<std::vector<int64>,
+           std::vector<int64>,
+           std::vector<std::optional<int64>>,
+           std::vector<std::optional<bool>>>
+flat_leg_permutation_inputs(TensorCPtr const& a,
+                            std::vector<int64> const& codomain_idcs,
+                            std::vector<int64> const& domain_idcs,
+                            std::vector<std::optional<int64>> const& levels,
+                            std::vector<std::optional<bool>> const& bend_right)
+{
+    std::vector<std::vector<int64>> leg_comb;
+    std::vector<std::optional<int64>> flat_levels;
+    std::vector<std::optional<bool>> flat_bend_right;
+    int64 flat_index = 0;
+    auto const legs = a->legs();
+    for (std::size_t i = 0; i < legs.size(); ++i) {
+        auto const& leg = legs[i];
+        bool const is_codomain = static_cast<int64>(i) < a->num_codomain_legs();
+        std::vector<int64> indices;
+        if (leg.is_pipe()) {
+            int64 const num = leg.num_flat_legs();
+            indices.reserve(static_cast<std::size_t>(num));
+            for (int64 k = 0; k < num; ++k)
+                indices.push_back(flat_index + k);
+            flat_index += num;
+            for (int64 k = 0; k < num; ++k) {
+                flat_levels.push_back(levels[i]);
+                flat_bend_right.push_back(bend_right[i]);
+            }
+        } else {
+            indices.push_back(flat_index);
+            ++flat_index;
+            flat_levels.push_back(levels[i]);
+            flat_bend_right.push_back(bend_right[i]);
+        }
+        leg_comb.push_back(std::move(indices));
+    }
+    std::vector<int64> new_domain_idcs;
+    for (int64 idx : domain_idcs) {
+        auto const& group = leg_comb[static_cast<std::size_t>(idx)];
+        for (auto it = group.rbegin(); it != group.rend(); ++it)
+            new_domain_idcs.push_back(*it);
+    }
+    std::vector<int64> new_codomain_idcs;
+    for (int64 idx : codomain_idcs) {
+        for (int64 k : leg_comb[static_cast<std::size_t>(idx)])
+            new_codomain_idcs.push_back(k);
+    }
+    return {
+        new_codomain_idcs, new_domain_idcs, std::move(flat_levels), std::move(flat_bend_right)
+    };
+}
+
+bool
+sector_sorted(Space const& space)
+{
+    return space.sector_order.has_value() && *space.sector_order == "sorted";
+}
+
+std::optional<std::vector<int64>>
+custom_basis_perm_of(Space const& space)
+{
+    auto const* es = dynamic_cast<ElementarySpace const*>(&space);
+    if (es == nullptr || !es->has_custom_basis_perm()) {
+        return std::nullopt;
+    }
+    return es->basis_perm();
+}
+
+bool
+space_is_dual(Space const& space)
+{
+    if (auto const* es = dynamic_cast<ElementarySpace const*>(&space))
+        return es->is_dual;
+    return false;
+}
+
+SectorArray const&
+defining_sectors_of(Space const& space)
+{
+    auto const* es = dynamic_cast<ElementarySpace const*>(&space);
+    if (es == nullptr) {
+        throw std::invalid_argument("FusionTreeBackend: expected an ElementarySpace");
+    }
+    return es->defining_sectors;
+}
+
+struct MaskPieces
+{
+    std::vector<BlockBackend::BlockPtr> blocks;
+    std::vector<int64> large_leg_block_inds;
+    /// If non-empty, used as block_inds[:, 0] instead of ``arange`` (dual reorder).
+    std::vector<int64> small_leg_block_inds;
+    std::vector<Sector> sectors;
+    std::vector<int64> multiplicities;
+    std::vector<int64> basis_perm_kept;
+
+    void add(BlockBackend& bb,
+             BlockBackend::BlockPtr block,
+             int64 mult,
+             int64 large_block_ind,
+             Sector sector,
+             std::optional<std::vector<int64>> const& large_basis_perm,
+             std::array<int64, 2> const& large_slice,
+             int64 sector_dim = 1)
+    {
+        if (large_basis_perm) {
+            // FusionTree mask blocks are multiplicity-sized; dense slices are mult * sector_dim.
+            auto const tiled = sector_dim > 1 ? bb.tile(block, sector_dim) : block;
+            auto const keep = bb.block_to_bool_vector(tiled);
+            for (std::size_t k = 0; k < keep.size(); ++k) {
+                if (keep[k]) {
+                    basis_perm_kept.push_back(
+                      (*large_basis_perm)[static_cast<std::size_t>(large_slice[0]) + k]);
+                }
+            }
+        }
+        blocks.push_back(std::move(block));
+        large_leg_block_inds.push_back(large_block_ind);
+        sectors.push_back(std::move(sector));
+        multiplicities.push_back(mult);
+    }
+};
+
+[[nodiscard]] BlockInds
+block_inds_from_rows(std::vector<std::vector<int64>> const& rows)
+{
+    return BlockInds::from_rows(rows);
+}
+
+BlockIndexVec
+slices_for_row(Space const& space, int64 block_ind)
+{
+    return { leg_slice(space, block_ind) };
+}
+
+std::tuple<FusionTreeData::Ptr, ElementarySpace::Ptr>
+finish_mask(MaskPieces&& pieces,
+            Symmetry::Ptr const& symmetry,
+            bool is_dual,
+            bool has_basis_perm,
+            std::string device,
+            bool sectors_are_defining = true)
+{
+    SectorArray sectors = SectorArray::empty(symmetry->sector_ind_len);
+    std::optional<std::vector<int64>> basis_perm_opt = std::nullopt;
+    BlockInds block_inds;
+    if (pieces.blocks.empty()) {
+        pieces.multiplicities.clear();
+        block_inds = zeros_i64(0, 2);
+    } else {
+        sectors = SectorArray::empty(pieces.sectors[0].len());
+        for (auto const& s : pieces.sectors)
+            sectors.push_back(s);
+        if (has_basis_perm) {
+            basis_perm_opt = rank_data(pieces.basis_perm_kept);
+        }
+        std::vector<int64> small_inds;
+        if (pieces.small_leg_block_inds.empty()) {
+            small_inds.resize(sectors.size());
+            std::iota(small_inds.begin(), small_inds.end(), int64{ 0 });
+        } else {
+            if (pieces.small_leg_block_inds.size() != pieces.blocks.size()) {
+                throw std::invalid_argument(
+                  "finish_mask: small_leg_block_inds length must match blocks");
+            }
+            small_inds = std::move(pieces.small_leg_block_inds);
+        }
+        // When ``sectors`` are defining sectors, Mask (co)domains (TensorProducts) store a
+        // lexsorted ``sector_decomposition``. For dual legs that is ``sorted(dual(defining))``,
+        // not defining order — remap so sanity / contract match. Truncate passes TP sectors
+        // instead and must skip this remap (``sectors_are_defining == false``).
+        if (is_dual && sectors_are_defining) {
+            auto const duals = symmetry->dual_sectors(sectors);
+            auto const perm = duals.lexsort_indices();
+            std::vector<int64> defining_to_tp(perm.size());
+            for (std::size_t j = 0; j < perm.size(); ++j)
+                defining_to_tp[perm[j]] = static_cast<int64>(j);
+            for (auto& idx : small_inds) {
+                if (idx < 0 || static_cast<std::size_t>(idx) >= defining_to_tp.size()) {
+                    throw std::invalid_argument("finish_mask: small_leg block index out of range");
+                }
+                idx = defining_to_tp[static_cast<std::size_t>(idx)];
+            }
+        }
+        block_inds = BlockInds::column_stack(std::vector<std::span<const int64>>{
+          std::span<const int64>(small_inds),
+          std::span<const int64>(pieces.large_leg_block_inds) });
+    }
+    // Lexsort: dual remaps / large-bi sorts may leave rows unsorted.
+    auto data =
+      make_data(Dtype::Bool, std::move(device), std::move(pieces.blocks), block_inds, false);
+    ElementarySpace::Ptr small_leg;
+    if (sectors_are_defining) {
+        small_leg = std::make_shared<ElementarySpace>(
+          symmetry, std::move(sectors), pieces.multiplicities, is_dual, basis_perm_opt);
+    } else {
+        // Match Python truncate_singular_values: sectors are domain.sector_decomposition.
+        small_leg = ElementarySpace::from_sector_decomposition(
+          symmetry, std::move(sectors), pieces.multiplicities, is_dual, basis_perm_opt);
+        small_leg->set_basis_perm(std::nullopt);
+    }
+    return { std::move(data), std::move(small_leg) };
+}
+
+[[nodiscard]] TensorProduct::Ptr
+tensor_product_with_replaced_factor(TensorProduct::Ptr const& tp,
+                                    int64 factor_idx,
+                                    Leg::Ptr new_leg)
+{
+    auto factors = tp->factors;
+    factors[static_cast<std::size_t>(factor_idx)] = std::move(new_leg);
+    return std::make_shared<TensorProduct>(std::move(factors), tp->symmetry);
+}
+
+[[nodiscard]] SectorArray
+coupled_sectors_from_domain_rows(TensorProduct::Ptr const& domain, BlockInds const& bi)
+{
+    if (bi.nrows() == 0)
+        return domain->symmetry->empty_sector_array;
+    std::vector<Sector> out;
+    out.reserve(bi.nrows());
+    for (std::size_t i = 0; i < bi.nrows(); ++i)
+        out.push_back(domain->sector_decomposition[static_cast<std::size_t>(bi(i, 1))]);
+    return SectorArray(std::move(out));
+}
+
+[[nodiscard]] int64
+sector_multiplicity_on_space(Space const& space, Sector const& sector)
+{
+    return space.sector_multiplicity(sector);
+}
+
+void
+append_basis_perm_kept_from_tile(std::vector<int64>& kept,
+                                 std::vector<int64> const& basis_perm,
+                                 std::array<int64, 2> const& slice,
+                                 BlockBackend& bb,
+                                 BlockBackend::BlockPtr const& tiled_block)
+{
+    auto const mask = bb.block_to_bool_vector(tiled_block);
+    for (std::size_t k = 0; k < mask.size(); ++k) {
+        if (mask[k])
+            kept.push_back(basis_perm[static_cast<std::size_t>(slice[0]) + k]);
+    }
+}
+
+BlockBackend::BlockPtr
+mask_block_at_sorted_sector(BlockBackend& bb,
+                            MaskCPtr const& mask,
+                            FusionTreeData const& data,
+                            std::size_t sector_idx,
+                            bool is_sorted,
+                            Space const& large,
+                            std::size_t& cursor,
+                            int64& next_bi)
+{
+    if (is_sorted && static_cast<int64>(sector_idx) == next_bi) {
+        auto block = data.blocks[cursor];
+        ++cursor;
+        next_bi = cursor >= data.block_inds.nrows() ? -1 : data.block_inds(cursor, 1);
+        return block;
+    }
+    if (!is_sorted) {
+        Sector dual_sec = large.sector_decomposition[sector_idx];
+        auto dom_idx = mask->domain->sector_decomposition_where(dual_sec);
+        if (dom_idx.has_value()) {
+            auto idx = data.block_ind_from_domain_sector_ind(*dom_idx);
+            if (idx.has_value())
+                return data.blocks[static_cast<std::size_t>(*idx)];
+        }
+    }
+    return bb.zeros({ large.multiplicities[sector_idx] }, Dtype::Bool);
+}
+
+#if LASYTEN_HAS_PYTHON
+
+std::vector<int64>
+mults_of(py::object leg)
+{
+    return mults_of(py::cast<Leg::Ptr>(leg));
+}
+
+py::slice
+slice_from_index_slice(IndexSlice slc)
+{
+    return py::slice(slc.start, slc.stop, 1);
+}
+
+[[nodiscard]] py::object
+py_bool_dtype()
+{
+    return py::reinterpret_borrow<py::object>((PyObject*)&PyBool_Type);
+}
+
+py::slice
+slice_pair(py::object pair)
+{
+    return py::slice(py::cast<py::ssize_t>(pair.attr("__getitem__")(0)),
+                     py::cast<py::ssize_t>(pair.attr("__getitem__")(1)),
+                     1);
+}
+
+std::vector<int64>
+asarray_i64_vec(py::object obj)
+{
+    auto arr = py::array_t<int64, py::array::c_style | py::array::forcecast>::ensure(obj);
+    if (!arr) {
+        throw std::invalid_argument("asarray_i64_vec: expected array-like");
+    }
+    if (arr.ndim() == 0) {
+        return { arr.at() };
+    }
+    auto buf = arr.unchecked<1>();
+    std::vector<int64> out(static_cast<std::size_t>(buf.shape(0)));
+    for (py::ssize_t i = 0; i < buf.shape(0); ++i)
+        out[static_cast<std::size_t>(i)] = buf(i);
+    return out;
+}
+
+std::vector<int64>
+rank_concat(py::object parts)
+{
+    std::vector<int64> all;
+    for (auto item : parts) {
+        auto chunk = asarray_i64_vec(py::reinterpret_borrow<py::object>(item));
+        all.insert(all.end(), chunk.begin(), chunk.end());
+    }
+    return rank_data(all);
+}
+
+SectorArray
+as_sector_array_from_list(py::list const& sectors)
+{
+    if (sectors.empty()) {
+        return SectorArray::from_sector(Sector::zeros(0));
+    }
+    std::vector<Sector> out;
+    out.reserve(static_cast<std::size_t>(sectors.size()));
+    for (auto h : sectors)
+        out.push_back(py::cast<Sector>(h));
+    return SectorArray(std::move(out));
+}
+
+BlockBackend::BlockPtr
+b_get(BlockBackend::BlockPtr const& b, py::object key)
+{
+    return b->get_item(key);
+}
+
+void
+b_set(BlockBackend::BlockPtr const& b, py::object key, BlockBackend::BlockPtr const& v)
+{
+    b->set_item(key, py::cast(v));
+}
+
+void
+b_set_add(BlockBackend::BlockPtr const& b, py::object key, BlockBackend::BlockPtr const& v)
+{
+    b_set(b, key, (*b_get(b, key)) + (*v));
+}
+
+#endif // LASYTEN_HAS_PYTHON
 
 } // namespace
 
@@ -544,11 +793,10 @@ FusionTreeBackend::test_tensor_sanity(TensorCPtr a, bool is_diagonal)
     // check charge rule (matching coupled sectors)
     // ---
     TensorBackend::test_tensor_sanity(a, is_diagonal);
-    py::object raw = py::cast(a).attr("data");
     FusionTreeData::Ptr data;
     try {
-        data = unwrap(raw.cast<DataPtr>());
-    } catch (...) {
+        data = data_from_tensor(a);
+    } catch (std::invalid_argument const&) {
         return;
     }
     check(a->device == data->device, "test_tensor_sanity: device mismatch");
@@ -572,8 +820,8 @@ FusionTreeBackend::test_tensor_sanity(TensorCPtr a, bool is_diagonal)
         int64 ic = bi(i, 0);
         int64 id = bi(i, 1);
         std::vector<int64> expect_shape = {
-            tp_mults(py::cast(a->codomain))[static_cast<std::size_t>(ic)],
-            mults_of(py::cast(a->domain))[static_cast<std::size_t>(id)]
+            a->codomain->multiplicities[static_cast<std::size_t>(ic)],
+            a->domain->multiplicities[static_cast<std::size_t>(id)]
         };
         if (is_diagonal) {
             check(expect_shape[0] == expect_shape[1],
@@ -594,11 +842,10 @@ FusionTreeBackend::test_mask_sanity(MaskCPtr a)
     // blocks
     // ---
     TensorBackend::test_mask_sanity(a);
-    py::object raw = py::cast(a).attr("data");
     FusionTreeData::Ptr data;
     try {
-        data = unwrap(raw.cast<DataPtr>());
-    } catch (...) {
+        data = data_from_tensor(a);
+    } catch (std::invalid_argument const&) {
         return;
     }
     check(a->device == data->device, "test_mask_sanity: device mismatch");
@@ -610,8 +857,8 @@ FusionTreeBackend::test_mask_sanity(MaskCPtr a)
     bool is_projection = a->is_projection;
     // block_inds index TensorProduct (co)domain sectors, not ElementarySpace defining order.
     // For dual legs those orders differ, so use domain/codomain multiplicities (like Python).
-    auto domain_mults = tp_mults(py::cast(a->domain));
-    auto codomain_mults = tp_mults(py::cast(a->codomain));
+    auto domain_mults = a->domain->multiplicities;
+    auto codomain_mults = a->codomain->multiplicities;
     for (std::size_t i = 0; i < bi.nrows(); ++i) {
         int64 i_cod = bi(i, 0);
         int64 i_dom = bi(i, 1);
@@ -641,7 +888,7 @@ FusionTreeBackend::act_block_diagonal_square_matrix(SymmetricTensorCPtr a,
     std::vector<BlockBackend::BlockPtr> res_blocks;
     int64 n = 0;
     int64 bi = block_inds_col0.empty() ? -1 : block_inds_col0[static_cast<std::size_t>(n)];
-    int64 num_sectors = py::cast(a->codomain).attr("num_sectors").cast<int64>();
+    int64 num_sectors = a->codomain->num_sectors;
     for (int64 i = 0; i < num_sectors; ++i) {
         BlockBackend::BlockPtr block;
         if (bi == i) {
@@ -651,16 +898,16 @@ FusionTreeBackend::act_block_diagonal_square_matrix(SymmetricTensorCPtr a,
                    ? -1
                    : block_inds_col0[static_cast<std::size_t>(n)];
         } else {
-            block = block_backend->zeros(
-              { tp_mults(py::cast(a->codomain))[static_cast<std::size_t>(i)],
-                tp_mults(py::cast(a->codomain))[static_cast<std::size_t>(i)] },
-              a->dtype);
+            block =
+              block_backend->zeros({ a->codomain->multiplicities[static_cast<std::size_t>(i)],
+                                     a->codomain->multiplicities[static_cast<std::size_t>(i)] },
+                                   a->dtype);
         }
         res_blocks.push_back(block_method(block));
     }
     Dtype dt = dtype_map ? (*dtype_map)(a->dtype) : a->dtype;
-    BlockInds res_block_inds = BlockInds::arange_diag(
-      static_cast<std::size_t>(py::cast(a->domain).attr("num_sectors").cast<int64>()));
+    BlockInds res_block_inds =
+      BlockInds::arange_diag(static_cast<std::size_t>(a->domain->num_sectors));
     return wrap(make_data(dt, a_data->device, std::move(res_blocks), res_block_inds));
 }
 
@@ -941,7 +1188,7 @@ clear_tree_plan_cache()
 
 TensorBackend::DataPtr
 FusionTreeBackend::apply_instructions(TensorCPtr tensor,
-                                      py::object instructions,
+                                      std::vector<Instruction> const& instructions,
                                       std::vector<int64> codomain_idcs,
                                       std::vector<int64> domain_idcs,
                                       TensorProduct::Ptr new_codomain,
@@ -949,18 +1196,16 @@ FusionTreeBackend::apply_instructions(TensorCPtr tensor,
                                       bool mixes_codomain_domain)
 {
     auto t_data = data_from_tensor(tensor);
-    auto codomain = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
-    auto domain = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
-    auto instructions_vec = instructions_from_python(instructions);
-
+    auto codomain = tensor->codomain;
+    auto domain = tensor->domain;
     auto const key =
-      plan_key(instructions_vec, codomain, domain, t_data->block_inds, mixes_codomain_domain);
+      plan_key(instructions, codomain, domain, t_data->block_inds, mixes_codomain_domain);
     FusionTreeData::Ptr res;
     if (mixes_codomain_domain) {
         auto mapping =
           cached_plan<TreePairMapping>(key, codomain->symmetry, domain->symmetry, [&] {
               return TreePairMapping::from_instructions(
-                instructions_vec, codomain, domain, py::cast(t_data->block_inds));
+                instructions, codomain, domain, t_data->block_inds);
           });
         res = mapping->transform_tensor(*t_data,
                                         codomain,
@@ -974,7 +1219,7 @@ FusionTreeBackend::apply_instructions(TensorCPtr tensor,
         auto mapping =
           cached_plan<FactorizedTreeMapping>(key, codomain->symmetry, domain->symmetry, [&] {
               return FactorizedTreeMapping::from_instructions(
-                instructions_vec, codomain, domain, py::cast(t_data->block_inds));
+                instructions, codomain, domain, t_data->block_inds);
           });
         res = mapping->transform_tensor(*t_data,
                                         codomain,
@@ -1093,7 +1338,7 @@ FusionTreeBackend::data_item(DataPtr a)
     if (data->blocks.size() > 1)
         throw std::runtime_error("Inconsistent data.");
     if (data->blocks.empty())
-        return block_backend->as_scalar(dtype::zero_scalar(data->dtype), data->dtype);
+        return zero_scalar_of(*block_backend, data->dtype);
     return block_backend->item(data->blocks[0]);
 }
 
@@ -1105,7 +1350,7 @@ FusionTreeBackend::diagonal_all(DiagonalTensorCPtr a)
     // now it is enough to check the existing blocks
     // ---
     auto data = data_from_tensor(a);
-    if (static_cast<int64>(data->blocks.size()) < nsec(py::cast(a->domain)))
+    if (static_cast<int64>(data->blocks.size()) < a->domain->num_sectors)
         return false;
     for (auto const& b : data->blocks)
         if (!block_backend->all(b))
@@ -1156,7 +1401,7 @@ FusionTreeBackend::diagonal_elementwise_binary(DiagonalTensorCPtr a,
         int64 bi_a = a_col0.empty() ? -1 : a_col0[static_cast<std::size_t>(n_a)];
         int64 n_b = 0;
         int64 bi_b = b_col0.empty() ? -1 : b_col0[static_cast<std::size_t>(n_b)];
-        int64 num_sectors = py::cast(a->codomain).attr("num_sectors").cast<int64>();
+        int64 num_sectors = a->codomain->num_sectors;
         for (int64 i = 0; i < num_sectors; ++i) {
             BlockBackend::BlockPtr a_block;
             if (i == bi_a) {
@@ -1166,7 +1411,7 @@ FusionTreeBackend::diagonal_elementwise_binary(DiagonalTensorCPtr a,
                          : a_col0[static_cast<std::size_t>(n_a)];
             } else {
                 a_block = block_backend->zeros(
-                  { mults_of(py::cast(a->domain))[static_cast<std::size_t>(i)] }, a->dtype);
+                  { a->domain->multiplicities[static_cast<std::size_t>(i)] }, a->dtype);
             }
             BlockBackend::BlockPtr b_block;
             if (i == bi_b) {
@@ -1176,7 +1421,7 @@ FusionTreeBackend::diagonal_elementwise_binary(DiagonalTensorCPtr a,
                          : b_col0[static_cast<std::size_t>(n_b)];
             } else {
                 b_block = block_backend->zeros(
-                  { mults_of(py::cast(a->domain))[static_cast<std::size_t>(i)] }, b->dtype);
+                  { a->domain->multiplicities[static_cast<std::size_t>(i)] }, b->dtype);
             }
             blocks.push_back(func(a_block, b_block));
         }
@@ -1205,7 +1450,7 @@ FusionTreeBackend::diagonal_elementwise_unary(DiagonalTensorCPtr a,
         auto col0 = a_data->block_inds.column(0);
         int64 n = 0;
         int64 bi = col0.empty() ? -1 : col0[static_cast<std::size_t>(n)];
-        int64 num_sectors = py::cast(a->codomain).attr("num_sectors").cast<int64>();
+        int64 num_sectors = a->codomain->num_sectors;
         for (int64 i = 0; i < num_sectors; ++i) {
             BlockBackend::BlockPtr block;
             if (i == bi) {
@@ -1215,7 +1460,7 @@ FusionTreeBackend::diagonal_elementwise_unary(DiagonalTensorCPtr a,
                        : col0[static_cast<std::size_t>(n)];
             } else {
                 block = block_backend->zeros(
-                  { tp_mults(py::cast(a->codomain))[static_cast<std::size_t>(i)] }, a->dtype);
+                  { a->codomain->multiplicities[static_cast<std::size_t>(i)] }, a->dtype);
             }
             blocks.push_back(func(block));
         }
@@ -1238,7 +1483,7 @@ FusionTreeBackend::diagonal_from_block(BlockBackend::BlockPtr a,
     // versus the ``a.leg`` itself
     // project onto the identity on the coupled sector
     // ---
-    py::object leg = py::cast(co_domain->factors[0]);
+    auto const& leg_space = *as_space(co_domain->factors[0]);
     Dtype dt = block_backend->get_dtype(a);
     BlockInds block_inds =
       BlockInds::arange_diag(static_cast<std::size_t>(co_domain->num_sectors));
@@ -1246,9 +1491,10 @@ FusionTreeBackend::diagonal_from_block(BlockBackend::BlockPtr a,
     for (std::size_t idx = 0; idx < co_domain->sector_decomposition.size(); ++idx) {
         Sector coupled = co_domain->sector_decomposition[idx];
         int64 dim_c = co_domain->symmetry->sector_dim(coupled);
-        auto j = leg.attr("sector_decomposition_where")(py::cast(coupled)).cast<int64>();
-        auto slc = slice_pair(leg.attr("slices").attr("__getitem__")(j));
-        auto entries = block_backend->reshape(b_get(a, py::make_tuple(slc)),
+        auto j = leg_space.sector_decomposition_where(coupled);
+        if (!j)
+            throw std::invalid_argument("diagonal_from_block: coupled sector not in leg");
+        auto entries = block_backend->reshape(b_get(a, slices_for_row(leg_space, *j)),
                                               { dim_c, co_domain->multiplicities[idx] });
         auto block = block_backend->sum(entries, 0);
         block = (*(block)) / block_backend->as_scalar(static_cast<float64>(dim_c));
@@ -1298,7 +1544,7 @@ BlockBackend::Scalar
 FusionTreeBackend::diagonal_tensor_trace_full(DiagonalTensorCPtr a)
 {
     auto a_data = data_from_tensor(a);
-    auto qdims = py::cast(a->domain).attr("sector_qdims").cast<std::vector<float64>>();
+    auto qdims = a->domain->sector_qdims;
     auto res = block_backend->as_scalar(0.0, a->dtype);
     auto const& bi = a_data->block_inds;
     for (std::size_t n = 0; n < bi.nrows(); ++n)
@@ -1322,23 +1568,21 @@ FusionTreeBackend::diagonal_tensor_to_block(DiagonalTensorCPtr a)
           "diagonal_tensor_to_block requires a droppable symmetry. Got {}.", a->symmetry->str()));
     }
     auto a_data = data_from_tensor(a);
-    auto res = block_backend->zeros({ py::cast(a->leg()).attr("dim").cast<int64>() }, a->dtype);
+    auto leg = a->leg();
+    auto const& leg_space = *leg;
+    auto res = block_backend->zeros({ static_cast<int64>(std::llround(leg_space.dim)) }, a->dtype);
     auto const& bi = a_data->block_inds;
     for (std::size_t n = 0; n < bi.nrows(); ++n) {
         int64 bi_cod = bi(n, 0);
-        Sector c = py::cast(a->codomain)
-                     .attr("sector_decomposition")
-                     .attr("__getitem__")(bi_cod)
-                     .cast<Sector>();
-        int64 dim_c =
-          py::cast(a->codomain).attr("sector_dims").attr("__getitem__")(bi_cod).cast<int64>();
+        Sector c = a->codomain->sector_decomposition[static_cast<std::size_t>(bi_cod)];
+        int64 dim_c = a->codomain->sector_qdims[static_cast<std::size_t>(bi_cod)];
         auto entries = block_backend->reshape(
           block_backend->outer(block_backend->ones_block({ dim_c }, a->dtype), a_data->blocks[n]),
           std::vector<int64>{ -1 });
-        auto j = py::cast(a->leg()).attr("sector_decomposition_where")(py::cast(c)).cast<int64>();
-        b_set(res,
-              py::make_tuple(slice_pair(py::cast(a->leg()).attr("slices").attr("__getitem__")(j))),
-              entries);
+        auto j = leg_space.sector_decomposition_where(c);
+        if (!j)
+            throw std::invalid_argument("diagonal_tensor_to_block: sector not in leg");
+        b_set(res, slices_for_row(leg_space, *j), entries);
     }
     return res;
 }
@@ -1369,7 +1613,7 @@ FusionTreeBackend::move_to_device(TensorCPtr a, std::string device)
 {
     auto a_data = data_from_tensor(a);
     for (auto& b : a_data->blocks)
-        b = block_backend->as_block(py::cast(b), std::nullopt, device);
+        b = block_backend->convert_block(b, std::nullopt, device);
     a_data->device = block_backend->as_device(device);
     return wrap(a_data);
 }
@@ -1395,7 +1639,7 @@ FusionTreeBackend::to_block_backend(DataPtr data,
     std::string dev = bb->as_device(device.has_value() ? *device : d->device);
     std::vector<BlockBackend::BlockPtr> blocks;
     for (auto const& b : d->blocks)
-        blocks.push_back(bb->as_block(py::cast(b), dt, dev));
+        blocks.push_back(bb->convert_block(b, dt, dev));
     return wrap(make_data(dt, dev, std::move(blocks), d->block_inds, true));
 }
 
@@ -1606,7 +1850,7 @@ FusionTreeBackend::inner(SymmetricTensorCPtr a, SymmetricTensorCPtr b, bool do_d
     // ---
     auto a_data = data_from_tensor(a);
     auto b_data = data_from_tensor(b);
-    auto qdims = py::cast(a->codomain).attr("sector_qdims").cast<std::vector<float64>>();
+    auto qdims = a->codomain->sector_qdims;
     auto a_col0 = a_data->block_inds.column(0);
     auto b_inds = do_dagger ? b_data->block_inds.column(0) : b_data->block_inds.column(1);
     auto res = block_backend->as_scalar(0.0, a->dtype);
@@ -1627,8 +1871,8 @@ FusionTreeBackend::trace_full(SymmetricTensorCPtr a,
                               std::vector<int64> idcs2)
 {
     auto a_data = data_from_tensor(a);
-    auto qdims = py::cast(a->codomain).attr("sector_qdims").cast<std::vector<float64>>();
-    auto res = block_backend->as_scalar(dtype::zero_scalar(a_data->dtype), a_data->dtype);
+    auto qdims = a->codomain->sector_qdims;
+    auto res = zero_scalar_of(*block_backend, a_data->dtype);
     auto const& bi = a_data->block_inds;
     for (std::size_t n = 0; n < bi.nrows(); ++n) {
         int64 bi_cod = bi(n, 0);
@@ -1647,7 +1891,7 @@ FusionTreeBackend::norm(TensorCPtr a)
     // OPTIMIZE should we offer the square-norm instead?
     // ---
     auto a_data = data_from_tensor(a);
-    auto qdims = py::cast(a->codomain).attr("sector_qdims").cast<std::vector<float64>>();
+    auto qdims = a->codomain->sector_qdims;
     float64 norm_sq = 0.;
     auto const& bi = a_data->block_inds;
     for (std::size_t n = 0; n < bi.nrows(); ++n) {
@@ -1663,10 +1907,7 @@ FusionTreeBackend::mul(BlockBackend::Scalar a, TensorCPtr b)
 {
     auto b_data = data_from_tensor(b);
     if (is_zero_scalar(a))
-        return zero_data(py::cast(b->codomain).cast<TensorProduct::Ptr>(),
-                         py::cast(b->domain).cast<TensorProduct::Ptr>(),
-                         b->dtype,
-                         b_data->device);
+        return zero_data(b->codomain, b->domain, b->dtype, b_data->device);
     std::vector<BlockBackend::BlockPtr> blocks;
     for (auto const& T : b_data->blocks)
         blocks.push_back(block_backend->mul(a, T));
@@ -1725,13 +1966,14 @@ FusionTreeBackend::linear_combination(BlockBackend::Scalar a,
 BlockBackend::Scalar
 FusionTreeBackend::get_element_diagonal(DiagonalTensorCPtr a, int64 idx)
 {
-    auto [sector_idx, idx_within] = parse_leg_index(a->leg(), idx);
-    auto leg_es = std::dynamic_pointer_cast<ElementarySpace>(a->leg());
+    auto leg_es = a->leg();
     if (!leg_es) {
         throw std::invalid_argument("get_element_diagonal requires ElementarySpace leg");
     }
+    auto [sector_idx, idx_within] = parse_leg_index(leg_es, idx);
     int64 multi = leg_es->multiplicities[static_cast<std::size_t>(sector_idx)];
-    if (leg_es->is_dual) {
+    auto const* es = dynamic_cast<ElementarySpace const*>(leg_es.get());
+    if (es && es->is_dual) {
         Sector sector = leg_es->sector_decomposition[static_cast<std::size_t>(sector_idx)];
         auto where = a->domain->sector_decomposition_where(sector);
         if (!where) {
@@ -1741,7 +1983,7 @@ FusionTreeBackend::get_element_diagonal(DiagonalTensorCPtr a, int64 idx)
     }
     auto block_idx = data_from_tensor(a)->block_ind_from_domain_sector_ind(sector_idx);
     if (!block_idx.has_value())
-        return block_backend->as_scalar(dtype::zero_scalar(a->dtype), a->dtype);
+        return zero_scalar_of(*block_backend, a->dtype);
     return block_backend->get_block_element(
       data_from_tensor(a)->blocks[static_cast<std::size_t>(*block_idx)], { idx_within % multi });
 }
@@ -1761,20 +2003,17 @@ FusionTreeBackend::get_element_mask(MaskCPtr a, std::vector<int64> idcs)
     }
     BlockInds pos = BlockInds::from_rows(pairs);
     int64 sector_idx = pos(1, 0);
-    Sector sector = py::cast(a->domain)
-                      .attr("__getitem__")(0)
-                      .attr("sector_decomposition")
-                      .attr("__getitem__")(sector_idx)
-                      .cast<Sector>();
-    if (sector != py::cast(a->codomain)
-                    .attr("__getitem__")(0)
-                    .attr("sector_decomposition")
-                    .attr("__getitem__")(pos(0, 0))
-                    .cast<Sector>())
+    auto const& dom_es = *as_space(a->domain->factors[0]);
+    auto const& cod_es = *as_space(a->codomain->factors[0]);
+    Sector sector = dom_es.sector_decomposition[static_cast<std::size_t>(sector_idx)];
+    if (sector != cod_es.sector_decomposition[static_cast<std::size_t>(pos(0, 0))])
         return block_backend->as_scalar(false);
-    if (py::cast(a->domain).attr("__getitem__")(0).attr("is_dual").cast<bool>())
-        sector_idx =
-          py::cast(a->domain).attr("sector_decomposition_where")(py::cast(sector)).cast<int64>();
+    if (space_is_dual(dom_es)) {
+        auto w = a->domain->sector_decomposition_where(sector);
+        if (!w)
+            return block_backend->as_scalar(false);
+        sector_idx = *w;
+    }
     auto block_idx = data_from_tensor(a)->block_ind_from_domain_sector_ind(sector_idx);
     if (!block_idx.has_value())
         return block_backend->as_scalar(false);
@@ -1782,11 +2021,11 @@ FusionTreeBackend::get_element_mask(MaskCPtr a, std::vector<int64> idcs)
     if (a->is_projection) {
         small = pos(0, 1);
         large = pos(1, 1);
-        multi = mults_of(py::cast(a->small_leg()))[static_cast<std::size_t>(pos(0, 0))];
+        multi = mults_of(a->small_leg())[static_cast<std::size_t>(pos(0, 0))];
     } else {
         large = pos(0, 1);
         small = pos(1, 1);
-        multi = mults_of(py::cast(a->small_leg()))[static_cast<std::size_t>(pos(1, 0))];
+        multi = mults_of(a->small_leg())[static_cast<std::size_t>(pos(1, 0))];
     }
     return block_backend->get_block_mask_element(
       data_from_tensor(a)->blocks[static_cast<std::size_t>(*block_idx)], large, small, multi);
@@ -1802,82 +2041,17 @@ FusionTreeBackend::permute_legs(TensorCPtr a,
                                 std::vector<std::optional<int64>> levels,
                                 std::vector<std::optional<bool>> bend_right)
 {
-    // --- hints from Python FusionTreeBackend.permute_legs ---
-    // mapping to flat indices for TreeMappingDict.from_permute_legs
-    // OPTIMIZE rm check?
-    // ---
-    std::vector<std::optional<int64>> flat_levels;
-    std::vector<std::optional<bool>> flat_bend_right;
-    py::list codomain_pipe_inds;
-    py::list domain_pipe_inds;
-    int64 flat_index = 0;
-    int64 num_codomain_flat_legs = a->num_codomain_flat_legs();
-    py::list legs = py::cast(a->legs());
-    for (py::ssize_t i = 0; i < py::len(legs); ++i) {
-        py::object leg = legs[i];
-        bool is_codomain = i < a->num_codomain_legs();
-        // Match Python ``isinstance(leg, LegPipe)`` — not ``hasattr(num_flat_legs)``,
-        // since ElementarySpace also exposes num_flat_legs.
-        bool const is_pipe = py::isinstance<LegPipe>(leg);
-        if (is_pipe) {
-            int64 num = leg.attr("num_flat_legs").cast<int64>();
-            py::list indices;
-            for (int64 k = 0; k < num; ++k)
-                indices.append(flat_index + k);
-            if (is_codomain)
-                codomain_pipe_inds.append(indices);
-            else
-                domain_pipe_inds.append(indices);
-            flat_index += num;
-            for (int64 k = 0; k < num; ++k) {
-                flat_levels.push_back(levels[static_cast<std::size_t>(i)]);
-                flat_bend_right.push_back(bend_right[static_cast<std::size_t>(i)]);
-            }
-        } else {
-            py::list indices;
-            indices.append(flat_index);
-            if (is_codomain)
-                codomain_pipe_inds.append(indices);
-            else
-                domain_pipe_inds.append(indices);
-            ++flat_index;
-            flat_levels.push_back(levels[static_cast<std::size_t>(i)]);
-            flat_bend_right.push_back(bend_right[static_cast<std::size_t>(i)]);
-        }
-    }
-    py::list leg_comb;
-    for (py::handle x : codomain_pipe_inds)
-        leg_comb.append(x);
-    for (py::handle x : domain_pipe_inds)
-        leg_comb.append(x);
-    std::vector<int64> new_domain_idcs;
-    for (int64 idx : domain_idcs) {
-        py::list rev = leg_comb[static_cast<py::ssize_t>(idx)].cast<py::list>();
-        for (py::ssize_t ri = py::len(rev) - 1; ri >= 0; --ri)
-            new_domain_idcs.push_back(rev[ri].cast<int64>());
-    }
-    std::vector<int64> new_codomain_idcs;
-    for (int64 idx : codomain_idcs) {
-        for (py::handle k : leg_comb[static_cast<py::ssize_t>(idx)])
-            new_codomain_idcs.push_back(k.cast<int64>());
-    }
-    int64 const num_domain_flat_legs = a->num_domain_flat_legs();
-    bool const has_symmetric_braid =
-      py::cast(a->symmetry).attr("has_symmetric_braid").cast<bool>();
-    PermuteLegsInstructionEngine engine(num_codomain_flat_legs,
-                                        num_domain_flat_legs,
+    auto [new_codomain_idcs, new_domain_idcs, flat_levels, flat_bend_right] =
+      flat_leg_permutation_inputs(a, codomain_idcs, domain_idcs, levels, bend_right);
+    PermuteLegsInstructionEngine engine(a->num_codomain_flat_legs(),
+                                        a->num_domain_flat_legs(),
                                         new_codomain_idcs,
                                         new_domain_idcs,
                                         flat_levels,
                                         flat_bend_right,
-                                        has_symmetric_braid);
-    auto instructions = engine.evaluate_instructions();
-    py::list instructions_py;
-    for (Instruction const& inst : instructions) {
-        std::visit([&](auto const& i) { instructions_py.append(py::cast(i)); }, inst);
-    }
+                                        a->symmetry->has_symmetric_braid());
     return apply_instructions(a,
-                              instructions_py,
+                              engine.evaluate_instructions(),
                               new_codomain_idcs,
                               new_domain_idcs,
                               new_codomain,
@@ -1891,8 +2065,8 @@ FusionTreeBackend::_get_forest_block_contribution(BlockBackend::BlockPtr block,
                                                   TensorProduct::Ptr codomain,
                                                   TensorProduct::Ptr domain,
                                                   Sector coupled,
-                                                  py::object a_sectors,
-                                                  py::object b_sectors,
+                                                  SectorArray const& a_sectors,
+                                                  SectorArray const& b_sectors,
                                                   std::vector<int64> a_dims,
                                                   std::vector<int64> b_dims,
                                                   int64 tree_block_width,
@@ -1915,8 +2089,6 @@ FusionTreeBackend::_get_forest_block_contribution(BlockBackend::BlockPtr block,
     // reset to the left of the current forest-block
     // OPTIMIZE count loop iterations above instead?  (same in _add_forest_block_entries)
     // ---
-    SectorArray a_sectors_arr = a_sectors.cast<SectorArray>();
-    SectorArray b_sectors_arr = b_sectors.cast<SectorArray>();
     auto codomain_are_dual = flat_are_dual(codomain);
     auto domain_are_dual = flat_are_dual(domain);
     std::vector<int64> shape;
@@ -1931,8 +2103,8 @@ FusionTreeBackend::_get_forest_block_contribution(BlockBackend::BlockPtr block,
     auto entries = block_backend->zeros(shape, dtype);
     int64 i1 = i1_init;
     int64 i2 = i2_init;
-    fusion_trees alpha_iter(sym, a_sectors_arr, coupled, codomain_are_dual);
-    fusion_trees beta_iter(sym, b_sectors_arr, coupled, domain_are_dual);
+    fusion_trees alpha_iter(sym, a_sectors, coupled, codomain_are_dual);
+    fusion_trees beta_iter(sym, b_sectors, coupled, domain_are_dual);
     BlockBackend* bb = block_backend.get();
     for (auto const& alpha_tree : alpha_iter.all_trees()) {
         auto splitting_tree =
@@ -1940,9 +2112,9 @@ FusionTreeBackend::_get_forest_block_contribution(BlockBackend::BlockPtr block,
         for (auto const& beta_tree : beta_iter.all_trees()) {
             auto fusion_tree = beta_tree.to_dense_block(bb, std::nullopt, true);
             auto symmetry_data = block_backend->tdot(splitting_tree, fusion_tree, { -1 }, { -1 });
-            py::slice idx1(i1, i1 + tree_block_height, 1);
-            py::slice idx2(i2, i2 + tree_block_width, 1);
-            auto degeneracy_data = b_get(block, py::make_tuple(idx1, idx2));
+            AxisSlice idx1{ i1, i1 + tree_block_height, std::nullopt };
+            AxisSlice idx2{ i2, i2 + tree_block_width, std::nullopt };
+            auto degeneracy_data = b_get(block, BlockIndexVec{ idx1, idx2 });
             degeneracy_data = block_backend->reshape(degeneracy_data, [&]() {
                 std::vector<int64> s = m_mults;
                 s.insert(s.end(), n_mults.begin(), n_mults.end());
@@ -1967,8 +2139,8 @@ FusionTreeBackend::_add_forest_block_entries(BlockBackend::BlockPtr block,
                                              TensorProduct::Ptr domain,
                                              Sector coupled,
                                              float64 dim_c,
-                                             py::object a_sectors,
-                                             py::object b_sectors,
+                                             SectorArray const& a_sectors,
+                                             SectorArray const& b_sectors,
                                              std::vector<int64> a_dims,
                                              std::vector<int64> b_dims,
                                              int64 tree_block_width,
@@ -1988,8 +2160,6 @@ FusionTreeBackend::_add_forest_block_entries(BlockBackend::BlockPtr block,
     // move right by one tree-block
     // move down by one tree-block (we reset to the left at start of the loop)
     // ---
-    SectorArray a_sectors_arr = a_sectors.cast<SectorArray>();
-    SectorArray b_sectors_arr = b_sectors.cast<SectorArray>();
     int64 J = codomain->num_flat_legs();
     int64 K = domain->num_flat_legs();
     std::vector<int64> range_J;
@@ -2005,8 +2175,8 @@ FusionTreeBackend::_add_forest_block_entries(BlockBackend::BlockPtr block,
     auto domain_are_dual = flat_are_dual(domain);
     int64 i1 = i1_init;
     int64 i2 = i2_init;
-    fusion_trees alpha_iter(sym, a_sectors_arr, coupled, codomain_are_dual);
-    fusion_trees beta_iter(sym, b_sectors_arr, coupled, domain_are_dual);
+    fusion_trees alpha_iter(sym, a_sectors, coupled, codomain_are_dual);
+    fusion_trees beta_iter(sym, b_sectors, coupled, domain_are_dual);
     BlockBackend* bb = block_backend.get();
     for (auto const& alpha_tree : alpha_iter.all_trees()) {
         auto Y = alpha_tree.to_dense_block(bb, std::nullopt, true);
@@ -2021,9 +2191,9 @@ FusionTreeBackend::_add_forest_block_entries(BlockBackend::BlockPtr block,
               tree_block,
               { prod_int(std::vector<int64>(ms_ns.begin(), ms_ns.begin() + J)),
                 prod_int(std::vector<int64>(ms_ns.begin() + J, ms_ns.end())) });
-            py::slice idx1(i1, i1 + tree_block_height, 1);
-            py::slice idx2(i2, i2 + tree_block_width, 1);
-            b_set(block, py::make_tuple(idx1, idx2), tree_block);
+            AxisSlice idx1{ i1, i1 + tree_block_height, std::nullopt };
+            AxisSlice idx2{ i2, i2 + tree_block_width, std::nullopt };
+            b_set(block, BlockIndexVec{ idx1, idx2 }, tree_block);
             i2 += tree_block_width;
         }
         i2 = i2_init;
@@ -2059,41 +2229,39 @@ FusionTreeBackend::from_dense_block(BlockBackend::BlockPtr a,
     // thus ``abs_err = norm(a - a_sym) = norm(a_rest) = sqrt(norm(a) ** 2 - norm(a_sym) ** 2)``
     // ---
     if (codomain->has_pipes() || domain->has_pipes()) {
-        // Match Python: split pipes on the dense block, then apply flat-leg permute.
-        py::list idcs;
-        py::list split_dims;
-        py::list legs;
+        std::vector<Leg::Ptr> legs;
         for (auto const& f : codomain->factors)
-            legs.append(py::cast(f));
+            legs.push_back(f);
         for (auto it = domain->factors.rbegin(); it != domain->factors.rend(); ++it)
-            legs.append(py::cast(it->dual()));
+            legs.push_back(it->dual());
         auto axes_perm = legs_flat_leg_permutation(legs);
+        std::vector<int64> split_idcs;
+        std::vector<std::vector<int64>> split_dims;
         int64 perm_idx = 0;
-        for (py::ssize_t n = 0; n < legs.size(); ++n) {
-            py::object leg = legs[n];
-            if (py::isinstance<LegPipe>(leg)) {
-                idcs.append(n);
-                py::list dims;
-                for (auto const& s : leg.attr("flat_legs"))
-                    dims.append(s.attr("dim"));
+        for (std::size_t n = 0; n < legs.size(); ++n) {
+            auto const& leg = legs[n];
+            if (leg.is_pipe()) {
+                split_idcs.push_back(static_cast<int64>(n));
+                std::vector<int64> dims;
+                for (auto const& fl : leg.as_leg_pipe()->flat_legs())
+                    dims.push_back(fl.dim());
+                auto const nf = leg.num_flat_legs();
                 std::vector<int64> perm(axes_perm.begin() + perm_idx,
-                                        axes_perm.begin() + perm_idx +
-                                          leg.attr("num_flat_legs").cast<int64>());
+                                        axes_perm.begin() + perm_idx + nf);
                 int64 perm_min = *std::min_element(perm.begin(), perm.end());
                 for (auto& p : perm)
                     p -= perm_min;
                 auto inv = inverse_permutation(perm);
-                py::list split_dim;
+                std::vector<int64> sd;
                 for (int64 ih : inv)
-                    split_dim.append(dims[ih]);
-                split_dims.append(split_dim);
-                perm_idx += leg.attr("num_flat_legs").cast<int64>();
+                    sd.push_back(dims[static_cast<std::size_t>(ih)]);
+                split_dims.push_back(std::move(sd));
+                perm_idx += nf;
             } else {
                 perm_idx += 1;
             }
         }
-        a = block_backend->split_legs(
-          a, idcs.cast<std::vector<int64>>(), split_dims.cast<std::vector<std::vector<int64>>>());
+        a = block_backend->split_legs(a, split_idcs, split_dims);
         a = block_backend->permute_axes(a, axes_perm);
     }
     if (!codomain->symmetry->can_be_dropped()) {
@@ -2112,7 +2280,7 @@ FusionTreeBackend::from_dense_block(BlockBackend::BlockPtr a,
     Dtype dt =
       dtype::common({ block_backend->get_dtype(a),
                       codomain->symmetry->fusion_tensor_dtype.value_or(Dtype::Complex128) });
-    py::list block_inds_rows;
+    std::vector<std::vector<int64>> block_inds_rows;
     std::vector<BlockBackend::BlockPtr> blocks;
     float64 norm_sq_projected = 0.;
     SectorArray::iter_common_sorted(
@@ -2138,13 +2306,13 @@ FusionTreeBackend::from_dense_block(BlockBackend::BlockPtr a,
               for (auto const& a_item : codomain->iter_uncoupled(true)) {
                   auto a_dims = codomain->symmetry->batch_sector_dim(a_item.uncoupled);
                   int64 tree_block_height = codomain->tree_block_size(a_item.uncoupled);
-                  py::list j1;
-                  py::list j2;
+                  std::vector<AxisSlice> j1;
+                  std::vector<AxisSlice> j2;
                   for (auto const& slc : *a_item.slices)
-                      j1.append(slice_from_index_slice(slc));
+                      j1.push_back(axis_slice_from_index_slice(slc));
                   for (auto const& slc : *b_item.slices)
-                      j2.append(slice_from_index_slice(slc));
-                  auto entries = b_get(a, concat_slice_lists(j1, j2));
+                      j2.push_back(axis_slice_from_index_slice(slc));
+                  auto entries = b_get(a, concat_slice_axes(j1, j2));
                   std::vector<int64> shape(2 * num_legs);
                   for (std::size_t si = 0; si < a_dims.size(); ++si) {
                       shape[2 * si] = a_dims[si];
@@ -2169,8 +2337,8 @@ FusionTreeBackend::from_dense_block(BlockBackend::BlockPtr a,
                                               domain,
                                               coupled,
                                               static_cast<float64>(dim_c),
-                                              py::cast(a_item.uncoupled),
-                                              py::cast(b_item.uncoupled),
+                                              a_item.uncoupled,
+                                              b_item.uncoupled,
                                               a_dims,
                                               b_dims,
                                               tree_block_width,
@@ -2189,7 +2357,7 @@ FusionTreeBackend::from_dense_block(BlockBackend::BlockPtr a,
           float64 block_norm = block_backend->norm(block, 2.).as_float64();
           if (block_norm <= 1e-14)
               return;
-          block_inds_rows.append(py::make_tuple(i, j));
+          block_inds_rows.push_back({ i, j });
           blocks.push_back(block);
           norm_sq_projected += dim_c * block_norm * block_norm;
       });
@@ -2200,15 +2368,9 @@ FusionTreeBackend::from_dense_block(BlockBackend::BlockPtr a,
             throw std::invalid_argument("Block is not symmetric up to tolerance.");
     }
     BlockInds block_inds;
-    if (block_inds_rows.size() > 0) {
-        std::vector<std::vector<int64>> rows;
-        rows.reserve(static_cast<std::size_t>(block_inds_rows.size()));
-        for (py::handle h : block_inds_rows) {
-            auto t = h.cast<py::tuple>();
-            rows.push_back({ t[0].cast<int64>(), t[1].cast<int64>() });
-        }
-        block_inds = BlockInds::from_rows(rows);
-    } else {
+    if (!block_inds_rows.empty())
+        block_inds = BlockInds::from_rows(block_inds_rows);
+    else {
         block_inds = zeros_i64(0, 2);
     }
     return wrap(make_data(dt, block_backend->get_device(a), std::move(blocks), block_inds));
@@ -2229,13 +2391,13 @@ FusionTreeBackend::to_dense_block(TensorCPtr a)
                                         a->symmetry->str()));
     }
     auto a_data = data_from_tensor(a);
-    auto codomain = py::cast(a->codomain).cast<TensorProduct::Ptr>();
-    auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
+    auto codomain = a->codomain;
+    auto domain = a->domain;
     int64 J = codomain->num_flat_legs();
     int64 K = domain->num_flat_legs();
     int64 num_legs = J + K;
     Dtype dt = dtype::common(
-      { a_data->dtype, py::cast(a->symmetry).attr("fusion_tensor_dtype").cast<Dtype>() });
+      { a_data->dtype, a->symmetry->fusion_tensor_dtype.value_or(Dtype::Complex128) });
     std::vector<int64> shape;
     for (auto const& leg : codomain->flat_legs())
         shape.push_back(leg.dim());
@@ -2248,22 +2410,20 @@ FusionTreeBackend::to_dense_block(TensorCPtr a)
         int64 i1 = 0;
         int64 i2 = 0;
         for (auto const& b_item : domain->iter_uncoupled(true)) {
-            auto b_dims =
-              py::cast(a->symmetry).cast<Symmetry::Ptr>()->batch_sector_dim(b_item.uncoupled);
+            auto b_dims = a->symmetry->batch_sector_dim(b_item.uncoupled);
             int64 tree_block_width = domain->tree_block_size(b_item.uncoupled);
             int64 forest_b_width = 0;
             for (auto const& a_item : codomain->iter_uncoupled(true)) {
-                auto a_dims =
-                  py::cast(a->symmetry).cast<Symmetry::Ptr>()->batch_sector_dim(a_item.uncoupled);
+                auto a_dims = a->symmetry->batch_sector_dim(a_item.uncoupled);
                 int64 tree_block_height = codomain->tree_block_size(a_item.uncoupled);
                 auto [entries, num_alpha, num_beta] =
                   _get_forest_block_contribution(a_data->blocks[static_cast<std::size_t>(row)],
-                                                 py::cast(a->symmetry).cast<Symmetry::Ptr>(),
+                                                 a->symmetry,
                                                  codomain,
                                                  domain,
                                                  coupled,
-                                                 py::cast(a_item.uncoupled),
-                                                 py::cast(b_item.uncoupled),
+                                                 a_item.uncoupled,
+                                                 b_item.uncoupled,
                                                  a_dims,
                                                  b_dims,
                                                  tree_block_width,
@@ -2293,13 +2453,13 @@ FusionTreeBackend::to_dense_block(TensorCPtr a)
                 for (std::size_t si = 0; si < b_dims.size(); ++si)
                     rshape.push_back(b_dims[si] * b_item.multiplicities[si]);
                 entries = block_backend->reshape(entries, rshape);
-                py::list j1;
-                py::list j2;
+                std::vector<AxisSlice> j1;
+                std::vector<AxisSlice> j2;
                 for (auto const& slc : *a_item.slices)
-                    j1.append(slice_from_index_slice(slc));
+                    j1.push_back(axis_slice_from_index_slice(slc));
                 for (auto const& slc : *b_item.slices)
-                    j2.append(slice_from_index_slice(slc));
-                b_set_add(res, concat_slice_lists(j1, j2), entries);
+                    j2.push_back(axis_slice_from_index_slice(slc));
+                b_set_add(res, concat_slice_axes(j1, j2), entries);
                 i1 += forest_b_height;
             }
             i1 = 0;
@@ -2315,16 +2475,16 @@ FusionTreeBackend::to_dense_block(TensorCPtr a)
     res = block_backend->permute_axes(res, final_perm);
 
     if (a->has_pipes()) {
-        py::list legs = py::cast(a->legs());
+        auto legs = a->legs();
         auto axes_perm_fwd = legs_flat_leg_permutation(legs);
         auto inv = inverse_permutation(axes_perm_fwd);
         std::vector<int64> axes_perm = inv;
         std::vector<std::vector<int64>> combine_axes;
-        for (py::handle g : py::cast(a->codomain).attr("flat_legs_nesting")())
-            combine_axes.push_back(g.cast<std::vector<int64>>());
-        py::list dom_nesting = py::cast(a->domain).attr("flat_legs_nesting")();
-        for (py::ssize_t gi = dom_nesting.size() - 1; gi >= 0; --gi) {
-            auto group = dom_nesting[gi].cast<std::vector<int64>>();
+        for (auto const& g : a->codomain->flat_legs_nesting())
+            combine_axes.push_back(g);
+        auto dom_nesting = a->domain->flat_legs_nesting();
+        for (int64 gi = static_cast<int64>(dom_nesting.size()) - 1; gi >= 0; --gi) {
+            auto const& group = dom_nesting[static_cast<std::size_t>(gi)];
             std::vector<int64> mapped;
             mapped.reserve(group.size());
             for (auto it = group.rbegin(); it != group.rend(); ++it)
@@ -2347,7 +2507,7 @@ FusionTreeBackend::reduce_DiagonalTensor(DiagonalTensorCPtr tensor,
     auto col0 = data->block_inds.column(0);
     int64 n = 0;
     int64 bi = col0.empty() ? -1 : col0[static_cast<std::size_t>(n)];
-    int64 num_sectors = py::cast(tensor->codomain).attr("num_sectors").cast<int64>();
+    int64 num_sectors = tensor->codomain->num_sectors;
     for (int64 i = 0; i < num_sectors; ++i) {
         BlockBackend::BlockPtr block;
         if (i == bi) {
@@ -2356,8 +2516,7 @@ FusionTreeBackend::reduce_DiagonalTensor(DiagonalTensorCPtr tensor,
               static_cast<std::size_t>(n) >= col0.size() ? -1 : col0[static_cast<std::size_t>(n)];
         } else {
             block = block_backend->zeros(
-              { mults_of(py::cast(tensor->codomain))[static_cast<std::size_t>(i)] },
-              tensor->dtype);
+              { tensor->codomain->multiplicities[static_cast<std::size_t>(i)] }, tensor->dtype);
         }
         numbers.push_back(block_func(block));
     }
@@ -2374,10 +2533,11 @@ FusionTreeBackend::diagonal_transpose(DiagonalTensorCPtr tens)
     // sectors do not appear in the same order.
     // OPTIMIZE doing this sorting is duplicate work between here and forming tens.leg.dual
     // ---
-    auto perm_py = py::cast(tens->symmetry)
-                     .attr("dual_sectors")(py::cast(tens->domain).attr("sector_decomposition"))
-                     .attr("lexsort_indices")();
-    auto inv = inverse_permutation(perm_py.cast<std::vector<int64>>());
+    auto perm = tens->symmetry->dual_sectors(tens->domain->sector_decomposition).lexsort_indices();
+    std::vector<int64> perm_i64(perm.size());
+    for (std::size_t i = 0; i < perm.size(); ++i)
+        perm_i64[i] = static_cast<int64>(perm[i]);
+    auto inv = inverse_permutation(perm_i64);
     auto tens_data = data_from_tensor(tens);
     // Map each stored sector index through the dual-sector inverse permutation.
     auto col0 = tens_data->block_inds.column(0);
@@ -2389,7 +2549,7 @@ FusionTreeBackend::diagonal_transpose(DiagonalTensorCPtr tens)
     BlockInds block_inds =
       BlockInds::column_stack(std::vector<std::span<const int64>>{ col0, col1 });
     auto data = make_data(tens->dtype, tens_data->device, tens_data->blocks, block_inds, false);
-    return { py::cast(tens->leg()).attr("dual").cast<Space::Ptr>(), wrap(data) };
+    return { tens->leg()->dual_space(), wrap(data) };
 }
 
 std::tuple<TensorBackend::DataPtr, TensorBackend::DataPtr, ElementarySpace::Ptr>
@@ -2406,7 +2566,7 @@ FusionTreeBackend::eigh(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<
     auto col0 = a_data->block_inds.column(0);
     int64 n = 0;
     int64 bi = col0.empty() ? -1 : col0[static_cast<std::size_t>(n)];
-    int64 num_sectors = py::cast(a->codomain).attr("num_sectors").cast<int64>();
+    int64 num_sectors = a->codomain->num_sectors;
     for (int64 i = 0; i < num_sectors; ++i) {
         if (i == bi) {
             auto [vals, vects] =
@@ -2417,7 +2577,7 @@ FusionTreeBackend::eigh(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<
             bi =
               static_cast<std::size_t>(n) >= col0.size() ? -1 : col0[static_cast<std::size_t>(n)];
         } else {
-            int64 block_size = tp_mults(py::cast(a->codomain))[static_cast<std::size_t>(i)];
+            int64 block_size = a->codomain->multiplicities[static_cast<std::size_t>(i)];
             v_blocks.push_back(block_backend->eye_matrix(block_size, a->dtype));
         }
     }
@@ -2439,7 +2599,7 @@ FusionTreeBackend::eig(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<s
     auto col0 = a_data->block_inds.column(0);
     int64 n = 0;
     int64 bi = col0.empty() ? -1 : col0[static_cast<std::size_t>(n)];
-    int64 num_sectors = py::cast(a->codomain).attr("num_sectors").cast<int64>();
+    int64 num_sectors = a->codomain->num_sectors;
     for (int64 i = 0; i < num_sectors; ++i) {
         if (i == bi) {
             auto [vals, vects] =
@@ -2450,7 +2610,7 @@ FusionTreeBackend::eig(SymmetricTensorCPtr a, bool new_leg_dual, std::optional<s
             bi =
               static_cast<std::size_t>(n) >= col0.size() ? -1 : col0[static_cast<std::size_t>(n)];
         } else {
-            int64 block_size = tp_mults(py::cast(a->codomain))[static_cast<std::size_t>(i)];
+            int64 block_size = a->codomain->multiplicities[static_cast<std::size_t>(i)];
             v_blocks.push_back(block_backend->eye_matrix(block_size, cdtype));
         }
     }
@@ -2498,8 +2658,7 @@ std::tuple<TensorBackend::DataPtr, TensorBackend::DataPtr>
 FusionTreeBackend::lq(SymmetricTensorCPtr a, TensorProduct::Ptr new_co_domain)
 {
     auto a_data = data_from_tensor(a);
-    py::list l_block_inds;
-    py::list q_block_inds;
+    std::vector<std::vector<int64>> l_rows, q_rows;
     std::vector<BlockBackend::BlockPtr> l_blocks;
     std::vector<BlockBackend::BlockPtr> q_blocks;
     auto col0 = a_data->block_inds.column(0);
@@ -2514,39 +2673,27 @@ FusionTreeBackend::lq(SymmetricTensorCPtr a, TensorProduct::Ptr new_co_domain)
       [&](std::ptrdiff_t i_cod_p, std::ptrdiff_t i_dom_p) {
           int64 i_cod = static_cast<int64>(i_cod_p);
           int64 i_dom = static_cast<int64>(i_dom_p);
-          q_block_inds.append(py::make_tuple(i_new, i_dom));
+          q_rows.push_back({ i_new, i_dom });
           if (bi_cod == i_cod) {
               auto [l, q] =
                 block_backend->matrix_lq(a_data->blocks[static_cast<std::size_t>(n)], false);
               l_blocks.push_back(l);
               q_blocks.push_back(q);
-              l_block_inds.append(py::make_tuple(i_cod, i_new));
+              l_rows.push_back({ i_cod, i_new });
               ++n;
               bi_cod = static_cast<std::size_t>(n) >= col0.size()
                          ? -1
                          : col0[static_cast<std::size_t>(n)];
           } else {
-              int64 B_dom = tp_mults(py::cast(a->domain))[static_cast<std::size_t>(i_dom)];
+              int64 B_dom = tp_mults(a->domain)[static_cast<std::size_t>(i_dom)];
               int64 B_new = new_co_domain->multiplicities[static_cast<std::size_t>(i_new)];
-              q_blocks.push_back(b_get(
-                block_backend->eye_matrix(B_dom, a->dtype),
-                py::make_tuple(py::slice(0, B_new, 1), py::slice(std::nullopt, std::nullopt, 1))));
+              q_blocks.push_back(b_get(block_backend->eye_matrix(B_dom, a->dtype),
+                                       { slice_of(0, B_new), axis_all() }));
           }
           ++i_new;
       });
-    auto rows_from_list = [](py::list const& lst) -> BlockInds {
-        if (lst.size() == 0)
-            return zeros_i64(0, 2);
-        std::vector<std::vector<int64>> rows;
-        rows.reserve(static_cast<std::size_t>(lst.size()));
-        for (py::handle h : lst) {
-            auto t = h.cast<py::tuple>();
-            rows.push_back({ t[0].cast<int64>(), t[1].cast<int64>() });
-        }
-        return BlockInds::from_rows(rows);
-    };
-    BlockInds l_bi = rows_from_list(l_block_inds);
-    BlockInds q_bi = rows_from_list(q_block_inds);
+    BlockInds l_bi = l_rows.empty() ? zeros_i64(0, 2) : block_inds_from_rows(l_rows);
+    BlockInds q_bi = q_rows.empty() ? zeros_i64(0, 2) : block_inds_from_rows(q_rows);
     return { wrap(make_data(a->dtype, a_data->device, std::move(l_blocks), l_bi, true)),
              wrap(make_data(a->dtype, a_data->device, std::move(q_blocks), q_bi)) };
 }
@@ -2560,8 +2707,7 @@ FusionTreeBackend::qr(SymmetricTensorCPtr a, TensorProduct::Ptr new_co_domain)
     // choose basis vectors for q as standard basis vectors (cols/rows of eye)
     // ---
     auto a_data = data_from_tensor(a);
-    py::list q_block_inds;
-    py::list r_block_inds;
+    std::vector<std::vector<int64>> q_rows, r_rows;
     std::vector<BlockBackend::BlockPtr> q_blocks;
     std::vector<BlockBackend::BlockPtr> r_blocks;
     auto col0 = a_data->block_inds.column(0);
@@ -2576,39 +2722,27 @@ FusionTreeBackend::qr(SymmetricTensorCPtr a, TensorProduct::Ptr new_co_domain)
       [&](std::ptrdiff_t i_cod_p, std::ptrdiff_t i_dom_p) {
           int64 i_cod = static_cast<int64>(i_cod_p);
           int64 i_dom = static_cast<int64>(i_dom_p);
-          q_block_inds.append(py::make_tuple(i_cod, i_new));
+          q_rows.push_back({ i_cod, i_new });
           if (bi_cod == i_cod) {
               auto [q, r] =
                 block_backend->matrix_qr(a_data->blocks[static_cast<std::size_t>(n)], false);
               q_blocks.push_back(q);
               r_blocks.push_back(r);
-              r_block_inds.append(py::make_tuple(i_new, i_dom));
+              r_rows.push_back({ i_new, i_dom });
               ++n;
               bi_cod = static_cast<std::size_t>(n) >= col0.size()
                          ? -1
                          : col0[static_cast<std::size_t>(n)];
           } else {
-              int64 B_cod = tp_mults(py::cast(a->codomain))[static_cast<std::size_t>(i_cod)];
+              int64 B_cod = tp_mults(a->codomain)[static_cast<std::size_t>(i_cod)];
               int64 B_new = new_co_domain->multiplicities[static_cast<std::size_t>(i_new)];
-              q_blocks.push_back(b_get(
-                block_backend->eye_matrix(B_cod, a->dtype),
-                py::make_tuple(py::slice(std::nullopt, std::nullopt, 1), py::slice(0, B_new, 1))));
+              q_blocks.push_back(b_get(block_backend->eye_matrix(B_cod, a->dtype),
+                                       { axis_all(), slice_of(0, B_new) }));
           }
           ++i_new;
       });
-    auto rows_from_list = [](py::list const& lst) -> BlockInds {
-        if (lst.size() == 0)
-            return zeros_i64(0, 2);
-        std::vector<std::vector<int64>> rows;
-        rows.reserve(static_cast<std::size_t>(lst.size()));
-        for (py::handle h : lst) {
-            auto t = h.cast<py::tuple>();
-            rows.push_back({ t[0].cast<int64>(), t[1].cast<int64>() });
-        }
-        return BlockInds::from_rows(rows);
-    };
-    BlockInds q_bi = rows_from_list(q_block_inds);
-    BlockInds r_bi = rows_from_list(r_block_inds);
+    BlockInds q_bi = q_rows.empty() ? zeros_i64(0, 2) : block_inds_from_rows(q_rows);
+    BlockInds r_bi = r_rows.empty() ? zeros_i64(0, 2) : block_inds_from_rows(r_rows);
     return { wrap(make_data(a->dtype, a_data->device, std::move(q_blocks), q_bi)),
              wrap(make_data(a->dtype, a_data->device, std::move(r_blocks), r_bi)) };
 }
@@ -2623,9 +2757,7 @@ FusionTreeBackend::svd(SymmetricTensorCPtr a,
     // choose basis vectors for u/vh as standard basis vectors (cols/rows of eye)
     // ---
     auto a_data = data_from_tensor(a);
-    py::list u_block_inds;
-    py::list s_block_inds;
-    py::list vh_block_inds;
+    std::vector<std::vector<int64>> u_rows, vh_rows, s_rows;
     std::vector<BlockBackend::BlockPtr> u_blocks;
     std::vector<BlockBackend::BlockPtr> s_blocks;
     std::vector<BlockBackend::BlockPtr> vh_blocks;
@@ -2641,50 +2773,36 @@ FusionTreeBackend::svd(SymmetricTensorCPtr a,
       [&](std::ptrdiff_t i_cod_p, std::ptrdiff_t i_dom_p) {
           int64 i_cod = static_cast<int64>(i_cod_p);
           int64 i_dom = static_cast<int64>(i_dom_p);
-          u_block_inds.append(py::make_tuple(i_cod, i_new));
-          vh_block_inds.append(py::make_tuple(i_new, i_dom));
+          u_rows.push_back({ i_cod, i_new });
+          vh_rows.push_back({ i_new, i_dom });
           if (bi_cod == i_cod) {
               auto [u, s, vh] =
                 block_backend->matrix_svd(a_data->blocks[static_cast<std::size_t>(n)], algorithm);
               u_blocks.push_back(u);
               s_blocks.push_back(s);
               vh_blocks.push_back(vh);
-              s_block_inds.append(i_new);
+              s_rows.push_back({ i_new, i_new });
               ++n;
               bi_cod = static_cast<std::size_t>(n) >= col0.size()
                          ? -1
                          : col0[static_cast<std::size_t>(n)];
           } else {
-              int64 B_cod = tp_mults(py::cast(a->codomain))[static_cast<std::size_t>(i_cod)];
-              int64 B_dom = tp_mults(py::cast(a->domain))[static_cast<std::size_t>(i_dom)];
+              int64 B_cod = tp_mults(a->codomain)[static_cast<std::size_t>(i_cod)];
+              int64 B_dom = tp_mults(a->domain)[static_cast<std::size_t>(i_dom)];
               int64 B_new = new_co_domain->multiplicities[static_cast<std::size_t>(i_new)];
-              u_blocks.push_back(b_get(
-                block_backend->eye_matrix(B_cod, a->dtype),
-                py::make_tuple(py::slice(std::nullopt, std::nullopt, 1), py::slice(0, B_new, 1))));
-              vh_blocks.push_back(b_get(
-                block_backend->eye_matrix(B_dom, a->dtype),
-                py::make_tuple(py::slice(0, B_new, 1), py::slice(std::nullopt, std::nullopt, 1))));
+              u_blocks.push_back(b_get(block_backend->eye_matrix(B_cod, a->dtype),
+                                       { axis_all(), slice_of(0, B_new) }));
+              vh_blocks.push_back(b_get(block_backend->eye_matrix(B_dom, a->dtype),
+                                        { slice_of(0, B_new), axis_all() }));
           }
           ++i_new;
       });
-    auto mk = [](py::list const& lst) -> BlockInds {
-        if (lst.size() == 0)
-            return zeros_i64(0, 2);
-        std::vector<std::vector<int64>> rows;
-        rows.reserve(static_cast<std::size_t>(lst.size()));
-        for (py::handle h : lst) {
-            auto t = h.cast<py::tuple>();
-            rows.push_back({ t[0].cast<int64>(), t[1].cast<int64>() });
-        }
-        return BlockInds::from_rows(rows);
-    };
-    py::list s_rows;
-    for (py::handle x : s_block_inds)
-        s_rows.append(py::make_tuple(x, x));
-    return { wrap(make_data(a->dtype, a_data->device, std::move(u_blocks), mk(u_block_inds))),
-             wrap(make_data(
-               dtype::to_real(a->dtype), a_data->device, std::move(s_blocks), mk(s_rows))),
-             wrap(make_data(a->dtype, a_data->device, std::move(vh_blocks), mk(vh_block_inds))) };
+    BlockInds u_bi = u_rows.empty() ? zeros_i64(0, 2) : block_inds_from_rows(u_rows);
+    BlockInds s_bi = s_rows.empty() ? zeros_i64(0, 2) : block_inds_from_rows(s_rows);
+    BlockInds vh_bi = vh_rows.empty() ? zeros_i64(0, 2) : block_inds_from_rows(vh_rows);
+    return { wrap(make_data(a->dtype, a_data->device, std::move(u_blocks), u_bi)),
+             wrap(make_data(dtype::to_real(a->dtype), a_data->device, std::move(s_blocks), s_bi)),
+             wrap(make_data(a->dtype, a_data->device, std::move(vh_blocks), vh_bi)) };
 }
 
 std::tuple<TensorBackend::DataPtr, ElementarySpace::Ptr, float64, float64>
@@ -2709,87 +2827,69 @@ FusionTreeBackend::truncate_singular_values(DiagonalTensorCPtr S,
     // ---
     // Port of Python FusionTreeBackend.truncate_singular_values — builds a dense
     // S array from block multiplicities/qdims (works when can_be_dropped is False).
+    if (custom_basis_perm_of(*S->leg()).has_value())
+        throw NotImplemented("truncate_singular_values with basis_perm");
+
     auto S_data = data_from_tensor(S);
-    auto domain = py::cast(S->domain);
-    auto mults = domain.attr("multiplicities").cast<std::vector<int64>>();
-    auto qdims_dom = domain.attr("sector_qdims").cast<std::vector<float64>>();
+    auto domain = S->domain;
+    auto const& mults = domain->multiplicities;
+    auto const& qdims_dom = domain->sector_qdims;
     int64 num_singular_values = 0;
     for (auto m : mults)
         num_singular_values += m;
-    Dtype S_dtype = S->dtype;
-    // Allocate via BlockBackend then to_numpy (no direct numpy import in this TU).
-    auto S_block = block_backend->zeros({ num_singular_values }, S_dtype);
-    py::array S_np = block_backend->to_numpy(S_block).cast<py::array>();
-    py::array_t<float64> qdims_arr(num_singular_values);
-    py::array qdims = qdims_arr;
-    py::list slices;
+    auto S_block = block_backend->zeros({ num_singular_values }, S->dtype);
+    std::vector<float64> qdims_vec;
+    qdims_vec.reserve(static_cast<std::size_t>(num_singular_values));
     int64 stop = 0;
     int64 i = 0;
     auto const& bi = S_data->block_inds;
-    int64 S_num_blocks = static_cast<int64>(bi.nrows());
+    int64 const S_num_blocks = static_cast<int64>(bi.nrows());
     for (std::size_t j = 0; j < mults.size(); ++j) {
-        int64 start = stop;
+        int64 const start = stop;
         stop += mults[j];
-        py::slice slc(start, stop, 1);
-        slices.append(slc);
         if (i < S_num_blocks && bi(static_cast<std::size_t>(i), 0) == static_cast<int64>(j)) {
-            S_np.attr("__setitem__")(
-              slc, block_backend->to_numpy(S_data->blocks[static_cast<std::size_t>(i)]));
+            b_set(S_block, { slice_of(start, stop) }, S_data->blocks[static_cast<std::size_t>(i)]);
             ++i;
         }
-        qdims.attr("__setitem__")(slc, qdims_dom[j]);
+        for (int64 k = 0; k < mults[j]; ++k)
+            qdims_vec.push_back(qdims_dom[j]);
     }
-    auto [keep, err, new_norm] = _truncate_singular_values_selection(
-      S_np, qdims, chi_max, chi_min, degeneracy_tol, trunc_cut, svd_min, minimize_error);
+    auto [keep, err, new_norm] =
+      _truncate_singular_values_selection(block_backend->block_to_float64_vector(S_block),
+                                          qdims_vec,
+                                          chi_max,
+                                          chi_min,
+                                          degeneracy_tol,
+                                          trunc_cut,
+                                          svd_min,
+                                          minimize_error);
 
-    if (!py::cast(S->leg()).attr("_basis_perm").is_none())
-        throw NotImplemented("truncate_singular_values with basis_perm");
-
-    py::list large_leg_block_inds;
-    std::vector<BlockBackend::BlockPtr> mask_blocks;
-    py::list small_leg_sectors;
-    py::list small_leg_multiplicities;
-    auto sector_decomp = domain.attr("sector_decomposition");
-    for (py::ssize_t j = 0; j < py::len(slices); ++j) {
-        py::object slc = slices[j];
-        py::array block = keep.attr("__getitem__")(slc).cast<py::array>();
-        auto keep_block = block_backend->block_from_numpy(block);
+    MaskPieces m;
+    stop = 0;
+    for (std::size_t j = 0; j < mults.size(); ++j) {
+        int64 const start = stop;
+        stop += mults[j];
+        std::vector<bool> slice_keep(keep.begin() + start, keep.begin() + stop);
+        auto keep_block =
+          block_backend->block_from_bool_vector(slice_keep, block_backend->get_device(S_block));
         if (!block_backend->any(keep_block))
             continue;
-        large_leg_block_inds.append(j);
-        mask_blocks.push_back(keep_block);
-        small_leg_sectors.append(sector_decomp.attr("__getitem__")(j));
-        small_leg_multiplicities.append(block_backend->sum_all(keep_block).as_int64());
+        int64 mult = block_backend->sum_all(keep_block).as_int64();
+        // TensorProduct domains may not populate ``slices``; the dense S layout already
+        // tracks the multiplicity window as ``[start, stop)``.
+        std::array<int64, 2> const slc{ start, stop };
+        m.add(*block_backend,
+              std::move(keep_block),
+              mult,
+              static_cast<int64>(j),
+              domain->sector_decomposition[j],
+              std::nullopt,
+              slc);
     }
-    BlockInds mask_block_inds;
-    ElementarySpace::Ptr small_leg;
-    bool is_dual = py::cast(S->leg()).attr("is_dual").cast<bool>();
-    auto sym = py::cast(S->symmetry).cast<Symmetry::Ptr>();
-    if (mask_blocks.empty()) {
-        mask_block_inds = zeros_i64(0, 2);
-        small_leg = ElementarySpace::from_sector_decomposition(
-          sym, sym->empty_sector_array, std::vector<int64>{}, is_dual);
-    } else {
-        std::vector<int64> small_arange(static_cast<std::size_t>(py::len(small_leg_sectors)));
-        std::iota(small_arange.begin(), small_arange.end(), 0);
-        std::vector<int64> large_vec;
-        large_vec.reserve(static_cast<std::size_t>(py::len(large_leg_block_inds)));
-        for (py::handle h : large_leg_block_inds)
-            large_vec.push_back(h.cast<int64>());
-        mask_block_inds =
-          BlockInds::column_stack(std::vector<std::span<const int64>>{ small_arange, large_vec });
-        SectorArray sectors = as_sector_array_from_list(py::list(small_leg_sectors));
-        std::vector<int64> mults_out;
-        for (py::handle h : small_leg_multiplicities)
-            mults_out.push_back(h.cast<int64>());
-        small_leg =
-          ElementarySpace::from_sector_decomposition(sym, std::move(sectors), mults_out, is_dual);
-    }
-    // Clear basis_perm like Python (new SVD legs should not carry one).
-    py::cast(small_leg).attr("_basis_perm") = py::none();
-    py::cast(small_leg).attr("_inverse_basis_perm") = py::none();
-    auto mask_data =
-      make_data(Dtype::Bool, S_data->device, std::move(mask_blocks), mask_block_inds, true);
+    bool const is_dual = space_is_dual(*S->leg());
+    // sectors are ``S.domain.sector_decomposition`` (TP order), not defining sectors.
+    auto [mask_data, small_leg] =
+      finish_mask(std::move(m), S->symmetry, is_dual, false, S_data->device, false);
     return { wrap(mask_data), small_leg, err, new_norm };
 }
 
@@ -2849,24 +2949,18 @@ FusionTreeBackend::_mask_contract(TensorCPtr tensor, MaskCPtr mask, int64 leg_id
     TensorProduct::Ptr domain;
     TensorProduct::Ptr target_space;
     TensorProduct::Ptr iter_space;
+    Leg::Ptr const new_leg = large_leg ? mask->small_leg() : mask->large_leg();
     if (in_domain) {
-        codomain = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
-        auto spaces = codomain->factors;
-        (void)spaces;
-        domain = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
-        // build target domain with swapped leg — use Python TensorProduct for now
-        py::list sp = py::cast(tensor->domain).attr("factors");
-        sp[co_domain_idx] = large_leg ? py::cast(mask->small_leg()) : py::cast(mask->large_leg());
-        target_space = domain = py::cast<TensorProduct::Ptr>(
-          py::type::of<TensorProduct>()(sp, py::arg("symmetry") = py::cast(tensor->symmetry)));
-        iter_space = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
+        codomain = tensor->codomain;
+        domain = tensor->domain;
+        target_space = domain =
+          tensor_product_with_replaced_factor(tensor->domain, co_domain_idx, new_leg);
+        iter_space = tensor->domain;
     } else {
-        domain = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
-        py::list sp = py::cast(tensor->codomain).attr("factors");
-        sp[co_domain_idx] = large_leg ? py::cast(mask->small_leg()) : py::cast(mask->large_leg());
-        target_space = codomain = py::cast<TensorProduct::Ptr>(
-          py::type::of<TensorProduct>()(sp, py::arg("symmetry") = py::cast(tensor->symmetry)));
-        iter_space = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
+        domain = tensor->domain;
+        target_space = codomain =
+          tensor_product_with_replaced_factor(tensor->codomain, co_domain_idx, new_leg);
+        iter_space = tensor->codomain;
     }
     // pipes on the other legs are fine; the data is organized w.r.t. the flat legs
     auto const masked_flat_idcs = iter_space->flat_leg_idcs(co_domain_idx);
@@ -2878,15 +2972,8 @@ FusionTreeBackend::_mask_contract(TensorCPtr tensor, MaskCPtr mask, int64 leg_id
     auto t_data = data_from_tensor(tensor);
     auto m_data = data_from_tensor(mask);
     int64 in_domain_int = in_domain ? 1 : 0;
-    py::list coupled;
     auto const& t_bi = t_data->block_inds;
-    for (std::size_t i = 0; i < t_bi.nrows(); ++i)
-        coupled.append(
-          py::cast(tensor->domain).attr("sector_decomposition").attr("__getitem__")(t_bi(i, 1)));
-    SectorArray coupled_arr =
-      coupled.size() > 0
-        ? as_sector_array_from_list(py::list(coupled))
-        : py::cast(tensor->symmetry).attr("empty_sector_array").cast<SectorArray>();
+    SectorArray coupled_arr = coupled_sectors_from_domain_rows(tensor->domain, t_bi);
     bool same_decomp =
       iter_space->sector_decomposition.size() == target_space->sector_decomposition.size();
     std::vector<BlockBackend::BlockPtr> res_blocks;
@@ -2909,26 +2996,22 @@ FusionTreeBackend::_mask_contract(TensorCPtr tensor, MaskCPtr mask, int64 leg_id
     for (auto const& fb : flat_iter_space->iter_forest_blocks(coupled_arr)) {
         auto unc = fb.uncoupled;
         auto dom_idx_mask =
-          py::cast(mask->domain)
-            .attr("sector_decomposition_where")(py::cast(unc[static_cast<std::size_t>(flat_idx)]));
-        if (dom_idx_mask.is_none())
+          mask->domain->sector_decomposition_where(unc[static_cast<std::size_t>(flat_idx)]);
+        if (!dom_idx_mask.has_value())
             continue;
-        auto j = m_data->block_ind_from_domain_sector_ind(dom_idx_mask.cast<int64>());
+        auto j = m_data->block_ind_from_domain_sector_ind(*dom_idx_mask);
         if (!j.has_value())
             continue;
-        auto block_slice = in_domain
-                             ? b_get(t_data->blocks[static_cast<std::size_t>(fb.coupled_idx)],
-                                     py::make_tuple(py::slice(std::nullopt, std::nullopt, 1),
-                                                    slice_from_index_slice(fb.slice)))
-                             : b_get(t_data->blocks[static_cast<std::size_t>(fb.coupled_idx)],
-                                     py::make_tuple(slice_from_index_slice(fb.slice),
-                                                    py::slice(std::nullopt, std::nullopt, 1)));
+        auto block_slice =
+          in_domain ? b_get(t_data->blocks[static_cast<std::size_t>(fb.coupled_idx)],
+                            BlockIndexVec{ axis_all(), axis_slice_from_index_slice(fb.slice) })
+                    : b_get(t_data->blocks[static_cast<std::size_t>(fb.coupled_idx)],
+                            BlockIndexVec{ axis_slice_from_index_slice(fb.slice), axis_all() });
         std::vector<int64> intermediate_shape;
         intermediate_shape.reserve(unc.size() + 1);
         for (std::size_t li = 0; li < unc.size(); ++li)
-            intermediate_shape.push_back(py::cast(flat_legs[li])
-                                           .attr("sector_multiplicity")(py::cast(unc[li]))
-                                           .cast<int64>());
+            intermediate_shape.push_back(
+              sector_multiplicity_on_space(*as_space(flat_legs[li]), unc[li]));
         std::vector<int64> final_shape;
         if (in_domain) {
             intermediate_shape.insert(intermediate_shape.begin(), -1);
@@ -2950,13 +3033,11 @@ FusionTreeBackend::_mask_contract(TensorCPtr tensor, MaskCPtr mask, int64 leg_id
           unc, coupled_arr[static_cast<std::size_t>(fb.coupled_idx)]);
         if (in_domain)
             b_set(res_blocks[static_cast<std::size_t>(fb.coupled_idx)],
-                  py::make_tuple(py::slice(std::nullopt, std::nullopt, 1),
-                                 slice_from_index_slice(new_slc)),
+                  BlockIndexVec{ axis_all(), axis_slice_from_index_slice(new_slc) },
                   block_slice);
         else
             b_set(res_blocks[static_cast<std::size_t>(fb.coupled_idx)],
-                  py::make_tuple(slice_from_index_slice(new_slc),
-                                 py::slice(std::nullopt, std::nullopt, 1)),
+                  BlockIndexVec{ axis_slice_from_index_slice(new_slc), axis_all() },
                   block_slice);
     }
     auto res =
@@ -2998,9 +3079,9 @@ tree_block_iter(
                 for (auto const& alpha_tree : alpha_iter.all_trees()) {
                     i2 = i2_forest;
                     for (auto const& beta_tree : beta_iter.all_trees()) {
-                        py::slice idx1(i1, i1 + tree_block_height, 1);
-                        py::slice idx2(i2, i2 + tree_block_width, 1);
-                        fn(alpha_tree, beta_tree, b_get(block, py::make_tuple(idx1, idx2)));
+                        AxisSlice idx1{ i1, i1 + tree_block_height, std::nullopt };
+                        AxisSlice idx2{ i2, i2 + tree_block_width, std::nullopt };
+                        fn(alpha_tree, beta_tree, b_get(block, BlockIndexVec{ idx1, idx2 }));
                         i2 += tree_block_width;
                     }
                     i1 += tree_block_height;
@@ -3075,12 +3156,8 @@ FusionTreeBackend::outer(SymmetricTensorCPtr a, SymmetricTensorCPtr b)
     // axes of new_tree_block after outer: (a.codomain, a.domain, b.codomain, b.domain)
     // ---
     auto a_data = data_from_tensor(a);
-    auto new_codomain =
-      TensorProduct::from_partial_products({ py::cast(a->codomain).cast<TensorProduct::Ptr>(),
-                                             py::cast(b->codomain).cast<TensorProduct::Ptr>() });
-    auto new_domain =
-      TensorProduct::from_partial_products({ py::cast(a->domain).cast<TensorProduct::Ptr>(),
-                                             py::cast(b->domain).cast<TensorProduct::Ptr>() });
+    auto new_codomain = TensorProduct::from_partial_products({ a->codomain, b->codomain });
+    auto new_domain = TensorProduct::from_partial_products({ a->domain, b->domain });
     Dtype dtype = dtype::common({ a->dtype, b->dtype });
     auto new_data = unwrap(zero_data(new_codomain, new_domain, dtype, a_data->device, true));
     tree_block_iter(
@@ -3112,11 +3189,11 @@ FusionTreeBackend::outer(SymmetricTensorCPtr a, SymmetricTensorCPtr b)
                         auto factor =
                           block_backend->as_scalar(std::conj(codom_amp) * dom_amp, dtype);
                         auto cur = b_get(new_data->blocks[static_cast<std::size_t>(*block_idx)],
-                                         py::make_tuple(slice_from_index_slice(codom_slc),
-                                                        slice_from_index_slice(dom_slc)));
+                                         BlockIndexVec{ axis_slice_from_index_slice(codom_slc),
+                                                        axis_slice_from_index_slice(dom_slc) });
                         b_set(new_data->blocks[static_cast<std::size_t>(*block_idx)],
-                              py::make_tuple(slice_from_index_slice(codom_slc),
-                                             slice_from_index_slice(dom_slc)),
+                              BlockIndexVec{ axis_slice_from_index_slice(codom_slc),
+                                             axis_slice_from_index_slice(dom_slc) },
                               (*cur) + (*block_backend->mul(factor, new_tree_block)));
                     }
                 }
@@ -3154,16 +3231,12 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
     if (a_data->blocks.empty() || b_data->blocks.empty())
         return wrap(make_data(dtype, a_data->device, {}, zeros_i64(0, 2), true));
 
-    SectorArray eff_sectors =
-      SectorArray::empty(py::cast(b->symmetry).cast<Symmetry::Ptr>()->sector_ind_len);
+    SectorArray eff_sectors = SectorArray::empty(b->symmetry->sector_ind_len);
     auto const& b_bi = b_data->block_inds;
     for (std::size_t r = 0; r < b_bi.nrows(); ++r)
-        eff_sectors.push_back(py::cast(b->domain)
-                                .attr("sector_decomposition")
-                                .attr("__getitem__")(b_bi(r, 1))
-                                .cast<Sector>());
-    auto eff_space = ElementarySpace::from_defining_sectors(
-      py::cast(b->symmetry).cast<Symmetry::Ptr>(), eff_sectors);
+        eff_sectors.push_back(
+          b->domain->sector_decomposition[static_cast<std::size_t>(b_bi(r, 1))]);
+    auto eff_space = ElementarySpace::from_defining_sectors(b->symmetry, eff_sectors);
 
     bool in_domain;
     int64 num_contr_legs;
@@ -3177,33 +3250,29 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
         in_domain = false;
         num_contr_legs = b->num_domain_legs();
         leg_idx = a_first_leg;
-        old_space = py::cast(a->codomain).cast<TensorProduct::Ptr>();
+        old_space = a->codomain;
         new_space = new_codomain;
-        py::list factors;
-        auto cod = py::cast(a->codomain);
+        std::vector<Leg::Ptr> factors;
         for (int64 i = 0; i < a_first_leg; ++i)
-            factors.append(cod.attr("__getitem__")(i));
-        factors.append(py::cast(eff_space));
+            factors.push_back(a->codomain->factors[static_cast<std::size_t>(i)]);
+        factors.push_back(eff_space);
         for (int64 i = a_first_leg + num_contr_legs; i < a_num_cod; ++i)
-            factors.append(cod.attr("__getitem__")(i));
-        iter_space = std::make_shared<TensorProduct>(factors.cast<std::vector<Leg::Ptr>>(),
-                                                     py::cast(a->symmetry).cast<Symmetry::Ptr>());
+            factors.push_back(a->codomain->factors[static_cast<std::size_t>(i)]);
+        iter_space = std::make_shared<TensorProduct>(std::move(factors), a->symmetry);
     } else {
         in_domain = true;
         num_contr_legs = b->num_codomain_legs();
         leg_idx = a_num_legs - a_first_leg - num_contr_legs;
-        old_space = py::cast(a->domain).cast<TensorProduct::Ptr>();
+        old_space = a->domain;
         new_space = new_domain;
-        py::list factors;
-        auto dom = py::cast(a->domain);
-        int64 n_dom = dom.attr("num_factors").cast<int64>();
+        std::vector<Leg::Ptr> factors;
+        int64 const n_dom = a->domain->num_factors;
         for (int64 i = 0; i < leg_idx; ++i)
-            factors.append(dom.attr("__getitem__")(i));
-        factors.append(py::cast(eff_space));
+            factors.push_back(a->domain->factors[static_cast<std::size_t>(i)]);
+        factors.push_back(eff_space);
         for (int64 i = leg_idx + num_contr_legs; i < n_dom; ++i)
-            factors.append(dom.attr("__getitem__")(i));
-        iter_space = std::make_shared<TensorProduct>(factors.cast<std::vector<Leg::Ptr>>(),
-                                                     py::cast(a->symmetry).cast<Symmetry::Ptr>());
+            factors.push_back(a->domain->factors[static_cast<std::size_t>(i)]);
+        iter_space = std::make_shared<TensorProduct>(std::move(factors), a->symmetry);
     }
 
     // `leg_idx` counts the factors of the (co)domain, but the fusion trees run over the flat legs
@@ -3211,7 +3280,7 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
     int64 flat_leg_idx = 0;
     for (int64 i = 0; i < leg_idx; ++i)
         flat_leg_idx += iter_space->factors[static_cast<std::size_t>(i)].num_flat_legs();
-    py::list new_block_inds_rows;
+    std::vector<std::vector<int64>> new_block_inds_rows;
     std::vector<BlockBackend::BlockPtr> new_blocks;
     // Python builds a cache keyed by ``vertex_labels``, but the key expression is a generator
     // object so lookups never hit and insert_at is always recomputed. Caching by vertex labels
@@ -3220,8 +3289,7 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
     auto const& a_bi = a_data->block_inds;
     for (std::size_t block_ind = 0; block_ind < a_bi.nrows(); ++block_ind) {
         int64 i = a_bi(block_ind, 0);
-        Sector coupled =
-          py::cast(a->codomain).attr("sector_decomposition").attr("__getitem__")(i).cast<Sector>();
+        Sector coupled = a->codomain->sector_decomposition[static_cast<std::size_t>(i)];
         auto new_i = new_codomain->sector_decomposition_where(coupled);
         auto new_j = new_domain->sector_decomposition_where(coupled);
         if (!new_i.has_value() || !new_j.has_value())
@@ -3230,13 +3298,12 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
           { new_codomain->multiplicities[*new_i], new_domain->multiplicities[*new_j] },
           dtype,
           a->device);
-        new_block_inds_rows.append(py::make_tuple(*new_i, *new_j));
+        new_block_inds_rows.push_back({ *new_i, *new_j });
 
         SectorArray coupled_arr = SectorArray::repeat(coupled, 1);
         for (auto const& tb : iter_space->iter_tree_blocks(coupled_arr)) {
             Sector b_coupled = tb.tree.uncoupled[static_cast<std::size_t>(flat_leg_idx)];
-            auto b_block_ind = b_data->block_ind_from_coupled(
-              b_coupled, py::cast(b->domain).cast<TensorProduct::Ptr>());
+            auto b_block_ind = b_data->block_ind_from_coupled(b_coupled, b->domain);
             if (!b_block_ind.has_value())
                 throw std::runtime_error("partial_compose: missing b block");
             std::vector<int64> dm = tb.multiplicities;
@@ -3246,8 +3313,8 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
               dm.begin() + static_cast<std::size_t>(flat_leg_idx) + 1, dm.end()));
             std::vector<int64> dummy_mults = { dm0, 1, dm2 };
 
-            auto b_cod = py::cast(b->codomain).cast<TensorProduct::Ptr>();
-            auto b_dom = py::cast(b->domain).cast<TensorProduct::Ptr>();
+            auto b_cod = b->codomain;
+            auto b_dom = b->domain;
             SectorArray b_coupled_arr = SectorArray::repeat(b_coupled, 1);
             for (auto const& xb : b_cod->iter_tree_blocks(b_coupled_arr)) {
                 FusionTreeLinearCombination X_b_trafo = tb.tree.insert_at(flat_leg_idx, xb.tree);
@@ -3256,18 +3323,17 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
                       tb.tree.insert_at(flat_leg_idx, yb.tree);
                     auto b_tree_block =
                       b_get(b_data->blocks[static_cast<std::size_t>(*b_block_ind)],
-                            py::make_tuple(slice_from_index_slice(xb.slice),
-                                           slice_from_index_slice(yb.slice)));
+                            BlockIndexVec{ axis_slice_from_index_slice(xb.slice),
+                                           axis_slice_from_index_slice(yb.slice) });
                     auto b_shape = block_backend->get_shape(b_tree_block);
 
                     if (in_domain) {
                         // Domain of a matches codomain of b → old trees from X_b, new from Y_b.
                         for (auto const& [old_tree, amp_old_tree] : X_b_trafo) {
                             auto old_slc = old_space->tree_block_slice(old_tree);
-                            auto a_forest =
-                              b_get(a_data->blocks[static_cast<std::size_t>(block_ind)],
-                                    py::make_tuple(py::slice(std::nullopt, std::nullopt, 1),
-                                                   slice_from_index_slice(old_slc)));
+                            auto a_forest = b_get(
+                              a_data->blocks[static_cast<std::size_t>(block_ind)],
+                              BlockIndexVec{ axis_all(), axis_slice_from_index_slice(old_slc) });
                             a_forest = block_backend->reshape(
                               a_forest, { -1, dummy_mults[0], b_shape[0], dummy_mults[2] });
                             for (auto const& [new_tree, amp_new_tree] : Y_b_trafo) {
@@ -3283,21 +3349,21 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
                                   amp_old_tree * std::conj(amp_new_tree), dtype);
                                 auto cur =
                                   b_get(new_block,
-                                        py::make_tuple(py::slice(std::nullopt, std::nullopt, 1),
-                                                       slice_from_index_slice(new_slc)));
+                                        BlockIndexVec{ axis_all(),
+                                                       axis_slice_from_index_slice(new_slc) });
                                 b_set(new_block,
-                                      py::make_tuple(py::slice(std::nullopt, std::nullopt, 1),
-                                                     slice_from_index_slice(new_slc)),
+                                      BlockIndexVec{ axis_all(),
+                                                     axis_slice_from_index_slice(new_slc) },
                                       (*cur) + (*block_backend->mul(factor, contribution)));
                             }
                         }
                     } else {
                         for (auto const& [old_tree, amp_old_tree] : Y_b_trafo) {
                             auto old_slc = old_space->tree_block_slice(old_tree);
-                            auto a_forest =
-                              b_get(a_data->blocks[static_cast<std::size_t>(block_ind)],
-                                    py::make_tuple(slice_from_index_slice(old_slc),
-                                                   py::slice(std::nullopt, std::nullopt, 1)));
+                            auto a_forest = b_get(
+                              a_data->blocks[static_cast<std::size_t>(block_ind)],
+                              BlockIndexVec{ axis_slice_from_index_slice(old_slc), axis_all() });
+
                             a_forest = block_backend->reshape(
                               a_forest, { dummy_mults[0], b_shape[1], dummy_mults[2], -1 });
                             for (auto const& [new_tree, amp_new_tree] : X_b_trafo) {
@@ -3313,11 +3379,13 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
                                   std::conj(amp_old_tree) * amp_new_tree, dtype);
                                 auto cur =
                                   b_get(new_block,
-                                        py::make_tuple(slice_from_index_slice(new_slc),
-                                                       py::slice(std::nullopt, std::nullopt, 1)));
+                                        BlockIndexVec{ axis_slice_from_index_slice(new_slc),
+                                                       axis_all() });
+
                                 b_set(new_block,
-                                      py::make_tuple(slice_from_index_slice(new_slc),
-                                                     py::slice(std::nullopt, std::nullopt, 1)),
+                                      BlockIndexVec{ axis_slice_from_index_slice(new_slc),
+                                                     axis_all() },
+
                                       (*cur) + (*block_backend->mul(factor, contribution)));
                             }
                         }
@@ -3328,18 +3396,8 @@ FusionTreeBackend::partial_compose(SymmetricTensorCPtr a,
         new_blocks.push_back(new_block);
     }
 
-    BlockInds block_inds;
-    if (new_block_inds_rows.size() > 0) {
-        std::vector<std::vector<int64>> rows;
-        rows.reserve(static_cast<std::size_t>(new_block_inds_rows.size()));
-        for (py::handle h : new_block_inds_rows) {
-            auto t = h.cast<py::tuple>();
-            rows.push_back({ t[0].cast<int64>(), t[1].cast<int64>() });
-        }
-        block_inds = BlockInds::from_rows(rows);
-    } else {
-        block_inds = zeros_i64(0, 2);
-    }
+    BlockInds block_inds =
+      new_block_inds_rows.empty() ? zeros_i64(0, 2) : BlockInds::from_rows(new_block_inds_rows);
     auto res = make_data(dtype, a_data->device, std::move(new_blocks), block_inds, true);
     res->discard_zero_blocks(block_backend, get_config().fusion_tree_eps);
     return wrap(res);
@@ -3394,37 +3452,36 @@ FusionTreeBackend::partial_trace(SymmetricTensorCPtr tensor,
         if (!traced.count(n))
             remaining.push_back(n);
 
-    auto sym = py::cast(tensor->symmetry).cast<Symmetry::Ptr>();
-    auto codomain_tp = py::cast(tensor->codomain).cast<TensorProduct::Ptr>();
-    auto domain_tp = py::cast(tensor->domain).cast<TensorProduct::Ptr>();
-    py::list new_cod_factors, new_dom_factors;
+    auto sym = tensor->symmetry;
+    auto codomain_tp = tensor->codomain;
+    auto domain_tp = tensor->domain;
+    std::vector<Leg::Ptr> new_cod_factors, new_dom_factors;
     for (int64 n = 0; n < codomain_tp->num_factors; ++n) {
         if (traced.count(n))
             continue;
-        new_cod_factors.append(py::cast(tensor->codomain).attr("__getitem__")(n));
+        new_cod_factors.push_back(tensor->codomain->factors[static_cast<std::size_t>(n)]);
     }
     for (int64 n = 0; n < domain_tp->num_factors; ++n) {
         if (traced.count(N - 1 - n))
             continue;
-        new_dom_factors.append(py::cast(tensor->domain).attr("__getitem__")(n));
+        new_dom_factors.push_back(tensor->domain->factors[static_cast<std::size_t>(n)]);
     }
-    auto new_codomain =
-      std::make_shared<TensorProduct>(new_cod_factors.cast<std::vector<Leg::Ptr>>(), sym);
-    auto new_domain =
-      std::make_shared<TensorProduct>(new_dom_factors.cast<std::vector<Leg::Ptr>>(), sym);
+    auto new_codomain = std::make_shared<TensorProduct>(std::move(new_cod_factors), sym);
+    auto new_domain = std::make_shared<TensorProduct>(std::move(new_dom_factors), sym);
 
-    py::list insert_idcs;
+    std::vector<int64> insert_idcs;
+    insert_idcs.reserve(pairs.size());
     for (std::size_t i = 0; i < pairs.size(); ++i) {
         int64 pos = 0;
         for (int64 r : remaining)
             if (r < pairs[i].first)
                 ++pos;
-        insert_idcs.append(pos + 2 * static_cast<int64>(i));
+        insert_idcs.push_back(pos + 2 * static_cast<int64>(i));
     }
     std::vector<int64> idcs = remaining;
     int64 codom_count = num_codom_legs;
     for (std::size_t pi = 0; pi < pairs.size(); ++pi) {
-        int64 idx = insert_idcs[pi].cast<int64>();
+        int64 idx = insert_idcs[pi];
         idcs.insert(idcs.begin() + idx, pairs[pi].first);
         idcs.insert(idcs.begin() + idx + 1, pairs[pi].second);
         if (pairs[pi].first < num_codom_legs && pairs[pi].second >= num_codom_legs)
@@ -3467,13 +3524,13 @@ FusionTreeBackend::partial_trace(SymmetricTensorCPtr tensor,
 
     TensorProduct::Ptr codom, dom;
     if (mixes) {
-        py::list cf, df;
+        std::vector<Leg::Ptr> cf, df;
         for (int64 i : codomain_idcs)
-            cf.append(py::cast(tensor).attr("_as_codomain_leg")(i));
+            cf.push_back(tensor->_as_codomain_leg(i));
         for (int64 i : domain_idcs)
-            df.append(py::cast(tensor).attr("_as_domain_leg")(i));
-        codom = std::make_shared<TensorProduct>(cf.cast<std::vector<Leg::Ptr>>(), sym);
-        dom = std::make_shared<TensorProduct>(df.cast<std::vector<Leg::Ptr>>(), sym);
+            df.push_back(tensor->_as_domain_leg(i));
+        codom = std::make_shared<TensorProduct>(std::move(cf), sym);
+        dom = std::make_shared<TensorProduct>(std::move(df), sym);
     } else {
         codom = codomain_tp->permuted(codomain_idcs);
         std::vector<int64> dom_perm;
@@ -3490,7 +3547,7 @@ FusionTreeBackend::partial_trace(SymmetricTensorCPtr tensor,
       permute_legs(tensor, codomain_idcs, domain_idcs, codom, dom, mixes, level_vec, bend);
     auto data = unwrap(data_ptr);
 
-    py::list coupled_sectors;
+    std::vector<Sector> coupled_sectors;
     auto const& d_bi = data->block_inds;
     for (std::size_t r = 0; r < d_bi.nrows(); ++r) {
         Sector sector = dom->sector_decomposition[static_cast<std::size_t>(d_bi(r, 1))];
@@ -3498,16 +3555,14 @@ FusionTreeBackend::partial_trace(SymmetricTensorCPtr tensor,
             continue;
         if (!new_codomain->sector_decomposition_where(sector).has_value())
             continue;
-        coupled_sectors.append(py::cast(sector));
+        coupled_sectors.push_back(sector);
     }
     auto new_data = unwrap(zero_data(new_codomain, new_domain, data->dtype, data->device, true));
-    SectorArray coupled_arr = coupled_sectors.size() > 0
-                                ? as_sector_array_from_list(coupled_sectors)
-                                : sym->empty_sector_array;
+    SectorArray coupled_arr =
+      coupled_sectors.empty() ? sym->empty_sector_array : SectorArray(coupled_sectors);
 
     std::vector<std::optional<int64>> old_inds, new_inds;
-    for (py::handle h : coupled_sectors) {
-        Sector c = h.cast<Sector>();
+    for (Sector const& c : coupled_sectors) {
         old_inds.push_back(data->block_ind_from_coupled(c, dom));
         new_inds.push_back(new_data->block_ind_from_coupled(c, new_domain));
     }
@@ -3603,8 +3658,8 @@ FusionTreeBackend::partial_trace(SymmetricTensorCPtr tensor,
             auto new_dom_slc = new_domain->tree_block_slice(new_dom_tree);
 
             auto old_block = b_get(data->blocks[static_cast<std::size_t>(*old_ind)],
-                                   py::make_tuple(slice_from_index_slice(cod_tb.slice),
-                                                  slice_from_index_slice(dom_tb.slice)));
+                                   BlockIndexVec{ axis_slice_from_index_slice(cod_tb.slice),
+                                                  axis_slice_from_index_slice(dom_tb.slice) });
             old_block = block_backend->reshape(old_block, tmp_shape);
             auto contribution =
               block_backend->trace_partial(old_block, tr_idcs1, tr_idcs2, remain_idcs);
@@ -3615,11 +3670,11 @@ FusionTreeBackend::partial_trace(SymmetricTensorCPtr tensor,
               block_backend->as_scalar(factor_codom * std::conj(factor_dom), data->dtype);
             contribution = block_backend->mul(factor, contribution);
             auto cur = b_get(new_data->blocks[static_cast<std::size_t>(*new_ind)],
-                             py::make_tuple(slice_from_index_slice(new_codom_slc),
-                                            slice_from_index_slice(new_dom_slc)));
+                             BlockIndexVec{ axis_slice_from_index_slice(new_codom_slc),
+                                            axis_slice_from_index_slice(new_dom_slc) });
             b_set(new_data->blocks[static_cast<std::size_t>(*new_ind)],
-                  py::make_tuple(slice_from_index_slice(new_codom_slc),
-                                 slice_from_index_slice(new_dom_slc)),
+                  BlockIndexVec{ axis_slice_from_index_slice(new_codom_slc),
+                                 axis_slice_from_index_slice(new_dom_slc) },
                   (*cur) + (*contribution));
         }
     }
@@ -3630,15 +3685,15 @@ FusionTreeBackend::partial_trace(SymmetricTensorCPtr tensor,
         // Dummy (1, 2) block_inds: FusionTreeData requires shape (N, 2); pybind
         // unwraps and returns block_backend.item for the full-trace case.
         if (new_data->blocks.empty()) {
-            auto s = block_backend->as_scalar(dtype::zero_scalar(dt), dt);
-            auto block = block_backend->as_block(s.to_numpy(), dt);
+            auto s = zero_scalar_of(*block_backend, dt);
+            auto block = scalar_block_of(*block_backend, s);
             return { wrap(make_data(dt, data->device, { block }, zeros_i64(1, 2), true)),
                      nullptr,
                      nullptr };
         }
         if (new_data->blocks.size() == 1) {
             auto s = block_backend->item(new_data->blocks[0]);
-            auto block = block_backend->as_block(s.to_numpy(), dt);
+            auto block = scalar_block_of(*block_backend, s);
             return { wrap(make_data(dt, data->device, { block }, zeros_i64(1, 2), true)),
                      nullptr,
                      nullptr };
@@ -3664,7 +3719,7 @@ FusionTreeBackend::from_tree_pairs(
     // ---
     int64 J = codomain->num_flat_legs();
     int64 K = domain->num_flat_legs();
-    py::list block_inds_rows;
+    std::vector<std::vector<int64>> block_inds_rows;
     std::vector<BlockBackend::BlockPtr> blocks;
     std::set<std::pair<FusionTree, FusionTree>> pairs_done;
     SectorArray::iter_common_sorted(
@@ -3701,8 +3756,8 @@ FusionTreeBackend::from_tree_pairs(
                   tree_block = block_backend->reshape(
                     tree_block, { prod_int(xb.multiplicities), prod_int(yb.multiplicities) });
                   b_set(block,
-                        py::make_tuple(slice_from_index_slice(xb.slice),
-                                       slice_from_index_slice(yb.slice)),
+                        BlockIndexVec{ axis_slice_from_index_slice(xb.slice),
+                                       axis_slice_from_index_slice(yb.slice) },
                         tree_block);
                   is_zero_block = false;
                   pairs_done.insert(pr);
@@ -3710,24 +3765,14 @@ FusionTreeBackend::from_tree_pairs(
           }
           if (is_zero_block)
               return;
-          block_inds_rows.append(py::make_tuple(i, j));
+          block_inds_rows.push_back({ i, j });
           blocks.push_back(block);
       });
     for (auto const& kv : trees)
         if (!pairs_done.count(kv.first))
             throw std::runtime_error("from_tree_pairs: uncovered tree pair");
-    BlockInds block_inds;
-    if (block_inds_rows.size() > 0) {
-        std::vector<std::vector<int64>> rows;
-        rows.reserve(static_cast<std::size_t>(block_inds_rows.size()));
-        for (py::handle h : block_inds_rows) {
-            auto t = h.cast<py::tuple>();
-            rows.push_back({ t[0].cast<int64>(), t[1].cast<int64>() });
-        }
-        block_inds = BlockInds::from_rows(rows);
-    } else {
-        block_inds = zeros_i64(0, 2);
-    }
+    BlockInds block_inds =
+      block_inds_rows.empty() ? zeros_i64(0, 2) : BlockInds::from_rows(block_inds_rows);
     return wrap(make_data(dtype, std::move(device), std::move(blocks), block_inds, true));
 }
 
@@ -3740,7 +3785,7 @@ FusionTreeBackend::get_element(SymmetricTensorCPtr a, std::vector<int64> idcs)
     // reshape to [(a1,m1),...,(aJ,mJ), (b1,n1),...,(bK,nK)]
     // ---
     warn("Accessing individual entries in the FusionTreeBackend is comparably expensive.");
-    py::list flat_idcs;
+    std::vector<int64> flat_idcs;
     auto legs = a->legs();
     for (std::size_t li = 0; li < legs.size(); ++li) {
         std::vector<int64> dims;
@@ -3748,57 +3793,46 @@ FusionTreeBackend::get_element(SymmetricTensorCPtr a, std::vector<int64> idcs)
             dims.push_back(static_cast<int64>(fl.dim()));
         auto strides = make_stride(dims, /*cstyle=*/true);
         int64 rem = idcs[li];
-        std::vector<int64> unr(dims.size());
-        for (std::size_t a = 0; a < dims.size(); ++a) {
-            unr[a] = rem / strides[a];
-            rem %= strides[a];
+        for (std::size_t ax = 0; ax < dims.size(); ++ax) {
+            flat_idcs.push_back(rem / strides[ax]);
+            rem %= strides[ax];
         }
-        for (int64 u : unr)
-            flat_idcs.append(u);
     }
     int64 num_cod_legs = a->num_codomain_flat_legs();
     int64 num_legs = a->num_flat_legs();
-    py::list a_legs;
+    std::vector<Leg::Ptr> a_legs;
     for (auto const& l : a->codomain->flat_legs())
-        a_legs.append(py::cast(l));
+        a_legs.push_back(l);
     for (auto const& l : a->domain->flat_legs())
-        a_legs.append(py::cast(l));
-    py::list rev_domain;
-    for (py::ssize_t i = py::len(flat_idcs) - 1; i >= num_cod_legs; --i)
-        rev_domain.append(flat_idcs[i]);
-    py::list flat_ordered;
-    for (py::ssize_t i = 0; i < num_cod_legs; ++i)
-        flat_ordered.append(flat_idcs[i]);
-    for (py::handle h : rev_domain)
-        flat_ordered.append(h);
-    py::list rows;
+        a_legs.push_back(l);
+    std::vector<int64> flat_ordered;
+    flat_ordered.reserve(a_legs.size());
+    for (int64 i = 0; i < num_cod_legs; ++i)
+        flat_ordered.push_back(flat_idcs[static_cast<std::size_t>(i)]);
+    for (std::size_t i = flat_idcs.size(); i > static_cast<std::size_t>(num_cod_legs); --i)
+        flat_ordered.push_back(flat_idcs[i - 1]);
     std::vector<std::vector<int64>> pairs;
-    pairs.reserve(static_cast<std::size_t>(py::len(a_legs)));
-    for (py::ssize_t i = 0; i < py::len(a_legs); ++i) {
-        auto es = a_legs[i].cast<ElementarySpace::Ptr>();
-        if (!es) {
-            throw std::invalid_argument("get_element: expected ElementarySpace flat legs");
-        }
-        auto [b, w] = es->parse_index(flat_ordered[i].cast<int64>());
+    pairs.reserve(a_legs.size());
+    for (std::size_t i = 0; i < a_legs.size(); ++i) {
+        // Use parse_leg_index (as_elementary_space), not as_ElementarySpace(): the latter
+        // defaults is_dual=false and flips dual legs, yielding the wrong sector slices.
+        auto [b, w] = parse_leg_index(a_legs[i], flat_ordered[i]);
         pairs.push_back({ b, w });
     }
     BlockInds pos = BlockInds::from_rows(pairs);
-    py::list uncoupled_list;
+    SectorArray uncoupled = SectorArray::empty(a->symmetry->sector_ind_len);
     for (std::size_t i = 0; i < pairs.size(); ++i)
-        uncoupled_list.append(a_legs[static_cast<py::ssize_t>(i)]
-                                .attr("sector_decomposition")
-                                .attr("__getitem__")(pos(i, 0)));
-    SectorArray uncoupled = as_sector_array_from_list(uncoupled_list);
+        uncoupled.push_back(
+          as_space(a_legs[i])->sector_decomposition[static_cast<std::size_t>(pos(i, 0))]);
     SectorArray codom_uncoupled = uncoupled.slice(0, static_cast<std::size_t>(num_cod_legs));
     SectorArray dom_uncoupled =
       uncoupled.slice(static_cast<std::size_t>(num_cod_legs), uncoupled.size());
     std::vector<int64> mults, dims_vec;
     for (std::size_t i = 0; i < pairs.size(); ++i) {
         int64 si = pos(i, 0);
-        mults.push_back(
-          mults_of(a_legs[static_cast<py::ssize_t>(i)])[static_cast<std::size_t>(si)]);
+        mults.push_back(mults_of(a_legs[i])[static_cast<std::size_t>(si)]);
     }
-    auto sym = py::cast(a->symmetry).cast<Symmetry::Ptr>();
+    auto sym = a->symmetry;
     auto batch_dims = sym->batch_sector_dim(uncoupled);
     std::vector<int64> codom_dims(batch_dims.begin(), batch_dims.begin() + num_cod_legs);
     std::vector<int64> dom_dims(batch_dims.begin() + num_cod_legs, batch_dims.end());
@@ -3811,8 +3845,8 @@ FusionTreeBackend::get_element(SymmetricTensorCPtr a, std::vector<int64> idcs)
     Dtype dt =
       dtype::common({ a_data->dtype, sym->fusion_tensor_dtype.value_or(Dtype::Complex128) });
     auto forest_block = block_backend->zeros(shape, dt, a->device);
-    auto codomain = py::cast(a->codomain).cast<TensorProduct::Ptr>();
-    auto domain = py::cast(a->domain).cast<TensorProduct::Ptr>();
+    auto codomain = a->codomain;
+    auto domain = a->domain;
     int64 tree_block_height = codomain->tree_block_size(codom_uncoupled);
     int64 tree_block_width = domain->tree_block_size(dom_uncoupled);
     auto const& bi = a_data->block_inds;
@@ -3827,8 +3861,8 @@ FusionTreeBackend::get_element(SymmetricTensorCPtr a, std::vector<int64> idcs)
                                          codomain,
                                          domain,
                                          coupled,
-                                         py::cast(codom_uncoupled),
-                                         py::cast(dom_uncoupled),
+                                         codom_uncoupled,
+                                         dom_uncoupled,
                                          codom_dims,
                                          dom_dims,
                                          tree_block_width,
@@ -3855,7 +3889,7 @@ FusionTreeBackend::get_element(SymmetricTensorCPtr a, std::vector<int64> idcs)
 }
 
 TensorBackend::DataPtr
-FusionTreeBackend::from_grid(std::vector<std::vector<py::object>> grid,
+FusionTreeBackend::from_grid(std::vector<std::vector<TensorCPtr>> grid,
                              TensorProduct::Ptr new_codomain,
                              TensorProduct::Ptr new_domain,
                              std::vector<std::vector<int64>> left_mult_slices,
@@ -3876,60 +3910,61 @@ FusionTreeBackend::from_grid(std::vector<std::vector<py::object>> grid,
     auto new_domain_legs = new_domain->flat_legs();
     for (std::size_t i = 0; i < grid.size(); ++i) {
         for (std::size_t j = 0; j < grid[i].size(); ++j) {
-            py::object op = grid[i][j];
-            if (op.is_none())
+            TensorCPtr op_t = grid[i][j];
+            if (!op_t)
                 continue;
-            auto op_t = op.cast<TensorCPtr>();
             auto op_data = data_from_tensor(op_t);
             auto op_codomain = op_t->codomain;
             auto op_domain = op_t->domain;
-            py::list op_coupled_list;
+            std::vector<Sector> op_coupled_vec;
             auto const& op_bi = op_data->block_inds;
+            op_coupled_vec.reserve(op_bi.nrows());
             for (std::size_t r = 0; r < op_bi.nrows(); ++r)
-                op_coupled_list.append(
+                op_coupled_vec.push_back(
                   op_domain->sector_decomposition[static_cast<std::size_t>(op_bi(r, 1))]);
-            SectorArray op_coupled = as_sector_array_from_list(op_coupled_list);
+            SectorArray op_coupled = op_coupled_vec.empty()
+                                       ? op_t->symmetry->empty_sector_array
+                                       : SectorArray(std::move(op_coupled_vec));
             for (auto const& fb : op_codomain->iter_forest_blocks(op_coupled)) {
                 Sector coupled = op_coupled[static_cast<std::size_t>(fb.coupled_idx)];
                 auto block_idx = data->block_ind_from_coupled(coupled, new_domain);
                 if (!block_idx.has_value())
                     continue;
                 std::vector<int64> op_codom_shape;
+                auto const op_cod_flat = op_codomain->flat_legs();
                 for (std::size_t l = 0; l < fb.uncoupled.size(); ++l)
                     op_codom_shape.push_back(
-                      py::cast(op_codomain->flat_legs()[l])
-                        .attr("sector_multiplicity")(py::cast(fb.uncoupled[l]))
-                        .cast<int64>());
+                      sector_multiplicity_on_space(*as_space(op_cod_flat[l]), fb.uncoupled[l]));
                 int64 op_codom0 = op_codom_shape.empty() ? 1 : op_codom_shape[0];
                 int64 op_codom_rest =
                   prod_int(std::vector<int64>(op_codom_shape.begin() + 1, op_codom_shape.end()));
                 op_codom_shape = { op_codom0, op_codom_rest };
                 int64 op_num_codom_trees =
                   (fb.slice.stop - fb.slice.start) / std::max<int64>(1, prod_int(op_codom_shape));
-                std::vector<int64> codom_shape = { py::cast(new_codomain_legs[0])
-                                                     .attr("sector_multiplicity")(
-                                                       py::cast(fb.uncoupled[0]))
-                                                     .cast<int64>(),
-                                                   op_codom_rest };
+                std::vector<int64> codom_shape = {
+                    sector_multiplicity_on_space(*as_space(new_codomain_legs[0]), fb.uncoupled[0]),
+                    op_codom_rest
+                };
                 auto codom_slc = new_codomain->forest_block_slice(fb.uncoupled, coupled);
                 int64 num_codom_trees =
                   (codom_slc.stop - codom_slc.start) / std::max<int64>(1, prod_int(codom_shape));
-                auto codom_leg_idx =
-                  py::cast(new_codomain_legs[0])
-                    .attr("sector_decomposition_where")(py::cast(fb.uncoupled[0]))
-                    .cast<int64>();
-                py::slice codom_leg_slc(
-                  left_mult_slices[static_cast<std::size_t>(codom_leg_idx)][i],
-                  left_mult_slices[static_cast<std::size_t>(codom_leg_idx)][i + 1],
-                  1);
+                auto codom_where =
+                  as_space(new_codomain_legs[0])->sector_decomposition_where(fb.uncoupled[0]);
+                if (!codom_where.has_value())
+                    continue;
+                int64 const codom_leg_idx = *codom_where;
+                AxisSlice codom_leg_slc{
+                    left_mult_slices[static_cast<std::size_t>(codom_leg_idx)][i],
+                    left_mult_slices[static_cast<std::size_t>(codom_leg_idx)][i + 1],
+                    std::nullopt
+                };
                 for (auto const& fb_dom :
                      op_domain->iter_forest_blocks(SectorArray::repeat(coupled, 1))) {
                     std::vector<int64> op_dom_shape;
+                    auto const op_dom_flat = op_domain->flat_legs();
                     for (std::size_t l = 0; l < fb_dom.uncoupled.size(); ++l)
-                        op_dom_shape.push_back(
-                          py::cast(op_domain->flat_legs()[l])
-                            .attr("sector_multiplicity")(py::cast(fb_dom.uncoupled[l]))
-                            .cast<int64>());
+                        op_dom_shape.push_back(sector_multiplicity_on_space(
+                          *as_space(op_dom_flat[l]), fb_dom.uncoupled[l]));
                     int64 op_dom_last = op_dom_shape.empty() ? 1 : op_dom_shape.back();
                     int64 op_dom_rest =
                       prod_int(std::vector<int64>(op_dom_shape.begin(), op_dom_shape.end() - 1));
@@ -3939,58 +3974,51 @@ FusionTreeBackend::from_grid(std::vector<std::vector<py::object>> grid,
                     std::vector<int64> op_new_shape = { op_num_codom_trees, op_codom0,
                                                         op_codom_rest,      op_num_dom_trees,
                                                         op_dom_rest,        op_dom_last };
-                    std::vector<int64> dom_shape = {
-                        op_dom_rest,
-                        py::cast(new_domain_legs.back())
-                          .attr("sector_multiplicity")(
-                            py::cast(fb_dom.uncoupled[fb_dom.uncoupled.size() - 1]))
-                          .cast<int64>()
-                    };
+                    std::size_t const dom_unc_i = fb_dom.uncoupled.size() - 1;
+                    std::vector<int64> dom_shape = { op_dom_rest,
+                                                     sector_multiplicity_on_space(
+                                                       *as_space(new_domain_legs.back()),
+                                                       fb_dom.uncoupled[dom_unc_i]) };
                     auto dom_slc = new_domain->forest_block_slice(fb_dom.uncoupled, coupled);
                     int64 num_dom_trees =
                       (dom_slc.stop - dom_slc.start) / std::max<int64>(1, prod_int(dom_shape));
                     std::vector<int64> new_shape = { num_codom_trees, codom_shape[0],
                                                      codom_shape[1],  num_dom_trees,
                                                      dom_shape[0],    dom_shape[1] };
-                    auto dom_leg_idx = py::cast(new_domain_legs.back())
-                                         .attr("sector_decomposition_where")(
-                                           py::cast(fb_dom.uncoupled[fb_dom.uncoupled.size() - 1]))
-                                         .cast<int64>();
-                    py::slice dom_leg_slc(
-                      right_mult_slices[static_cast<std::size_t>(dom_leg_idx)][j],
-                      right_mult_slices[static_cast<std::size_t>(dom_leg_idx)][j + 1],
-                      1);
+                    auto dom_where = as_space(new_domain_legs.back())
+                                       ->sector_decomposition_where(fb_dom.uncoupled[dom_unc_i]);
+                    if (!dom_where.has_value())
+                        continue;
+                    int64 const dom_leg_idx = *dom_where;
+                    AxisSlice dom_leg_slc{
+                        right_mult_slices[static_cast<std::size_t>(dom_leg_idx)][j],
+                        right_mult_slices[static_cast<std::size_t>(dom_leg_idx)][j + 1],
+                        std::nullopt
+                    };
                     auto op_block =
                       b_get(op_data->blocks[static_cast<std::size_t>(fb.coupled_idx)],
-                            py::make_tuple(slice_from_index_slice(fb.slice),
-                                           slice_from_index_slice(fb_dom.slice)));
+                            BlockIndexVec{ axis_slice_from_index_slice(fb.slice),
+                                           axis_slice_from_index_slice(fb_dom.slice) });
                     op_block = block_backend->reshape(op_block, op_new_shape);
                     auto block = block_backend->copy_block(
                       b_get(data->blocks[static_cast<std::size_t>(*block_idx)],
-                            py::make_tuple(slice_from_index_slice(codom_slc),
-                                           slice_from_index_slice(dom_slc))),
+                            BlockIndexVec{ axis_slice_from_index_slice(codom_slc),
+                                           axis_slice_from_index_slice(dom_slc) }),
                       device);
                     auto final_shape = block_backend->get_shape(block);
                     block = block_backend->reshape(block, new_shape);
-                    auto cur = b_get(block,
-                                     py::make_tuple(py::slice(0, std::nullopt, 1),
-                                                    codom_leg_slc,
-                                                    py::slice(0, std::nullopt, 1),
-                                                    py::slice(0, std::nullopt, 1),
-                                                    py::slice(0, std::nullopt, 1),
-                                                    dom_leg_slc));
-                    b_set(block,
-                          py::make_tuple(py::slice(0, std::nullopt, 1),
-                                         codom_leg_slc,
-                                         py::slice(0, std::nullopt, 1),
-                                         py::slice(0, std::nullopt, 1),
-                                         py::slice(0, std::nullopt, 1),
-                                         dom_leg_slc),
-                          (*cur) + (*op_block));
+                    AxisSlice const all_ax{ 0, std::nullopt, std::nullopt };
+                    auto cur = b_get(
+                      block,
+                      BlockIndexVec{ all_ax, codom_leg_slc, all_ax, all_ax, all_ax, dom_leg_slc });
+                    b_set(
+                      block,
+                      BlockIndexVec{ all_ax, codom_leg_slc, all_ax, all_ax, all_ax, dom_leg_slc },
+                      (*cur) + (*op_block));
                     block = block_backend->reshape(block, final_shape);
                     b_set(data->blocks[static_cast<std::size_t>(*block_idx)],
-                          py::make_tuple(slice_from_index_slice(codom_slc),
-                                         slice_from_index_slice(dom_slc)),
+                          BlockIndexVec{ axis_slice_from_index_slice(codom_slc),
+                                         axis_slice_from_index_slice(dom_slc) },
                           block);
                 }
             }
@@ -4023,7 +4051,7 @@ FusionTreeBackend::scale_axis(TensorCPtr a, DiagonalTensorCPtr b, int64 leg)
     auto const& a_bi = a_data->block_inds;
     auto b_col0 = b_data->block_inds.column(0);
     int64 num_cod = a->num_codomain_legs();
-    int64 num_dom = py::cast(a->domain).attr("num_factors").cast<int64>();
+    int64 num_dom = a->domain->num_factors;
     if ((in_domain && num_dom == 1) || (!in_domain && num_cod == 1)) {
         std::vector<std::vector<int64>> block_inds_rows;
         std::vector<BlockBackend::BlockPtr> blocks;
@@ -4049,26 +4077,26 @@ FusionTreeBackend::scale_axis(TensorCPtr a, DiagonalTensorCPtr b, int64 leg)
           block_inds_rows.empty() ? zeros_i64(0, 2) : BlockInds::from_rows(block_inds_rows);
         return wrap(make_data(dtype, a_data->device, std::move(blocks), block_inds, true));
     }
-    TensorProduct::Ptr iter_space = in_domain ? py::cast(a->domain).cast<TensorProduct::Ptr>()
-                                              : py::cast(a->codomain).cast<TensorProduct::Ptr>();
+    TensorProduct::Ptr iter_space = in_domain ? a->domain : a->codomain;
     if (a->has_pipes()) {
         co_domain_idx = iter_space->flat_leg_idcs(co_domain_idx).front();
         iter_space = flatten_pipes(iter_space);
     }
-    py::list coupled_list;
+    std::vector<Sector> coupled_vec;
+    coupled_vec.reserve(a_bi.nrows());
     for (std::size_t r = 0; r < a_bi.nrows(); ++r)
-        coupled_list.append(
-          py::cast(a->codomain).attr("sector_decomposition").attr("__getitem__")(a_bi(r, 0)));
-    SectorArray coupled_sectors = as_sector_array_from_list(coupled_list);
+        coupled_vec.push_back(
+          a->codomain->sector_decomposition[static_cast<std::size_t>(a_bi(r, 0))]);
+    SectorArray coupled_sectors =
+      coupled_vec.empty() ? a->symmetry->empty_sector_array : SectorArray(std::move(coupled_vec));
     std::vector<BlockBackend::BlockPtr> blocks;
     std::vector<std::vector<int64>> block_inds_rows;
     std::map<int64, std::size_t> ind_mapping;
     std::set<int64> domain_inds_seen;
     for (auto const& fb : iter_space->iter_forest_blocks(coupled_sectors)) {
         int64 ind = a_bi(static_cast<std::size_t>(fb.coupled_idx), 1);
-        auto ind_b =
-          b_data->block_ind_from_coupled(fb.uncoupled[static_cast<std::size_t>(co_domain_idx)],
-                                         py::cast(b->domain).cast<TensorProduct::Ptr>());
+        auto ind_b = b_data->block_ind_from_coupled(
+          fb.uncoupled[static_cast<std::size_t>(co_domain_idx)], b->domain);
         if (!ind_b.has_value())
             continue;
         if (!domain_inds_seen.count(ind)) {
@@ -4080,39 +4108,37 @@ FusionTreeBackend::scale_axis(TensorCPtr a, DiagonalTensorCPtr b, int64 leg)
               dtype));
         }
         std::vector<int64> reshape;
+        auto const scale_flat_legs = iter_space->flat_legs();
         for (std::size_t li = 0; li < fb.uncoupled.size(); ++li)
-            reshape.push_back(py::cast(iter_space->flat_legs()[li])
-                                .attr("sector_multiplicity")(py::cast(fb.uncoupled[li]))
-                                .cast<int64>());
+            reshape.push_back(
+              sector_multiplicity_on_space(*as_space(scale_flat_legs[li]), fb.uncoupled[li]));
         BlockBackend::BlockPtr forest;
         std::vector<int64> initial_shape;
-        py::object slcs0, slcs1;
+        AxisSlice slcs0, slcs1;
         if (in_domain) {
             forest = b_get(a_data->blocks[static_cast<std::size_t>(fb.coupled_idx)],
-                           py::make_tuple(py::slice(std::nullopt, std::nullopt, 1),
-                                          slice_from_index_slice(fb.slice)));
+                           BlockIndexVec{ axis_all(), axis_slice_from_index_slice(fb.slice) });
             initial_shape = block_backend->get_shape(forest);
             std::vector<int64> rshape = { initial_shape[0], -1 };
             rshape.insert(rshape.end(), reshape.begin(), reshape.end());
             forest = block_backend->reshape(forest, rshape);
-            slcs0 = py::slice(0, initial_shape[0], 1);
-            slcs1 = slice_from_index_slice(fb.slice);
+            slcs0 = AxisSlice{ 0, initial_shape[0], std::nullopt };
+            slcs1 = axis_slice_from_index_slice(fb.slice);
         } else {
             forest = b_get(a_data->blocks[static_cast<std::size_t>(fb.coupled_idx)],
-                           py::make_tuple(slice_from_index_slice(fb.slice),
-                                          py::slice(std::nullopt, std::nullopt, 1)));
+                           BlockIndexVec{ axis_slice_from_index_slice(fb.slice), axis_all() });
             initial_shape = block_backend->get_shape(forest);
             std::vector<int64> rshape = { -1 };
             rshape.insert(rshape.end(), reshape.begin(), reshape.end());
             rshape.push_back(initial_shape[1]);
             forest = block_backend->reshape(forest, rshape);
-            slcs0 = slice_from_index_slice(fb.slice);
-            slcs1 = py::slice(0, initial_shape[1], 1);
+            slcs0 = axis_slice_from_index_slice(fb.slice);
+            slcs1 = AxisSlice{ 0, initial_shape[1], std::nullopt };
         }
         forest = block_backend->scale_axis(
           forest, b_data->blocks[static_cast<std::size_t>(*ind_b)], ax_a + co_domain_idx + 1);
         forest = block_backend->reshape(forest, initial_shape);
-        b_set(blocks[ind_mapping.at(fb.coupled_idx)], py::make_tuple(slcs0, slcs1), forest);
+        b_set(blocks[ind_mapping.at(fb.coupled_idx)], BlockIndexVec{ slcs0, slcs1 }, forest);
     }
     BlockInds block_inds =
       block_inds_rows.empty() ? zeros_i64(0, 2) : BlockInds::from_rows(block_inds_rows);
@@ -4122,346 +4148,246 @@ FusionTreeBackend::scale_axis(TensorCPtr a, DiagonalTensorCPtr b, int64 leg)
 std::tuple<TensorBackend::DataPtr, ElementarySpace::Ptr>
 FusionTreeBackend::diagonal_to_mask(DiagonalTensorCPtr tens)
 {
-    // --- hints from Python FusionTreeBackend.diagonal_to_mask ---
-    // block_inds are w.r.t. TensorProducts, not the legs
-    // -> maybe need to do additional sorting if leg is dual
-    // get the defining sector
-    // ---
-    // Match Python FusionTreeBackend.diagonal_to_mask: defining sectors + ElementarySpace ctor.
     auto tens_data = data_from_tensor(tens);
-    // Keep TensorProduct alive while reading Space members (sector_decomposition is
-    // exposed via def_readwrite; chained attr() on a temporary is UAF).
-    auto codomain = py::cast(tens->codomain).cast<TensorProduct::Ptr>();
-    py::object large_leg = py::cast(tens->leg());
-    auto large_es = large_leg.cast<ElementarySpace::Ptr>();
-    bool is_dual = large_es->is_dual;
-    bool is_sorted = !is_dual;
-    bool have_basis_perm = large_es->has_custom_basis_perm();
-    py::object basis_perm =
-      have_basis_perm ? large_leg.attr("_basis_perm") : py::object(py::none());
-    std::vector<BlockBackend::BlockPtr> blocks;
-    std::vector<int64> codom_block_inds;
-    std::vector<Sector> sectors_vec;
-    std::vector<int64> multiplicities;
-    py::list basis_perm_ranks;
+    auto const& large = *tens->leg();
+    auto basis_perm = custom_basis_perm_of(large);
+    bool const is_dual = space_is_dual(large);
+    bool const is_sorted = !is_dual;
+    auto const& codom_secs = tens->codomain->sector_decomposition;
+    MaskPieces pieces;
+    std::vector<std::vector<int64>> basis_perm_ranks_per_block;
+    auto sym = tens->symmetry;
     auto const& bi = tens_data->block_inds;
-    auto sym = py::cast(tens->symmetry).cast<Symmetry::Ptr>();
-    auto const& codom_secs = codomain->sector_decomposition;
     for (std::size_t n = 0; n < bi.nrows(); ++n) {
         auto const& diag_block = tens_data->blocks[n];
         if (!block_backend->any(diag_block))
             continue;
-        int64 bii = bi(n, 0);
-        Sector coupled = codom_secs[static_cast<std::size_t>(bii)];
-        Sector defining = is_dual ? sym->dual_sector(coupled) : coupled;
-        blocks.push_back(diag_block);
-        codom_block_inds.push_back(bii);
-        sectors_vec.push_back(defining);
-        multiplicities.push_back(block_backend->sum_all(diag_block).as_int64());
-        if (have_basis_perm) {
+        int64 const bii = bi(n, 0);
+        Sector const coupled = codom_secs[static_cast<std::size_t>(bii)];
+        Sector const defining = is_dual ? sym->dual_sector(coupled) : coupled;
+        int64 const mult = block_backend->sum_all(diag_block).as_int64();
+        if (basis_perm) {
+            // ``slices`` exist only when ``can_be_dropped``; basis_perm is meaningless otherwise.
+            if (!large.slices) {
+                throw std::invalid_argument(
+                  "diagonal_to_mask: basis_perm requires large_leg.slices");
+            }
+            std::size_t slice_bi = static_cast<std::size_t>(bii);
+            if (is_dual) {
+                auto j = large.sector_decomposition_where(coupled);
+                if (!j.has_value())
+                    throw std::runtime_error("diagonal_to_mask: coupled sector not in large_leg");
+                slice_bi = static_cast<std::size_t>(*j);
+            }
+            auto const& slc = large.slices->at(slice_bi);
+            std::vector<int64> kept;
             int64 dim = sym->sector_dim(defining);
             auto tiled = block_backend->tile(diag_block, dim);
-            py::array mask = block_backend->to_numpy(tiled, py_bool_dtype());
-            int64 slice_bi = bii;
-            if (is_dual) {
-                auto j = large_leg.attr("sector_decomposition_where")(py::cast(coupled));
-                if (j.is_none())
-                    throw std::runtime_error("diagonal_to_mask: coupled sector not in large_leg");
-                slice_bi = j.cast<int64>();
-            }
-            auto slc = slice_pair(large_leg.attr("slices").attr("__getitem__")(slice_bi));
-            basis_perm_ranks.append(basis_perm.attr("__getitem__")(slc).attr("__getitem__")(mask));
+            append_basis_perm_kept_from_tile(
+              kept, *basis_perm, { slc[0], slc[1] }, *block_backend, tiled);
+            basis_perm_ranks_per_block.push_back(std::move(kept));
         }
+        pieces.blocks.push_back(diag_block);
+        pieces.large_leg_block_inds.push_back(bii);
+        pieces.sectors.push_back(defining);
+        pieces.multiplicities.push_back(mult);
     }
-    BlockInds block_inds;
-    ElementarySpace::Ptr small_leg;
-    if (blocks.empty()) {
-        block_inds = zeros_i64(0, 2);
-        small_leg = std::make_shared<ElementarySpace>(
-          sym, sym->empty_sector_array, std::vector<int64>{}, is_dual, std::nullopt);
-    } else {
-        SectorArray sectors = SectorArray::empty(sectors_vec[0].len());
-        for (auto const& s : sectors_vec)
-            sectors.push_back(s);
-        std::optional<std::vector<int64>> basis_perm_opt = std::nullopt;
-        if (!is_sorted) {
-            auto perm = sectors.lexsort_indices();
-            sectors = sectors.take(perm);
-            std::vector<int64> new_mults;
-            new_mults.reserve(multiplicities.size());
-            py::list new_ranks;
-            for (auto pi : perm) {
-                new_mults.push_back(multiplicities[pi]);
-                if (have_basis_perm)
-                    new_ranks.append(basis_perm_ranks[static_cast<py::ssize_t>(pi)]);
-            }
-            multiplicities = std::move(new_mults);
-            if (have_basis_perm)
-                basis_perm_ranks = std::move(new_ranks);
+    if (!pieces.blocks.empty() && !is_sorted) {
+        // Defining sectors must be sorted for ElementarySpace; keep blocks/bi in sync.
+        SectorArray sectors(pieces.sectors);
+        auto const perm = sectors.lexsort_indices();
+        std::vector<Sector> new_secs;
+        std::vector<int64> new_mults;
+        std::vector<BlockBackend::BlockPtr> new_blocks;
+        std::vector<int64> new_large_bi;
+        std::vector<std::vector<int64>> new_ranks;
+        new_secs.reserve(perm.size());
+        new_mults.reserve(perm.size());
+        new_blocks.reserve(perm.size());
+        new_large_bi.reserve(perm.size());
+        if (basis_perm)
+            new_ranks.reserve(perm.size());
+        for (auto pi : perm) {
+            new_secs.push_back(pieces.sectors[pi]);
+            new_mults.push_back(pieces.multiplicities[pi]);
+            new_blocks.push_back(std::move(pieces.blocks[pi]));
+            new_large_bi.push_back(pieces.large_leg_block_inds[pi]);
+            if (basis_perm)
+                new_ranks.push_back(basis_perm_ranks_per_block[pi]);
         }
-        if (have_basis_perm) {
-            auto ranked = rank_concat(basis_perm_ranks);
-            basis_perm_opt = ranked;
-        }
-        // Like Python: do not reorder blocks/codom_block_inds with the defining lexsort.
-        std::vector<int64> arange(blocks.size());
-        std::iota(arange.begin(), arange.end(), 0);
-        block_inds =
-          BlockInds::column_stack(std::vector<std::span<const int64>>{ arange, codom_block_inds });
-        small_leg = std::make_shared<ElementarySpace>(
-          sym, std::move(sectors), multiplicities, is_dual, std::move(basis_perm_opt));
+        pieces.sectors = std::move(new_secs);
+        pieces.multiplicities = std::move(new_mults);
+        pieces.blocks = std::move(new_blocks);
+        pieces.large_leg_block_inds = std::move(new_large_bi);
+        basis_perm_ranks_per_block = std::move(new_ranks);
     }
-    auto data = make_data(Dtype::Bool, tens_data->device, std::move(blocks), block_inds, true);
-    return { wrap(data), small_leg };
+    if (basis_perm) {
+        for (auto const& chunk : basis_perm_ranks_per_block)
+            pieces.basis_perm_kept.insert(
+              pieces.basis_perm_kept.end(), chunk.begin(), chunk.end());
+    }
+    auto [data, small_leg] =
+      finish_mask(std::move(pieces), sym, is_dual, basis_perm.has_value(), tens_data->device);
+    return { wrap(std::move(data)), std::move(small_leg) };
 }
 
 std::tuple<TensorBackend::DataPtr, ElementarySpace::Ptr>
 FusionTreeBackend::mask_binary_operand(MaskCPtr mask1, MaskCPtr mask2, BlockBinaryFn func)
 {
-    // --- hints from Python FusionTreeBackend.mask_binary_operand ---
-    // -> maybe need to do additional sorting and searching if leg is dual
-    // next block of mask1 to process; iterating like this only works if is_sorted.
-    // its block_ind for the large leg.
-    // do this here for both masks
-    // mask1 has no further blocks
-    // mask2 has no further blocks
-    // ---
-    py::object large_leg = py::cast(mask1->large_leg());
-    py::object basis_perm = large_leg.attr("_basis_perm");
-    bool is_sorted = !large_leg.attr("is_dual").cast<bool>();
+    auto const& large = *as_space(mask1->large_leg());
+    auto basis_perm = custom_basis_perm_of(large);
+    bool const is_sorted = !space_is_dual(large);
     auto mask1_data = data_from_tensor(mask1);
     auto mask2_data = data_from_tensor(mask2);
-    auto const& m1 = mask1_data->block_inds;
-    auto const& m2 = mask2_data->block_inds;
-    std::vector<BlockBackend::BlockPtr> blocks;
-    std::vector<int64> dom_block_inds;
-    std::vector<Sector> sectors_vec;
-    std::vector<int64> multiplicities;
-    py::list basis_perm_ranks;
-    int64 i1 = 0, i2 = 0;
-    int64 b1_i1 = m1.nrows() == 0 ? -1 : m1(0, 1);
-    int64 b2_i2 = m2.nrows() == 0 ? -1 : m2(0, 1);
-    auto defining = large_leg.attr("defining_sectors").cast<SectorArray>();
-    auto mults = mults_of(large_leg);
-    auto sym = py::cast(mask1->symmetry).cast<Symmetry::Ptr>();
-    for (std::size_t sector_idx = 0; sector_idx < defining.size(); ++sector_idx) {
-        BlockBackend::BlockPtr block1, block2;
-        bool block1_found = false, block2_found = false;
-        if (is_sorted && static_cast<int64>(sector_idx) == b1_i1) {
-            block1 = mask1_data->blocks[static_cast<std::size_t>(i1)];
-            ++i1;
-            b1_i1 = static_cast<std::size_t>(i1) >= m1.nrows()
-                      ? -1
-                      : m1(static_cast<std::size_t>(i1), 1);
-            block1_found = true;
-        } else if (!is_sorted) {
-            Sector dual_sec = large_leg.attr("sector_decomposition")
-                                .attr("__getitem__")(sector_idx)
-                                .cast<Sector>();
-            auto dom_idx = py::cast(mask1->domain).attr("sector_decomposition_where")(dual_sec);
-            if (!dom_idx.is_none()) {
-                auto idx = mask1_data->block_ind_from_domain_sector_ind(dom_idx.cast<int64>());
-                if (idx.has_value()) {
-                    block1 = mask1_data->blocks[static_cast<std::size_t>(*idx)];
-                    block1_found = true;
-                }
-            }
-        }
-        if (!block1_found)
-            block1 = block_backend->zeros({ mults[sector_idx] }, Dtype::Bool);
-        if (is_sorted && static_cast<int64>(sector_idx) == b2_i2) {
-            block2 = mask2_data->blocks[static_cast<std::size_t>(i2)];
-            ++i2;
-            b2_i2 = static_cast<std::size_t>(i2) >= m2.nrows()
-                      ? -1
-                      : m2(static_cast<std::size_t>(i2), 1);
-            block2_found = true;
-        } else if (!is_sorted) {
-            Sector dual_sec = large_leg.attr("sector_decomposition")
-                                .attr("__getitem__")(sector_idx)
-                                .cast<Sector>();
-            auto dom_idx = py::cast(mask2->domain).attr("sector_decomposition_where")(dual_sec);
-            if (!dom_idx.is_none()) {
-                auto idx = mask2_data->block_ind_from_domain_sector_ind(dom_idx.cast<int64>());
-                if (idx.has_value()) {
-                    block2 = mask2_data->blocks[static_cast<std::size_t>(*idx)];
-                    block2_found = true;
-                }
-            }
-        }
-        if (!block2_found)
-            block2 = block_backend->zeros({ mults[sector_idx] }, Dtype::Bool);
+    MaskPieces m;
+    std::size_t i1 = 0, i2 = 0;
+    int64 b1 = mask1_data->block_inds.nrows() == 0 ? -1 : mask1_data->block_inds(0, 1);
+    int64 b2 = mask2_data->block_inds.nrows() == 0 ? -1 : mask2_data->block_inds(0, 1);
+    auto const& defining = defining_sectors_of(large);
+    for (std::size_t si = 0; si < defining.size(); ++si) {
+        BlockBackend::BlockPtr block1 = mask_block_at_sorted_sector(
+          *block_backend, mask1, *mask1_data, si, is_sorted, large, i1, b1);
+        BlockBackend::BlockPtr block2 = mask_block_at_sorted_sector(
+          *block_backend, mask2, *mask2_data, si, is_sorted, large, i2, b2);
         auto new_block = func(block1, block2);
         int64 mult = block_backend->sum_all(new_block).as_int64();
         if (mult == 0)
             continue;
-        blocks.push_back(new_block);
-        dom_block_inds.push_back(static_cast<int64>(sector_idx));
-        sectors_vec.push_back(defining[sector_idx]);
-        multiplicities.push_back(mult);
-        if (!basis_perm.is_none()) {
-            int64 dim = sym->sector_dim(defining[sector_idx]);
-            auto tiled = block_backend->tile(new_block, dim);
-            py::array mask = block_backend->to_numpy(tiled, py_bool_dtype());
-            auto slc = slice_pair(
-              large_leg.attr("slices").attr("__getitem__")(static_cast<int64>(sector_idx)));
-            basis_perm_ranks.append(basis_perm.attr("__getitem__")(slc).attr("__getitem__")(mask));
+        // ``slices`` only needed when applying basis_perm (and only exist if can_be_dropped).
+        std::array<int64, 2> slc{ 0, 0 };
+        if (basis_perm) {
+            if (!large.slices) {
+                throw std::invalid_argument(
+                  "mask_binary_operand: basis_perm requires large_leg.slices");
+            }
+            slc = large.slices->at(si);
         }
+        int64 const sec_dim = basis_perm ? mask1->symmetry->sector_dim(defining[si]) : int64{ 1 };
+        m.add(*block_backend,
+              std::move(new_block),
+              mult,
+              static_cast<int64>(si),
+              defining[si],
+              basis_perm,
+              slc,
+              sec_dim);
     }
-    SectorArray sectors = sym->empty_sector_array;
-    std::optional<std::vector<int64>> basis_perm_opt = std::nullopt;
-    BlockInds block_inds;
-    if (blocks.empty()) {
-        multiplicities.clear();
-        block_inds = zeros_i64(0, 2);
-    } else {
-        sectors = SectorArray::empty(sectors_vec[0].len());
-        for (auto const& s : sectors_vec)
-            sectors.push_back(s);
-        if (!basis_perm.is_none()) {
-            auto ranked = rank_concat(basis_perm_ranks);
-            basis_perm_opt = ranked;
-        }
-        std::vector<int64> arange(sectors.size());
-        std::iota(arange.begin(), arange.end(), 0);
-        block_inds =
-          BlockInds::column_stack(std::vector<std::span<const int64>>{ arange, dom_block_inds });
-    }
-    auto data = make_data(Dtype::Bool, mask1->device, std::move(blocks), block_inds, true);
-    auto small_leg = std::make_shared<ElementarySpace>(sym,
-                                                       std::move(sectors),
-                                                       multiplicities,
-                                                       large_leg.attr("is_dual").cast<bool>(),
-                                                       basis_perm_opt);
-    return { wrap(data), small_leg };
+    auto [data, small_leg] = finish_mask(
+      std::move(m), mask1->symmetry, space_is_dual(large), basis_perm.has_value(), mask1->device);
+    return { wrap(std::move(data)), std::move(small_leg) };
 }
 
 std::tuple<TensorBackend::DataPtr, ElementarySpace::Ptr>
 FusionTreeBackend::mask_from_block(BlockBackend::BlockPtr a, Space::Ptr large_leg)
 {
-    // --- hints from Python FusionTreeBackend.mask_from_block ---
-    // block_inds are w.r.t. TensorProducts, not the legs
-    // -> maybe need to do additional sorting and searching if leg is dual
-    // ---
-    py::object large_leg_obj = py::cast(large_leg);
-    py::object basis_perm = large_leg_obj.attr("_basis_perm");
-    bool is_sorted = !large_leg_obj.attr("is_dual").cast<bool>();
-    std::vector<BlockBackend::BlockPtr> blocks;
-    std::vector<int64> dom_block_inds;
-    std::vector<Sector> sectors_vec;
-    std::vector<int64> multiplicities;
-    py::list basis_perm_ranks;
-    auto defining = large_leg_obj.attr("defining_sectors").cast<SectorArray>();
-    auto slices = large_leg_obj.attr("slices");
-    py::object domain;
+    auto basis_perm = custom_basis_perm_of(*large_leg);
+    bool const is_sorted = !space_is_dual(*large_leg);
+    auto const& defining = defining_sectors_of(*large_leg);
+    MaskPieces m;
+    std::vector<std::vector<int64>> basis_perm_chunks;
+    TensorProduct::Ptr dual_domain;
     if (!is_sorted) {
-        auto perm = large_leg_obj.attr("sector_decomposition").attr("lexsort_indices")();
-        auto sorted_duals =
-          large_leg_obj.attr("sector_decomposition").attr("__getitem__")(perm).cast<SectorArray>();
-        auto multis = large_leg_obj.attr("multiplicities")
-                        .attr("__getitem__")(perm)
-                        .cast<std::vector<int64>>();
         auto large_es = std::dynamic_pointer_cast<ElementarySpace>(large_leg);
         if (!large_es) {
             throw std::invalid_argument("mask_from_block: large_leg must be an ElementarySpace");
         }
-        auto leg_ptr = Leg{ large_es };
-        domain = py::cast(std::make_shared<TensorProduct>(std::vector<Leg::Ptr>{ leg_ptr },
-                                                          large_leg->symmetry,
-                                                          std::move(sorted_duals),
-                                                          std::move(multis)));
+        auto [sorted_duals, perm] = large_leg->sector_decomposition.sorted();
+        std::vector<int64> multis;
+        multis.reserve(perm.size());
+        for (auto pi : perm)
+            multis.push_back(large_leg->multiplicities[pi]);
+        dual_domain = std::make_shared<TensorProduct>(
+          std::vector<Leg::Ptr>{ Leg{ large_es } }, large_leg->symmetry, sorted_duals, multis);
     }
     for (std::size_t bi_large = 0; bi_large < defining.size(); ++bi_large) {
-        auto slc = slice_pair(slices.attr("__getitem__")(static_cast<int64>(bi_large)));
-        auto block = b_get(a, slc);
+        auto block = b_get(a, slices_for_row(*large_leg, static_cast<int64>(bi_large)));
         int64 mult = block_backend->sum_all(block).as_int64();
         if (mult == 0)
             continue;
-        Sector sector = defining[bi_large];
+        Sector const sector = defining[bi_large];
         int64 bi_out = static_cast<int64>(bi_large);
         if (!is_sorted) {
-            Sector dual_sector = large_leg->symmetry->dual_sector(sector);
-            bi_out =
-              domain.attr("sector_decomposition_where")(py::cast(dual_sector)).cast<int64>();
+            auto where =
+              dual_domain->sector_decomposition_where(large_leg->symmetry->dual_sector(sector));
+            if (!where.has_value())
+                throw std::runtime_error("mask_from_block: dual sector missing in domain");
+            bi_out = *where;
         }
-        dom_block_inds.push_back(bi_out);
-        sectors_vec.push_back(sector);
         int64 dim = large_leg->symmetry->sector_dim(sector);
         int64 stop = block_backend->get_shape(block)[0] / dim;
-        blocks.push_back(b_get(block, py::slice(0, stop, 1)));
-        multiplicities.push_back(mult / dim);
-        if (!basis_perm.is_none()) {
-            py::array mask = block_backend->to_numpy(block).cast<py::array>();
-            basis_perm_ranks.append(
-              large_leg_obj.attr("basis_perm").attr("__getitem__")(slc).attr("__getitem__")(mask));
-        }
-    }
-    SectorArray sectors = large_leg->symmetry->empty_sector_array;
-    std::optional<std::vector<int64>> basis_perm_opt = std::nullopt;
-    BlockInds block_inds;
-    if (blocks.empty()) {
-        multiplicities.clear();
-        block_inds = zeros_i64(0, 2);
-    } else {
-        sectors = SectorArray::empty(sectors_vec[0].len());
-        for (auto const& s : sectors_vec)
-            sectors.push_back(s);
-        if (!basis_perm.is_none()) {
-            auto ranked = rank_concat(basis_perm_ranks);
-            basis_perm_opt = ranked;
-        }
-        if (!is_sorted) {
-            // Match Python: only reorder dom_block_inds and blocks (not sectors/multiplicities).
-            std::vector<std::size_t> perm(dom_block_inds.size());
-            std::iota(perm.begin(), perm.end(), std::size_t{ 0 });
-            std::stable_sort(perm.begin(), perm.end(), [&](std::size_t i, std::size_t j) {
-                return dom_block_inds[i] < dom_block_inds[j];
-            });
-            py::list new_dom, new_blocks;
-            for (std::size_t pi : perm) {
-                new_dom.append(dom_block_inds[pi]);
-                new_blocks.append(blocks[pi]);
+        auto mask_block = b_get(block, BlockIndexVec{ AxisSlice{ 0, stop, std::nullopt } });
+        if (basis_perm) {
+            if (!large_leg->slices) {
+                throw std::invalid_argument(
+                  "mask_from_block: basis_perm requires large_leg.slices");
             }
-            dom_block_inds.clear();
-            for (py::handle h : new_dom)
-                dom_block_inds.push_back(h.cast<int64>());
-            blocks.clear();
-            for (py::handle h : new_blocks)
-                blocks.push_back(h.cast<BlockBackend::BlockPtr>());
+            auto const& slc = large_leg->slices->at(bi_large);
+            std::vector<int64> kept;
+            append_basis_perm_kept_from_tile(
+              kept, *basis_perm, { slc[0], slc[1] }, *block_backend, block);
+            basis_perm_chunks.push_back(std::move(kept));
         }
-        std::vector<int64> arange(sectors.size());
-        std::iota(arange.begin(), arange.end(), 0);
-        block_inds =
-          BlockInds::column_stack(std::vector<std::span<const int64>>{ arange, dom_block_inds });
+        m.blocks.push_back(std::move(mask_block));
+        m.large_leg_block_inds.push_back(bi_out);
+        m.sectors.push_back(sector);
+        m.multiplicities.push_back(mult / dim);
     }
-    auto data =
-      make_data(Dtype::Bool, block_backend->get_device(a), std::move(blocks), block_inds, true);
-    auto small_leg = std::make_shared<ElementarySpace>(large_leg->symmetry,
-                                                       std::move(sectors),
-                                                       multiplicities,
-                                                       large_leg_obj.attr("is_dual").cast<bool>(),
-                                                       basis_perm_opt);
-    return { wrap(data), small_leg };
+    // basis_perm_kept must follow defining-sector / slice order (not large-bi order).
+    if (basis_perm) {
+        for (auto const& chunk : basis_perm_chunks)
+            m.basis_perm_kept.insert(m.basis_perm_kept.end(), chunk.begin(), chunk.end());
+    }
+    if (!is_sorted && !m.blocks.empty()) {
+        // Sort rows by large-leg (domain) index for FusionTreeData, but keep
+        // block_inds[:, 0] pointing at the original defining-sector slots so
+        // sectors/multiplicities (still in defining order) stay aligned.
+        std::vector<std::size_t> perm(m.large_leg_block_inds.size());
+        std::iota(perm.begin(), perm.end(), std::size_t{ 0 });
+        std::stable_sort(perm.begin(), perm.end(), [&](std::size_t i, std::size_t j) {
+            return m.large_leg_block_inds[i] < m.large_leg_block_inds[j];
+        });
+        auto reorder = [&](auto& vec) {
+            using T = typename std::decay_t<decltype(vec)>::value_type;
+            std::vector<T> out;
+            out.reserve(vec.size());
+            for (std::size_t pi : perm)
+                out.push_back(std::move(vec[pi]));
+            vec = std::move(out);
+        };
+        m.small_leg_block_inds.assign(perm.begin(), perm.end());
+        reorder(m.blocks);
+        reorder(m.large_leg_block_inds);
+    }
+    auto [data, small_leg] = finish_mask(std::move(m),
+                                         large_leg->symmetry,
+                                         space_is_dual(*large_leg),
+                                         basis_perm.has_value(),
+                                         block_backend->get_device(a));
+    return { wrap(std::move(data)), std::move(small_leg) };
 }
 
 BlockBackend::BlockPtr
 FusionTreeBackend::mask_to_block(MaskCPtr a)
 {
     auto a_data = data_from_tensor(a);
-    auto large_leg = py::cast(a->large_leg());
-    auto res = block_backend->zeros({ large_leg.attr("dim").cast<int64>() }, Dtype::Bool);
-    bool is_projection = a->is_projection;
+    auto const& large = *as_space(a->large_leg());
+    auto res = block_backend->zeros({ static_cast<int64>(std::llround(large.dim)) }, Dtype::Bool);
+    bool const is_projection = a->is_projection;
     auto const& bi = a_data->block_inds;
-    auto co_dom = is_projection ? py::cast(a->domain) : py::cast(a->codomain);
+    auto const& co_dom = is_projection ? *a->domain : *a->codomain;
     for (std::size_t i = 0; i < bi.nrows(); ++i) {
         int64 bi_large = is_projection ? bi(i, 1) : bi(i, 0);
-        Sector sector =
-          co_dom.attr("sector_decomposition").attr("__getitem__")(bi_large).cast<Sector>();
-        int64 dim = co_dom.attr("symmetry").attr("sector_dim")(sector).cast<int64>();
-        if (large_leg.attr("is_dual").cast<bool>())
-            bi_large = large_leg.attr("sector_decomposition_where")(sector).cast<int64>();
-        auto slc = slice_pair(large_leg.attr("slices").attr("__getitem__")(bi_large));
-        b_set(res, slc, block_backend->tile(a_data->blocks[static_cast<std::size_t>(i)], dim));
+        Sector const sector = co_dom.sector_decomposition[static_cast<std::size_t>(bi_large)];
+        int64 dim = a->symmetry->sector_dim(sector);
+        if (space_is_dual(large)) {
+            auto where = large.sector_decomposition_where(sector);
+            if (!where.has_value())
+                throw std::runtime_error("mask_to_block: sector missing on large leg");
+            bi_large = *where;
+        }
+        b_set(res,
+              slices_for_row(large, bi_large),
+              block_backend->tile(a_data->blocks[static_cast<std::size_t>(i)], dim));
     }
     return res;
 }
@@ -4473,13 +4399,9 @@ FusionTreeBackend::mask_transpose(MaskCPtr tens)
     // similar implementation to diagonal_transpose
     // ---
     auto data = data_from_tensor(tens);
-    auto sym = py::cast(tens->symmetry).cast<Symmetry::Ptr>();
-    auto perm_dom =
-      sym->dual_sectors(py::cast(tens->domain).attr("sector_decomposition").cast<SectorArray>())
-        .lexsort_indices();
-    auto perm_codom =
-      sym->dual_sectors(py::cast(tens->codomain).attr("sector_decomposition").cast<SectorArray>())
-        .lexsort_indices();
+    auto sym = tens->symmetry;
+    auto perm_dom = sym->dual_sectors(tens->domain->sector_decomposition).lexsort_indices();
+    auto perm_codom = sym->dual_sectors(tens->codomain->sector_decomposition).lexsort_indices();
     std::vector<int64> perm_dom_i64(perm_dom.begin(), perm_dom.end());
     std::vector<int64> perm_codom_i64(perm_codom.begin(), perm_codom.end());
     auto inv_dom = inverse_permutation(perm_dom_i64);
@@ -4494,100 +4416,53 @@ FusionTreeBackend::mask_transpose(MaskCPtr tens)
     BlockInds block_inds =
       BlockInds::column_stack(std::vector<std::span<const int64>>{ col1, col0 });
     auto out = make_data(tens->dtype, data->device, data->blocks, block_inds, false);
-    return { py::cast(tens->codomain).attr("__getitem__")(0).attr("dual").cast<Space::Ptr>(),
-             py::cast(tens->domain).attr("__getitem__")(0).attr("dual").cast<Space::Ptr>(),
-             wrap(out) };
+    auto cod = as_space(tens->codomain->factors[0])->dual_space();
+    auto dom = as_space(tens->domain->factors[0])->dual_space();
+    return { std::move(cod), std::move(dom), wrap(out) };
 }
 
 std::tuple<TensorBackend::DataPtr, ElementarySpace::Ptr>
 FusionTreeBackend::mask_unary_operand(MaskCPtr mask, BlockUnaryFn func)
 {
-    // --- hints from Python FusionTreeBackend.mask_unary_operand ---
-    // next block of mask to process; iterating like this only works if is_sorted.
-    // mask has no further blocks
-    // ---
-    py::object large_leg = py::cast(mask->large_leg());
-    py::object basis_perm = large_leg.attr("_basis_perm");
-    bool is_sorted = !large_leg.attr("is_dual").cast<bool>();
+    auto const& large = *as_space(mask->large_leg());
+    auto basis_perm = custom_basis_perm_of(large);
+    bool const is_sorted = !space_is_dual(large);
     auto mask_data = data_from_tensor(mask);
-    auto const& mbuf = mask_data->block_inds;
-    std::vector<BlockBackend::BlockPtr> blocks;
-    std::vector<int64> dom_block_inds;
-    std::vector<Sector> sectors_vec;
-    std::vector<int64> multiplicities;
-    py::list basis_perm_ranks;
-    int64 i = 0;
-    int64 b_i = mbuf.nrows() == 0 ? -1 : mbuf(0, 1);
-    auto defining = large_leg.attr("defining_sectors").cast<SectorArray>();
-    auto mults = mults_of(large_leg);
-    auto sym = py::cast(mask->symmetry).cast<Symmetry::Ptr>();
-    for (std::size_t sector_idx = 0; sector_idx < defining.size(); ++sector_idx) {
-        BlockBackend::BlockPtr block;
-        bool block_found = false;
-        if (is_sorted && static_cast<int64>(sector_idx) == b_i) {
-            block = mask_data->blocks[static_cast<std::size_t>(i)];
-            ++i;
-            b_i = static_cast<std::size_t>(i) >= mbuf.nrows()
-                    ? -1
-                    : mbuf(static_cast<std::size_t>(i), 1);
-            block_found = true;
-        } else if (!is_sorted) {
-            Sector dual_sec = large_leg.attr("sector_decomposition")
-                                .attr("__getitem__")(sector_idx)
-                                .cast<Sector>();
-            auto idx = mask_data->block_ind_from_coupled(
-              dual_sec, py::cast(mask->domain).cast<TensorProduct::Ptr>());
-            if (idx.has_value()) {
-                block = mask_data->blocks[static_cast<std::size_t>(*idx)];
-                block_found = true;
-            }
-        }
-        if (!block_found)
-            block = block_backend->zeros({ mults[sector_idx] }, Dtype::Bool);
+    MaskPieces m;
+    std::size_t i = 0;
+    int64 b_i = mask_data->block_inds.nrows() == 0 ? -1 : mask_data->block_inds(0, 1);
+    auto const& defining = defining_sectors_of(large);
+    for (std::size_t si = 0; si < defining.size(); ++si) {
+        BlockBackend::BlockPtr block = mask_block_at_sorted_sector(
+          *block_backend, mask, *mask_data, si, is_sorted, large, i, b_i);
         auto new_block = func(block);
         int64 mult = block_backend->sum_all(new_block).as_int64();
         if (mult == 0)
             continue;
-        blocks.push_back(new_block);
-        dom_block_inds.push_back(static_cast<int64>(sector_idx));
-        sectors_vec.push_back(defining[sector_idx]);
-        multiplicities.push_back(mult);
-        if (!basis_perm.is_none()) {
-            int64 dim = sym->sector_dim(defining[sector_idx]);
-            auto tiled = block_backend->tile(new_block, dim);
-            py::array mask_np = block_backend->to_numpy(tiled, py_bool_dtype());
-            auto slc = slice_pair(
-              large_leg.attr("slices").attr("__getitem__")(static_cast<int64>(sector_idx)));
-            basis_perm_ranks.append(
-              basis_perm.attr("__getitem__")(slc).attr("__getitem__")(mask_np));
+        std::array<int64, 2> slc{ 0, 0 };
+        if (basis_perm) {
+            if (!large.slices) {
+                throw std::invalid_argument(
+                  "mask_unary_operand: basis_perm requires large_leg.slices");
+            }
+            slc = large.slices->at(si);
         }
+        int64 const sec_dim = basis_perm ? mask->symmetry->sector_dim(defining[si]) : int64{ 1 };
+        m.add(*block_backend,
+              std::move(new_block),
+              mult,
+              static_cast<int64>(si),
+              defining[si],
+              basis_perm,
+              slc,
+              sec_dim);
     }
-    SectorArray sectors = sym->empty_sector_array;
-    std::optional<std::vector<int64>> basis_perm_opt = std::nullopt;
-    BlockInds block_inds;
-    if (blocks.empty()) {
-        multiplicities.clear();
-        block_inds = zeros_i64(0, 2);
-    } else {
-        sectors = SectorArray::empty(sectors_vec[0].len());
-        for (auto const& s : sectors_vec)
-            sectors.push_back(s);
-        if (!basis_perm.is_none()) {
-            auto ranked = rank_concat(basis_perm_ranks);
-            basis_perm_opt = ranked;
-        }
-        std::vector<int64> arange(sectors.size());
-        std::iota(arange.begin(), arange.end(), 0);
-        block_inds =
-          BlockInds::column_stack(std::vector<std::span<const int64>>{ arange, dom_block_inds });
-    }
-    auto data = make_data(Dtype::Bool, mask->device, std::move(blocks), block_inds, true);
-    auto small_leg = std::make_shared<ElementarySpace>(sym,
-                                                       std::move(sectors),
-                                                       multiplicities,
-                                                       large_leg.attr("is_dual").cast<bool>(),
-                                                       basis_perm_opt);
-    return { wrap(data), small_leg };
+    auto [data, small_leg] = finish_mask(std::move(m),
+                                         mask->symmetry,
+                                         space_is_dual(large),
+                                         basis_perm.has_value(),
+                                         mask_data->device);
+    return { wrap(std::move(data)), std::move(small_leg) };
 }
 
 } // namespace lasyten

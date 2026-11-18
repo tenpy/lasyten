@@ -1,6 +1,6 @@
 #include "../../doc_plus.h"
 #include "docstrings/symmetries/factors/zn.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 #include "symmetries/casters.hpp"
 
@@ -13,19 +13,19 @@
 namespace lasyten {
 
 void
-bind_zn(py::module_& m)
+bind_zn(nb::module_& m)
 {
-    py::class_<ZN, AbelianGroup, py::smart_holder>(m, "ZN", DOC(lasyten, ZN))
-      .def(py::init<int, std::optional<std::string>, bool>(),
-           py::arg("N"),
-           py::arg("descriptive_name") = py::none(),
-           py::arg("trivial_shift") = true)
-      .def_readonly("N", &ZN::N)
+    nb::class_<ZN, AbelianGroup>(m, "ZN", DOC(lasyten, ZN))
+      .def(lasyten::ctor_for<ZN, int, std::optional<std::string>, bool>(),
+           nb::arg("N"),
+           nb::arg("descriptive_name").none() = nb::none(),
+           nb::arg("trivial_shift") = true)
+      .def_ro("N", &ZN::N)
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<ZN>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 }
 
 } // namespace lasyten

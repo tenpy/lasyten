@@ -36,7 +36,9 @@ dependencies = [
     "numpy",
     "scipy",
     "pyyaml",
-    "torch",  # required: C++ TorchBlockBackend links libtorch; prefer conda-forge pytorch
+    # Required: C++ TorchBlockBackend links libtorch. Wheels exclude libtorch*
+    # from auditwheel and resolve via the installed torch package (+ RPATH).
+    "torch",
 ]
 
 [project.optional-dependencies]
@@ -54,8 +56,9 @@ docbuild = [
     "clang",
     "pybind11-mkdoc",
 ]
-# generates lasyten/_core.pyi at build time for IDE type hints (optional; build warns if missing)
-stubs = ["pybind11-stubgen"]
+# generates lasyten/_core.pyi at build time via scripts/generate_core_pyi.py
+# (nanobind.stubgen + stubgen_patterns.txt; soft-fail if generation fails)
+stubs = ["nanobind"]
 # bundles
 dev = ["lasyten[io, test, lint, docbuild, stubs]"]
 all = ["lasyten[io, test, lint, docbuild, stubs]"]
@@ -73,7 +76,8 @@ all = ["lasyten[io, test, lint, docbuild, stubs]"]
 
 [build-system]
 # torch is required at build time: CMake links against the same libtorch as `import torch`
-requires = ["scikit-build-core", "pybind11", "numpy>=2.0", "torch", "setuptools-scm"]
+# pybind11 is not used anymore (it cannot be compiled with Py_LIMITED_API / the Stable ABI).
+requires = ["scikit-build-core", "nanobind>=3.0", "numpy>=2.0", "torch", "setuptools-scm"]
 build-backend = "scikit_build_core.build"
 
 
@@ -82,11 +86,17 @@ cmake.version = ">=3.15"
 # Only print install lines for files that actually changed (hides "-- Up-to-date: ..." spam).
 cmake.define.CMAKE_INSTALL_MESSAGE = "LAZY"
 cmake.define.BUILD_DOC = {env="BUILD_DOC", default="OFF"}
+# Wheel/editable builds do not need ctests (and SKBUILD skips Development.Embed).
+cmake.define.BUILD_TESTING = {env="BUILD_TESTING", default="OFF"}
 build-dir = "build" # The build directory. Defaults to a temporary directory, but can be set.
 cmake.build-type = "Debug"  # TODO: for now setup debug builds - update this once we release!
 # Select the editable mode to use. Can be "redirect" (default) or "inplace".
 # editable.mode = "inplace"
 wheel.packages = ["lasyten"]
+# Stable ABI (abi3): ``lasyten._core`` is built with nanobind STABLE_ABI (Py_LIMITED_API 3.12), so one
+# ``cp312-abi3`` wheel serves Python >= 3.12 (the project requires >= 3.14). See CMake option
+# LASYTEN_STABLE_ABI (silently off for Python < 3.12). Set to "" to build version-specific wheels.
+wheel.py-api = "cp312"
 sdist.include = ["lasyten/_version.py"]
 
 [[tool.dynamic-metadata]]
@@ -112,12 +122,67 @@ markers = [
     "FusionTree: marks tests that use the FusionTreeBackend.",
     "numpy: marks tests that use the numpy block backend.",
     "torch: marks tests that use the torch block backend.",
+    "eigen: marks tests that use the Eigen/LAPACK block backend.",
     "example: marks tests as example (deselect with '-m \"not example\"')",
     "deselect_invalid_ChargedTensor_cases: modifies collection. See notes in conftest.py",
 ]
 log_level = "INFO"
 log_format = "%(asctime)s %(levelname)-8s %(filename)-16s%(lineno)4d: %(message)s"
 testpaths = ["tests"]
+
+
+# cibuildwheel (issue #326 item 4 / leftover #2): produce cp312-abi3 wheels.
+# Build with CPython >= 3.14 (requires-python); scikit-build-core tags abi3 via wheel.py-api.
+# Wheel CI (``.github/workflows/publish.yml``) runs on release + workflow_dispatch only
+# (micromamba abi3 hosts + cibuildwheel linux/macOS), not on every PR.
+# Do not vendor libtorch into the wheel: ``torch`` is a runtime dependency and
+# ``_core`` already has RPATH ``$ORIGIN/../torch/lib``. repair commands exclude
+# Torch sonames (auditwheel on linux, delocate on macOS).
+[tool.cibuildwheel]
+build = "cp314-*"
+skip = "pp* *-musllinux_* *i686* *win32*"
+build-verbosity = 1
+# Release wheels (repo default cmake.build-type is Debug for local editable installs).
+# BUILD_TESTING=OFF: no Development.Embed / ctest targets in the wheel build.
+config-settings = "cmake.build-type=Release cmake.define.BUILD_TESTING=OFF cmake.define.LASYTEN_STABLE_ABI=ON"
+# CPU torch: avoid CUDA wheels that need the toolkit at link time.
+environment = { PIP_EXTRA_INDEX_URL = "https://download.pytorch.org/whl/cpu" }
+test-skip = "*"
+
+[tool.cibuildwheel.linux]
+before-all = [
+  "yum install -y eigen3-devel lapack-devel openblas-devel hdf5-devel doxygen || dnf install -y eigen3-devel lapack-devel openblas-devel hdf5-devel doxygen",
+]
+# Eigen3_DIR is set via CIBW_ENVIRONMENT in .github/workflows/publish.yml (FindEigen3 NO_MODULE).
+before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm cmake ninja"
+# Exclude Torch sonames: they come from the ``torch`` PyPI/conda package at runtime.
+# Bundling them fails (libs not on the linker path) and would bloat the wheel anyway.
+# (Must be one string: list values are joined with ``&&``.)
+repair-wheel-command = """
+  auditwheel repair -w {dest_dir} {wheel} \
+    --exclude libtorch.so \
+    --exclude libtorch_cpu.so \
+    --exclude libtorch_cuda.so \
+    --exclude libtorch_python.so \
+    --exclude libtorch_global_deps.so \
+    --exclude libc10.so \
+    --exclude libc10_cuda.so \
+    --exclude libshm.so
+"""
+
+[tool.cibuildwheel.macos]
+archs = ["native"]
+before-all = "brew install eigen hdf5 openblas doxygen || true"
+before-build = "pip install torch numpy nanobind scikit-build-core setuptools-scm cmake ninja"
+# Vendor brew deps (e.g. HDF5); leave Torch to the runtime ``torch`` package (RPATH
+# ``$ORIGIN/../torch/lib``). ``--ignore-missing-dependencies`` covers Torch libs that
+# delocate cannot copy; ``--exclude`` matches the Linux auditwheel policy.
+repair-wheel-command = """
+  delocate-wheel --ignore-missing-dependencies --require-archs {delocate_archs} \
+    --exclude libtorch --exclude libtorch_cpu --exclude libtorch_python \
+    --exclude libc10 --exclude libomp \
+    -w {dest_dir} -v {wheel}
+"""
 
 
 [tool.ruff]

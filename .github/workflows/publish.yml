@@ -1,0 +1,213 @@
+name: Wheels (cp312-abi3)
+
+# Build Stable ABI wheels and publish to (Test)PyPI (issue #326 item 4).
+#
+# Not run on every PR. Triggered by:
+#   - workflow_dispatch (manual pre-release check → TestPyPI when publish=true)
+#   - release published (required: build must succeed, then publish to PyPI)
+#
+# Jobs:
+#   - abi3-wheel (ubuntu + macOS micromamba): Stable ABI build + smoke import
+#     (validation / artifacts only — host-linked, not for PyPI)
+#   - cibuildwheel-linux / cibuildwheel-macos: PyPI wheels (manylinux + macOS);
+#     repair excludes libtorch* (runtime dep on ``torch``)
+#   - publish: sdist + cibuildwheel wheels → TestPyPI (manual) or PyPI (release)
+#
+# Secrets: none for PyPI tokens if Trusted Publishing (OIDC) is configured on
+# test.pypi.org / pypi.org for this repo + workflow (see comments on the publish job).
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_testpypi:
+        description: Publish built wheels + sdist to TestPyPI
+        type: boolean
+        default: true
+  release:
+    types: [published]
+
+jobs:
+  abi3-wheel:
+    name: abi3 wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Set up micromamba
+        uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-file: environment.yml
+          create-args: >-
+            python=3.14
+          cache-environment: true
+
+      - name: Build cp312-abi3 wheel
+        run: |
+          pip install --no-build-isolation -e ./external/hdf5_io
+          pip install build
+          # --no-isolation: use conda pytorch/eigen/hdf5 (isolated builds pull CUDA torch).
+          # Release build for artifacts; LASYTEN_STABLE_ABI stays ON (default).
+          python -m build --wheel --no-isolation -o wheelhouse \
+            -C cmake.build-type=Release \
+            -C cmake.define.LASYTEN_STABLE_ABI=ON
+
+      - name: Check abi3 wheel tag and _core.abi3 extension
+        run: |
+          python scripts/check_abi3_wheel.py wheelhouse/*.whl
+          python - <<'PY'
+          import pathlib, zipfile, sys
+          wheels = list(pathlib.Path('wheelhouse').glob('*.whl'))
+          assert wheels, 'no wheels'
+          with zipfile.ZipFile(wheels[0]) as zf:
+              cores = [n for n in zf.namelist() if '_core.abi3.' in n]
+          print('abi3 extension members:', cores)
+          if not cores:
+              sys.exit('missing _core.abi3.* inside wheel')
+          PY
+
+      - name: Smoke-import from the wheel
+        run: |
+          pip install --no-deps --force-reinstall wheelhouse/*.whl
+          # Cwd is the repo root; its ``lasyten/`` source tree shadows site-packages and has
+          # no importable ``_core`` for a clean wheel check. Import from an empty directory.
+          SMOKE_DIR="${RUNNER_TEMP:-/tmp}/lasyten_wheel_smoke"
+          mkdir -p "$SMOKE_DIR"
+          cd "$SMOKE_DIR"
+          python -c "import lasyten._core as c; print(c.__file__); assert 'abi3' in c.__file__"
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: abi3-wheel-${{ matrix.os }}
+          path: wheelhouse/*.whl
+          retention-days: 14
+
+  cibuildwheel-linux:
+    name: cibuildwheel (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Build wheels with cibuildwheel
+        uses: pypa/cibuildwheel@v3.4.1
+        env:
+          # Point FindEigen3 at the yum eigen3-devel CMake package inside the container.
+          CIBW_ENVIRONMENT: >-
+            PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
+            Eigen3_DIR=/usr/share/eigen3/cmake
+
+      - name: Check abi3 wheels
+        run: python3 scripts/check_abi3_wheel.py wheelhouse/*.whl
+
+      - name: Upload cibuildwheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibuildwheel-linux
+          path: wheelhouse/*.whl
+          retention-days: 14
+          if-no-files-found: error
+
+  cibuildwheel-macos:
+    name: cibuildwheel (macos ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # Native arch per runner: intel x86_64 + apple silicon arm64 for PyPI.
+        os: [macos-13, macos-14]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Build wheels with cibuildwheel
+        uses: pypa/cibuildwheel@v3.4.1
+        env:
+          # macOS torch on PyPI is CPU-only; keep the CPU index for consistency.
+          CIBW_ENVIRONMENT: >-
+            PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
+            MACOSX_DEPLOYMENT_TARGET=12.0
+
+      - name: Check abi3 wheels
+        run: python3 scripts/check_abi3_wheel.py wheelhouse/*.whl
+
+      - name: Upload cibuildwheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibuildwheel-${{ matrix.os }}
+          path: wheelhouse/*.whl
+          retention-days: 14
+          if-no-files-found: error
+
+  publish:
+    name: Publish to (Test)PyPI
+    needs: [abi3-wheel, cibuildwheel-linux, cibuildwheel-macos]
+    runs-on: ubuntu-latest
+    # Trusted Publishing (OIDC) — configure on https://pypi.org and https://test.pypi.org:
+    #   Owner: tenpy  |  Repo: lasyten  |  Workflow: publish.yml  |  Environment: (none or match below)
+    # No PYPI_API_TOKEN / TEST_PYPI_API_TOKEN repository secrets are required with OIDC.
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+          # setuptools-scm needs full history / tags for the version
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install build / twine
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Download cibuildwheel wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cibuildwheel-*
+          merge-multiple: true
+          path: dist/
+
+      - name: Build sdist
+        run: |
+          # sdist only — binary wheels come from cibuildwheel. Micromamba abi3
+          # host wheels are validation artifacts and are not published.
+          python -m build --sdist --outdir dist/
+          python -m twine check --strict dist/*
+
+      - name: Publish to TestPyPI
+        if: >-
+          github.event_name == 'workflow_dispatch'
+          && inputs.publish_testpypi
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+
+      - name: Publish to PyPI
+        if: github.event_name == 'release'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

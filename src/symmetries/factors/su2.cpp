@@ -1,6 +1,6 @@
 #include <lasyten/symmetries/factors/su2.h>
 
-#include <lasyten/block_backend/numpy.h>
+#include <lasyten/block_backend/block_backend.h>
 #include <lasyten/symmetries/fusion_symbol.h>
 
 #include <cmath>
@@ -206,10 +206,8 @@ _SU2::_f_symbol(Sector a, Sector b, Sector c, Sector d, Sector e, Sector f) cons
     // --- hints from Python SU2._f_symbol ---
     // OPTIMIZE: jutho has a special case if all sectors are trivial ...?
     // ---
-    return fusion_symbol_from_numpy(
-      su2data()
-        .attr("f_symbol")(a.q[0], b.q[0], c.q[0], d.q[0], e.q[0], f.q[0])
-        .cast<py::array>());
+    return fusion_symbol_from_numpy(py::cast<py::array>(
+      su2data().attr("f_symbol")(a.q[0], b.q[0], c.q[0], d.q[0], e.q[0], f.q[0])));
 }
 
 int64
@@ -250,12 +248,12 @@ _SU2::_fusion_tensor(Sector a, Sector b, Sector c, bool Z_a, bool Z_b) const
     // [µ, m_a, m_b, m_c] @ [m_b, m_bbar*] -> [µ, m_a, m_c, m_bbar*]
     // ---
     auto X = fusion_symbol_from_numpy(
-      su2data().attr("fusion_tensor")(a.q[0], b.q[0], c.q[0]).cast<py::array>());
+      py::cast<py::array>(su2data().attr("fusion_tensor")(a.q[0], b.q[0], c.q[0])));
     if (!Z_a && !Z_b) {
         return X;
     }
 
-    auto& be = *static_cast<BlockBackend*>(NumpyBlockBackend::from_factory("cpu"));
+    auto& be = *default_cpu_block_backend();
     auto Xb = block_from_fusion_symbol(be, X);
     if (Z_a && Z_b) {
         auto Za = block_from_fusion_symbol(be, Z_iso(dual_sector(a)));
@@ -278,7 +276,7 @@ _SU2::_fusion_tensor(Sector a, Sector b, Sector c, bool Z_a, bool Z_b) const
 FusionSymbol
 _SU2::Z_iso(Sector a) const
 {
-    return fusion_symbol_from_numpy(su2data().attr("Z_iso")(a.q[0]).cast<py::array>());
+    return fusion_symbol_from_numpy(py::cast<py::array>(su2data().attr("Z_iso")(a.q[0])));
 }
 
 _SU2::Ptr

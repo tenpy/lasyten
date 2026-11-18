@@ -245,6 +245,7 @@ def pytest_generate_tests(metafunc):
 _block_backend_params = dict(
     numpy=pytest.param('numpy', marks=pytest.mark.numpy),
     torch=pytest.param('torch', marks=pytest.mark.torch),
+    eigen=pytest.param('eigen', marks=pytest.mark.eigen),
 )
 _symmetries = {
     # groups:

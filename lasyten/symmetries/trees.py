@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from .._core import FusionTree, fusion_trees  # noqa: F401
 
-# C++ implementations via pybind11
+# C++ implementations via nanobind
 from ._symmetries import SectorArray
 
 # auto-maintained by scripts/generate_reexport_all.py; do not edit by hand

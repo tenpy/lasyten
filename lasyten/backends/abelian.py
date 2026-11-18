@@ -1,6 +1,6 @@
 """Backends for abelian group symmetries.
 
-C++ implementations via pybind11 (``lasyten._core``).
+C++ implementations via nanobind (``lasyten._core``).
 """
 
 # Copyright (C) TeNPy Developers, Apache license

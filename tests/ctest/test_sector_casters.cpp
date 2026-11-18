@@ -1,25 +1,25 @@
 #include <cassert>
 #include <iostream>
 
-#include <pybind11/embed.h>
-#include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
+#include <lasyten/embed.h>
 
 #include "symmetries/casters.hpp"
 
 #include <lasyten/symmetries/sector.h>
 #include <lasyten/symmetries/sector_numpy.h>
 
-namespace py = pybind11;
+namespace py = lasyten::py;
 using namespace lasyten;
 
 int
 test_sector_casters(int /*argc*/, char** /*args*/)
 {
-    py::scoped_interpreter guard{};
-    py::module_::import("numpy");
-    // Register py::class_<Sector> / SectorArray bindings used by type_caster_base.
-    py::module_::import("lasyten._core");
+    lasyten::ScopedInterpreter guard;
+    py::module_::import_("numpy");
+    // Import the nanobind-bound Sector / SectorArray classes and attach this program's copy of
+    // nanobind to the extension's internals.
+    py::module_::import_("lasyten._core");
+    lasyten::init_embedded_nanobind();
 
     Sector s{ 1, -2, 3 };
     py::object obj = py::cast(s);
@@ -28,7 +28,7 @@ test_sector_casters(int /*argc*/, char** /*args*/)
     assert(arr.ndim() == 1);
     assert(arr.shape(0) == 3);
 
-    Sector s2 = obj.cast<Sector>();
+    Sector s2 = py::cast<Sector>(obj);
     assert(s2 == s);
 
     // ndarray / sequence → Sector via sector_from_numpy (same path as load caster)
@@ -45,7 +45,7 @@ test_sector_casters(int /*argc*/, char** /*args*/)
     assert(sa_arr.shape(0) == 2);
     assert(sa_arr.shape(1) == 2);
 
-    SectorArray sa2 = sa_obj.cast<SectorArray>();
+    SectorArray sa2 = py::cast<SectorArray>(sa_obj);
     assert(sa2 == sa);
 
     SectorArray from_np = sector_array_from_numpy(sa_arr);

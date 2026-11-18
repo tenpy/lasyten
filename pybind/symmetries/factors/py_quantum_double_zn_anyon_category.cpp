@@ -1,6 +1,6 @@
 #include "../../doc_plus.h"
 #include "docstrings/symmetries/factors/quantum_double_zn_anyon_category.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 #include "symmetries/casters.hpp"
 
@@ -13,19 +13,19 @@
 namespace lasyten {
 
 void
-bind_quantum_double_zn_anyon_category(py::module_& m)
+bind_quantum_double_zn_anyon_category(nb::module_& m)
 {
-    py::class_<QuantumDoubleZNAnyonCategory, SymmetryFactor, py::smart_holder>(
+    nb::class_<QuantumDoubleZNAnyonCategory, SymmetryFactor>(
       m, "QuantumDoubleZNAnyonCategory", DOC(lasyten, QuantumDoubleZNAnyonCategory))
-      .def(py::init<int, std::optional<std::string>>(),
-           py::arg("N"),
-           py::arg("descriptive_name") = py::none())
-      .def_readonly("N", &QuantumDoubleZNAnyonCategory::N)
+      .def(lasyten::ctor_for<QuantumDoubleZNAnyonCategory, int, std::optional<std::string>>(),
+           nb::arg("N"),
+           nb::arg("descriptive_name").none() = nb::none())
+      .def_ro("N", &QuantumDoubleZNAnyonCategory::N)
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<QuantumDoubleZNAnyonCategory>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 }
 
 } // namespace lasyten

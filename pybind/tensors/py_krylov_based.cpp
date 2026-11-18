@@ -1,12 +1,9 @@
 #include <lasyten/tensors/krylov_based.h>
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/krylov_based.h"
-
-#include <pybind11/numpy.h>
-#include <pybind11/stl.h>
 
 #include <optional>
 #include <utility>
@@ -15,34 +12,6 @@
 namespace lasyten {
 
 namespace {
-
-class PyKrylovBased
-  : public KrylovBased
-  , public py::trampoline_self_life_support
-{
-  public:
-    using KrylovBased::KrylovBased;
-
-    int64 _build_krylov() override { PYBIND11_OVERRIDE_PURE(int64, KrylovBased, _build_krylov); }
-
-    void _calc_result_krylov(int64 k) override
-    {
-        PYBIND11_OVERRIDE_PURE(void, KrylovBased, _calc_result_krylov, k);
-    }
-
-    bool _converged(int64 k) override { PYBIND11_OVERRIDE_PURE(bool, KrylovBased, _converged, k); }
-
-    void _to_cache(VectorLike::Ptr psi) override
-    {
-        PYBIND11_OVERRIDE(void, KrylovBased, _to_cache, psi);
-    }
-
-    VectorLike::Ptr _rebuild_krylov_for_result_full(VectorLike::Ptr psif, int64 N_max) override
-    {
-        PYBIND11_OVERRIDE(
-          VectorLike::Ptr, KrylovBased, _rebuild_krylov_for_result_full, psif, N_max);
-    }
-};
 
 py::object
 optional_float_to_py(std::optional<float64> const& v)
@@ -76,78 +45,89 @@ eigenvalues_to_numpy(std::vector<complex128> const& E0s)
 } // namespace
 
 void
-bind_tensors_krylov_based(py::module_& m)
+bind_tensors_krylov_based(nb::module_& m)
 {
-    py::class_<KrylovBased, PyKrylovBased, py::smart_holder> krylov_based(m, "KrylovBased");
+    nb::class_<KrylovBased> krylov_based(m, "KrylovBased");
     krylov_based.doc() = DOC(lasyten, KrylovBased);
 
     krylov_based
-      .def(py::init<LinearOperator::Ptr, VectorLike::Ptr, py::object>(),
-           py::arg("H"),
-           py::arg("psi0"),
-           py::arg("options") = py::none())
-      .def_readwrite("H", &KrylovBased::H)
-      .def_readwrite("psi0", &KrylovBased::psi0)
-      .def_readwrite("options", &KrylovBased::options)
-      .def_readwrite("N_min", &KrylovBased::N_min)
-      .def_readwrite("N_max", &KrylovBased::N_max)
-      .def_readwrite("N_cache", &KrylovBased::N_cache)
-      .def_readwrite("P_tol", &KrylovBased::P_tol)
-      .def_readwrite("min_gap", &KrylovBased::min_gap)
-      .def_readwrite("reortho", &KrylovBased::reortho)
-      .def_property(
+      .def(
+        lasyten::ctor<decltype(krylov_based), LinearOperator::Ptr, VectorLike::Ptr, py::object>(),
+        nb::arg("H"),
+        nb::arg("psi0"),
+        nb::arg("options").none() = nb::none())
+      .def_rw("H", &KrylovBased::H)
+      .def_rw("psi0", &KrylovBased::psi0)
+      .def_prop_rw(
+        "options",
+        [](KrylovBased const& self) { return krylov_options_to_py(self.options); },
+        [](KrylovBased& self, py::object v) { self.options = krylov_options_from_py(v); })
+      .def_rw("N_min", &KrylovBased::N_min)
+      .def_rw("N_max", &KrylovBased::N_max)
+      .def_rw("N_cache", &KrylovBased::N_cache)
+      .def_rw("P_tol", &KrylovBased::P_tol)
+      .def_rw("min_gap", &KrylovBased::min_gap)
+      .def_rw("reortho", &KrylovBased::reortho)
+      .def_prop_rw(
         "E_shift",
         [](KrylovBased const& self) { return optional_float_to_py(self.E_shift); },
         [](KrylovBased& self, py::object v) {
             if (v.is_none()) {
                 self.E_shift = std::nullopt;
             } else {
-                self.E_shift = v.cast<float64>();
+                self.E_shift = py::cast<float64>(v);
             }
         })
-      .def_readwrite("_cutoff", &KrylovBased::_cutoff)
-      .def_property_readonly("Es", &KrylovBased::Es_numpy)
-      .def_property_readonly("_h_krylov", &KrylovBased::h_krylov_numpy)
-      .def_property_readonly("_result_krylov", &KrylovBased::result_krylov_numpy)
+      .def_rw("_cutoff", &KrylovBased::_cutoff)
+      .def_prop_ro("Es", &KrylovBased::Es_numpy)
+      .def_prop_ro("_h_krylov", &KrylovBased::h_krylov_numpy)
+      .def_prop_ro("_result_krylov", &KrylovBased::result_krylov_numpy)
       .def("_reset_krylov_state",
            &KrylovBased::_reset_krylov_state,
            "Clear cached Krylov vectors and the projected Hessenberg matrix.");
 
-    py::class_<GMRES, py::smart_holder> gmres(m, "GMRES");
+    nb::class_<GMRES> gmres(m, "GMRES");
     gmres.doc() = DOC(lasyten, GMRES);
 
     gmres
-      .def(py::init<LinearOperator::Ptr, VectorLike::Ptr, VectorLike::Ptr, py::object>(),
-           py::arg("A"),
-           py::arg("x"),
-           py::arg("b"),
-           py::arg("options") = py::none())
-      .def_readwrite("A", &GMRES::A)
-      .def_readwrite("x", &GMRES::x)
-      .def_readwrite("b", &GMRES::b)
-      .def_readwrite("options", &GMRES::options)
-      .def_readwrite("N_min", &GMRES::N_min)
-      .def_readwrite("N_max", &GMRES::N_max)
-      .def_readwrite("restart", &GMRES::restart)
-      .def_readwrite("res", &GMRES::res)
+      .def(lasyten::ctor<decltype(gmres),
+                         LinearOperator::Ptr,
+                         VectorLike::Ptr,
+                         VectorLike::Ptr,
+                         py::object>(),
+           nb::arg("A"),
+           nb::arg("x"),
+           nb::arg("b"),
+           nb::arg("options").none() = nb::none())
+      .def_rw("A", &GMRES::A)
+      .def_rw("x", &GMRES::x)
+      .def_rw("b", &GMRES::b)
+      .def_prop_rw(
+        "options",
+        [](GMRES const& self) { return krylov_options_to_py(self.options); },
+        [](GMRES& self, py::object v) { self.options = krylov_options_from_py(v); })
+      .def_rw("N_min", &GMRES::N_min)
+      .def_rw("N_max", &GMRES::N_max)
+      .def_rw("restart", &GMRES::restart)
+      .def_rw("res", &GMRES::res)
       .def("run", &GMRES::run)
-      .def("arnoldi", &GMRES::arnoldi, py::arg("k"))
-      .def("apply_givens_rotation", &GMRES::apply_givens_rotation, py::arg("k"))
-      .def("givens_rotation", &GMRES::givens_rotation, py::arg("k"))
-      .def("backsolve", &GMRES::backsolve, py::arg("k"))
+      .def("arnoldi", &GMRES::arnoldi, nb::arg("k"))
+      .def("apply_givens_rotation", &GMRES::apply_givens_rotation, nb::arg("k"))
+      .def("givens_rotation", &GMRES::givens_rotation, nb::arg("k"))
+      .def("backsolve", &GMRES::backsolve, nb::arg("k"))
       .def("reset", &GMRES::reset);
 
-    py::class_<Arnoldi, KrylovBased, py::smart_holder> arnoldi(m, "Arnoldi");
+    nb::class_<Arnoldi, KrylovBased> arnoldi(m, "Arnoldi");
     arnoldi.doc() = DOC(lasyten, Arnoldi);
 
     arnoldi
-      .def(py::init<LinearOperator::Ptr, VectorLike::Ptr, py::object>(),
-           py::arg("H"),
-           py::arg("psi0"),
-           py::arg("options") = py::none())
-      .def_readwrite("E_tol", &Arnoldi::E_tol)
-      .def_readwrite("which", &Arnoldi::which)
-      .def_readwrite("num_ev", &Arnoldi::num_ev)
+      .def(lasyten::ctor<decltype(arnoldi), LinearOperator::Ptr, VectorLike::Ptr, py::object>(),
+           nb::arg("H"),
+           nb::arg("psi0"),
+           nb::arg("options").none() = nb::none())
+      .def_rw("E_tol", &Arnoldi::E_tol)
+      .def_rw("which", &Arnoldi::which)
+      .def_rw("num_ev", &Arnoldi::num_ev)
       .def(
         "run",
         [](Arnoldi& self) {
@@ -156,75 +136,77 @@ bind_tensors_krylov_based(py::module_& m)
         },
         DOC(lasyten, Arnoldi, run));
 
-    py::class_<ArnoldiEvolution, Arnoldi, py::smart_holder> arnoldi_evolution(m,
-                                                                              "ArnoldiEvolution");
+    nb::class_<ArnoldiEvolution, Arnoldi> arnoldi_evolution(m, "ArnoldiEvolution");
     arnoldi_evolution.doc() = DOC(lasyten, ArnoldiEvolution);
 
     arnoldi_evolution
-      .def(py::init<LinearOperator::Ptr, VectorLike::Ptr, py::object>(),
-           py::arg("H"),
-           py::arg("psi0"),
-           py::arg("options") = py::none())
-      .def_readwrite("_result_norm", &ArnoldiEvolution::_result_norm)
-      .def_property(
+      .def(lasyten::
+             ctor<decltype(arnoldi_evolution), LinearOperator::Ptr, VectorLike::Ptr, py::object>(),
+           nb::arg("H"),
+           nb::arg("psi0"),
+           nb::arg("options").none() = nb::none())
+      .def_rw("_result_norm", &ArnoldiEvolution::_result_norm)
+      .def_prop_rw(
         "delta",
         [](ArnoldiEvolution const& self) { return optional_complex_to_py(self.delta); },
         [](ArnoldiEvolution& self, py::object v) {
             if (v.is_none()) {
                 self.delta = std::nullopt;
             } else {
-                self.delta = v.cast<complex128>();
+                self.delta = py::cast<complex128>(v);
             }
         })
       .def("run",
            &ArnoldiEvolution::run,
-           py::arg("delta"),
-           py::arg("normalize") = py::none(),
+           nb::arg("delta"),
+           nb::arg("normalize").none() = nb::none(),
            DOC(lasyten, ArnoldiEvolution, run));
 
-    py::class_<LanczosGroundState, KrylovBased, py::smart_holder> lanczos_ground_state(
-      m, "LanczosGroundState");
+    nb::class_<LanczosGroundState, KrylovBased> lanczos_ground_state(m, "LanczosGroundState");
     lanczos_ground_state.doc() = DOC(lasyten, LanczosGroundState);
 
     lanczos_ground_state
-      .def(py::init<LinearOperator::Ptr, VectorLike::Ptr, py::object>(),
-           py::arg("H"),
-           py::arg("psi0"),
-           py::arg("options") = py::none())
-      .def_readwrite("E_tol", &LanczosGroundState::E_tol)
+      .def(
+        lasyten::
+          ctor<decltype(lanczos_ground_state), LinearOperator::Ptr, VectorLike::Ptr, py::object>(),
+        nb::arg("H"),
+        nb::arg("psi0"),
+        nb::arg("options").none() = nb::none())
+      .def_rw("E_tol", &LanczosGroundState::E_tol)
       .def("run", &LanczosGroundState::run, DOC(lasyten, LanczosGroundState, run));
 
-    py::class_<LanczosEvolution, LanczosGroundState, py::smart_holder> lanczos_evolution(
-      m, "LanczosEvolution");
+    nb::class_<LanczosEvolution, LanczosGroundState> lanczos_evolution(m, "LanczosEvolution");
     lanczos_evolution.doc() = DOC(lasyten, LanczosEvolution);
 
     lanczos_evolution
-      .def(py::init<LinearOperator::Ptr, VectorLike::Ptr, py::object>(),
-           py::arg("H"),
-           py::arg("psi0"),
-           py::arg("options") = py::none())
-      .def_readwrite("_result_norm", &LanczosEvolution::_result_norm)
-      .def_property(
+      .def(lasyten::
+             ctor<decltype(lanczos_evolution), LinearOperator::Ptr, VectorLike::Ptr, py::object>(),
+           nb::arg("H"),
+           nb::arg("psi0"),
+           nb::arg("options").none() = nb::none())
+      .def_rw("_result_norm", &LanczosEvolution::_result_norm)
+      .def_prop_rw(
         "delta",
         [](LanczosEvolution const& self) { return optional_complex_to_py(self.delta); },
         [](LanczosEvolution& self, py::object v) {
             if (v.is_none()) {
                 self.delta = std::nullopt;
             } else {
-                self.delta = v.cast<complex128>();
+                self.delta = py::cast<complex128>(v);
             }
         })
       .def("run",
            &LanczosEvolution::run,
-           py::arg("delta"),
-           py::arg("normalize") = py::none(),
+           nb::arg("delta"),
+           nb::arg("normalize").none() = nb::none(),
            DOC(lasyten, LanczosEvolution, run));
 
     m.def("lanczos",
-          &lanczos,
-          py::arg("H"),
-          py::arg("psi"),
-          py::arg("options") = py::none(),
+          static_cast<std::tuple<float64, VectorLike::Ptr, int64> (*)(
+            LinearOperator::Ptr, VectorLike::Ptr, py::object)>(&lanczos),
+          nb::arg("H"),
+          nb::arg("psi"),
+          nb::arg("options").none() = nb::none(),
           DOC(lasyten, lanczos));
 }
 

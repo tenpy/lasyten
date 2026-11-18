@@ -330,7 +330,9 @@ class DiagonalTensor : public SymmetricTensor
     [[nodiscard]] virtual BlockBackend::BlockPtr diagonal_as_block(
       std::optional<Dtype> dtype = std::nullopt);
 
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] virtual py::array diagonal_as_numpy(py::object numpy_dtype = py::none());
+#endif // LASYTEN_HAS_PYTHON
 
     [[nodiscard]] virtual Ptr elementwise_almost_equal(DiagonalTensorCPtr other,
                                                        float64 rtol = 1e-5,
@@ -499,7 +501,9 @@ class Identity : public DiagonalTensor
     [[nodiscard]] BlockBackend::BlockPtr diagonal_as_block(
       std::optional<Dtype> dtype = std::nullopt) override;
 
+#if LASYTEN_HAS_PYTHON
     [[nodiscard]] py::array diagonal_as_numpy(py::object numpy_dtype = py::none()) override;
+#endif // LASYTEN_HAS_PYTHON
 
     [[nodiscard]] DiagonalTensor::Ptr elementwise_almost_equal(DiagonalTensorCPtr other,
                                                                float64 rtol = 1e-5,

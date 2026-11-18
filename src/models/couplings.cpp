@@ -205,7 +205,7 @@ occupation_jw(OccupationDOF::Ptr const& occ)
     if (auto ferm = std::dynamic_pointer_cast<FermionicDOF>(occ)) {
         return ferm->JW;
     }
-    auto d = occ->number_operators.attr("shape").attr("__getitem__")(0).cast<int64>();
+    auto d = py::cast<int64>(occ->number_operators.attr("shape").attr("__getitem__")(0));
     return numpy().attr("diag")(numpy().attr("ones")(d));
 }
 
@@ -253,30 +253,27 @@ quadratic_coupling_numpy(std::vector<Site::Ptr> const& sites,
                             "for constructing couplings.");
     }
 
-    py::tuple species_tuple =
-      species.is_none() ? default_species_pair() : species.cast<py::tuple>();
+    py::tuple species_tuple = species.is_none() ? default_species_pair() : py::to_tuple(species);
     py::list species_i;
     py::list species_j;
-    if (is_all_species(species_tuple[0].cast<py::object>())) {
+    if (is_all_species(py::cast<py::object>(species_tuple[0]))) {
         for (int64 k = 0; k < occ_i->num_species; ++k) {
             species_i.append(k);
         }
     } else {
-        species_i = py::list(species_tuple[0]);
+        species_i = py::list(py::object(species_tuple[0]));
     }
-    if (is_all_species(species_tuple[1].cast<py::object>())) {
+    if (is_all_species(py::cast<py::object>(species_tuple[1]))) {
         for (int64 k = 0; k < occ_j->num_species; ++k) {
             species_j.append(k);
         }
     } else {
-        species_j = py::list(species_tuple[1]);
+        species_j = py::list(py::object(species_tuple[1]));
     }
     if (species_i.empty() || species_j.empty()) {
         auto np = numpy();
-        return np
-          .attr("zeros")(py::make_tuple(
-            site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1]), site_dim(sites[0])))
-          .cast<py::array>();
+        return py::cast<py::array>(np.attr("zeros")(py::make_tuple(
+          site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1]), site_dim(sites[0]))));
     }
 
     auto np = numpy();
@@ -284,8 +281,8 @@ quadratic_coupling_numpy(std::vector<Site::Ptr> const& sites,
       site_dim(sites[0]), site_dim(sites[1]), site_dim(sites[1]), site_dim(sites[0])));
     py::object jw = occupation_jw(occ_i);
     for (py::ssize_t idx = 0; idx < py::len(species_i); ++idx) {
-        py::object k_i = species_i[py::int_(idx)];
-        py::object k_j = species_j[py::int_(idx)];
+        py::object k_i = species_i[idx];
+        py::object k_j = species_j[idx];
         py::object op_i = occ_i->get_creator_numpy(k_i, true);
         py::object op_j = is_pairing ? occ_i->get_creator_numpy(k_j, true)
                                      : occ_i->get_annihilator_numpy(k_j, true);
@@ -296,7 +293,7 @@ quadratic_coupling_numpy(std::vector<Site::Ptr> const& sites,
                                  py::none(), py::slice(), py::slice(), py::none()))));
     }
     py::array h_conj = np.attr("transpose")(h.attr("conj")(), py::make_tuple(3, 2, 1, 0));
-    return add_hc ? (h + h_conj).cast<py::array>() : h.cast<py::array>();
+    return add_hc ? py::cast<py::array>((h + h_conj)) : py::cast<py::array>(h);
 }
 
 py::object
@@ -382,11 +379,11 @@ py::object
 freeze(py::object obj)
 {
     if (py::isinstance<py::dict>(obj)) {
-        py::dict d = obj.cast<py::dict>();
+        py::dict d = py::to_dict(obj);
         std::vector<std::pair<std::string, py::object>> items;
         items.reserve(d.size());
         for (auto item : d) {
-            items.emplace_back(py::str(item.first).cast<std::string>(),
+            items.emplace_back(py::cast<std::string>(py::str(item.first)),
                                freeze(py::reinterpret_borrow<py::object>(item.second)));
         }
         std::sort(items.begin(), items.end(), [](auto const& a, auto const& b) {
@@ -1062,7 +1059,7 @@ spin_spin_coupling(std::vector<Site::Ptr> sites,
         add_ladder_term(Jmm, sm0, sm1);
     }
     h = np.attr("transpose")(h, py::make_tuple(0, 2, 3, 1));
-    return coupling_from_dense_block(h.cast<py::array>(), sites, parse_name(name, "spin-spin"));
+    return coupling_from_dense_block(py::cast<py::array>(h), sites, parse_name(name, "spin-spin"));
 }
 
 Coupling
@@ -1095,7 +1092,8 @@ spin_field_coupling(std::vector<Site::Ptr> sites,
                                spin->spin_vector.attr("__getitem__")(
                                  py::make_tuple(py::slice(), py::slice(), 2))));
     }
-    return coupling_from_dense_block(h.cast<py::array>(), sites, parse_name(name, "spin-field"));
+    return coupling_from_dense_block(
+      py::cast<py::array>(h), sites, parse_name(name, "spin-field"));
 }
 
 Coupling
@@ -1118,7 +1116,7 @@ aklt_coupling(std::vector<Site::Ptr> sites,
       S_dot_S, S_dot_S, py::make_tuple(py::make_tuple(3, 2), py::make_tuple(0, 1)));
     py::object h = np_add(np_multiply(py::float_(J), S_dot_S),
                           np_multiply(py::float_(J / 3.0), S_dot_S_square));
-    return coupling_from_dense_block(h.cast<py::array>(), sites, parse_name(name, "AKLT"));
+    return coupling_from_dense_block(py::cast<py::array>(h), sites, parse_name(name, "AKLT"));
 }
 
 Coupling
@@ -1152,7 +1150,7 @@ chiral_3spin_coupling(std::vector<Site::Ptr> sites,
     py::object h = np_multiply(
       py::float_(chi), np.attr("tensordot")(spin0->spin_vector, SxS, py::make_tuple(-1, -1)));
     h = np.attr("transpose")(h, py::make_tuple(0, 2, 3, 4, 5, 1));
-    return coupling_from_dense_block(h.cast<py::array>(), sites, parse_name(name, "S.SxS"));
+    return coupling_from_dense_block(py::cast<py::array>(h), sites, parse_name(name, "S.SxS"));
 }
 
 Coupling
@@ -1168,7 +1166,8 @@ chemical_potential(std::vector<Site::Ptr> sites,
     }
     auto np = numpy();
     py::object h = np_multiply(py::float_(-mu), occ->get_occupation_numpy(species));
-    return coupling_from_dense_block(h.cast<py::array>(), sites, parse_name(name, "chem. pot."));
+    return coupling_from_dense_block(
+      py::cast<py::array>(h), sites, parse_name(name, "chem. pot."));
 }
 
 Coupling
@@ -1186,7 +1185,7 @@ onsite_interaction(std::vector<Site::Ptr> sites,
     py::object n_i = occ->get_occupation_numpy(species);
     py::object h = np_multiply(py::float_(0.5 * U), np.attr("matmul")(n_i, n_i));
     return coupling_from_dense_block(
-      h.cast<py::array>(), sites, parse_name(name, "onsite interaction"));
+      py::cast<py::array>(h), sites, parse_name(name, "onsite interaction"));
 }
 
 Coupling
@@ -1221,7 +1220,7 @@ density_density_interaction(std::vector<Site::Ptr> sites,
         n_j.attr("__getitem__")(
           py::make_tuple(py::none(), py::slice(), py::slice(), py::none()))));
     return coupling_from_dense_block(
-      h.cast<py::array>(), sites, parse_name(name, "density-density"));
+      py::cast<py::array>(h), sites, parse_name(name, "density-density"));
 }
 
 Coupling
@@ -1234,11 +1233,11 @@ hopping(std::vector<Site::Ptr> sites,
     py::array h = quadratic_coupling_numpy(sites, false, species, false);
     auto np = numpy();
     py::array h_conj =
-      np.attr("transpose")(h.attr("conj")(), py::make_tuple(3, 2, 1, 0)).cast<py::array>();
+      py::cast<py::array>(np.attr("transpose")(h.attr("conj")(), py::make_tuple(3, 2, 1, 0)));
     py::object weighted_h =
       np_add(np_multiply(py::float_(t_left), h), np_multiply(py::float_(t_right), h_conj));
     return coupling_from_dense_block(
-      weighted_h.cast<py::array>(), sites, parse_name(name, "hopping"));
+      py::cast<py::array>(weighted_h), sites, parse_name(name, "hopping"));
 }
 
 Coupling
@@ -1250,7 +1249,7 @@ pairing(std::vector<Site::Ptr> sites,
     py::array h = quadratic_coupling_numpy(sites, true, species);
     auto np = numpy();
     return coupling_from_dense_block(
-      np_multiply(py::float_(Delta), np.attr("array")(h)).cast<py::array>(),
+      py::cast<py::array>(np_multiply(py::float_(Delta), np.attr("array")(h))),
       sites,
       parse_name(name, "pairing"));
 }
@@ -1266,37 +1265,36 @@ onsite_pairing(std::vector<Site::Ptr> sites,
     if (!occ) {
         throw std::invalid_argument("onsite_pairing requires bosonic or fermionic sites");
     }
-    py::tuple species_tuple =
-      species.is_none() ? default_species_pair() : species.cast<py::tuple>();
+    py::tuple species_tuple = species.is_none() ? default_species_pair() : py::to_tuple(species);
     py::list species_1;
     py::list species_2;
-    if (is_all_species(species_tuple[0].cast<py::object>())) {
+    if (is_all_species(py::cast<py::object>(species_tuple[0]))) {
         for (int64 k = 0; k < occ->num_species; ++k) {
             species_1.append(k);
         }
     } else {
-        species_1 = py::list(species_tuple[0]);
+        species_1 = py::list(py::object(species_tuple[0]));
     }
-    if (is_all_species(species_tuple[1].cast<py::object>())) {
+    if (is_all_species(py::cast<py::object>(species_tuple[1]))) {
         for (int64 k = 0; k < occ->num_species; ++k) {
             species_2.append(k);
         }
     } else {
-        species_2 = py::list(species_tuple[1]);
+        species_2 = py::list(py::object(species_tuple[1]));
     }
 
     auto np = numpy();
     py::object h = np.attr("zeros")(py::make_tuple(site_dim(sites[0]), site_dim(sites[0])));
     for (py::ssize_t i = 0; i < py::len(species_1); ++i) {
-        py::object k1 = species_1[py::int_(i)];
-        py::object k2 = species_2[py::int_(i)];
+        py::object k1 = species_1[i];
+        py::object k2 = species_2[i];
         py::object a_i_hc = occ->get_creator_numpy(k1, true);
         py::object a_j_hc = occ->get_creator_numpy(k2, true);
         h = np_add(h, np_multiply(py::float_(Delta), np.attr("matmul")(a_i_hc, a_j_hc)));
     }
     h = h.attr("__iadd__")(np.attr("transpose")(h.attr("conj")()));
     return coupling_from_dense_block(
-      h.cast<py::array>(), sites, parse_name(name, "onsite pairing"));
+      py::cast<py::array>(h), sites, parse_name(name, "onsite pairing"));
 }
 
 Coupling
@@ -1346,7 +1344,8 @@ clock_clock_coupling(std::vector<Site::Ptr> sites,
     if (plus_hc) {
         h = h.attr("__iadd__")(np.attr("transpose")(h.attr("conj")(), py::make_tuple(3, 2, 1, 0)));
     }
-    return coupling_from_dense_block(h.cast<py::array>(), sites, parse_name(name, "clock-clock"));
+    return coupling_from_dense_block(
+      py::cast<py::array>(h), sites, parse_name(name, "clock-clock"));
 }
 
 Coupling
@@ -1370,7 +1369,8 @@ clock_field_coupling(std::vector<Site::Ptr> sites,
     py::object h =
       np_add(np_multiply(py::float_(hx_val), np_add(X, np.attr("transpose")(X.attr("conj")()))),
              np_multiply(py::float_(hz_val), np_add(Z, np.attr("transpose")(Z.attr("conj")()))));
-    return coupling_from_dense_block(h.cast<py::array>(), sites, parse_name(name, "clock-field"));
+    return coupling_from_dense_block(
+      py::cast<py::array>(h), sites, parse_name(name, "clock-field"));
 }
 
 Coupling

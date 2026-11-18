@@ -2,9 +2,28 @@
 
 ## Status
 
-**Done.** The abstract `BlockBackend`, concrete `NumpyBlockBackend`, and the supporting `Block` / `Scalar` types live in C++ with pybind11 bindings. Python imports them from `lasyten._core` via `lasyten/block_backends/__init__.py`. The full pytest suite was brought back to green after the switch.
+**Done (pybind11 era).** The abstract `BlockBackend`, concrete `NumpyBlockBackend`,
+and the supporting `Block` / `Scalar` types live in C++. Python imports them from
+`lasyten._core` via `lasyten/block_backends/__init__.py`.
 
-The original Python sources `lasyten/block_backends/_block_backend.py` and `lasyten/block_backends/numpy.py` are still present: `ArrayApiBlockBackend` and `TorchBlockBackend` still subclass the Python ABC. Public users of `BlockBackend` / `NumpyBlockBackend` get the C++ implementations.
+**Follow-up (#255):** migrate bindings to nanobind, add native
+[Eigen/LAPACK BlockBackend](convert_EigenBlockBackend.md), replace `py::array`
+boundaries with `nb::ndarray` / owning Eigen storage, and make
+`LASYTEN_WITH_PYTHON=OFF` viable. See [convert_nanobind.md](convert_nanobind.md).
+
+| Backend | Storage / compute | #255 direction |
+| --- | --- | --- |
+| `NumpyBlockBackend` | `py::array` + Python NumPy/SciPy | **Transitional**; CMake option `LASYTEN_WITH_NUMPY_BACKEND` (default ON with Python) |
+| `TorchBlockBackend` | `torch::Tensor` + ATen | Keep for GPU |
+| `ArrayApiBlockBackend` | `py::object` + Array API | **Transitional**; same CMake option as Numpy |
+| `EigenBlockBackend` | Owning buffer + Eigen/LAPACK | Opt-in CPU backend (`"eigen"`); long-term Python-free default, but **`"cpu"` stays Numpy for now** (switch deferred — leftover #5) |
+
+`LASYTEN_WITH_NUMPY_BACKEND=OFF` drops `numpy.cpp` / `array_api.cpp` (and their bindings and the
+Python classes `NumpyBlockBackend` / `ArrayApiBlockBackend`); `"cpu"` then resolves to Eigen
+(`default_cpu_block_backend_shared()` in `block_backend.h` is the single switch point). With
+`LASYTEN_WITH_PYTHON=OFF` the option is forced OFF. The `py::`-typed virtuals of `BlockBackend`
+(`block_from_numpy`, `to_numpy`, `apply_leg_permutations`, ...) are compiled out in that
+configuration; the Python-free replacement for the latter is `apply_axis_permutations`.
 
 Related notes: [convert_Spaces.md](convert_Spaces.md) — `apply_basis_perm` now uses C++ `Leg`.
 
@@ -69,7 +88,7 @@ Python still accepts `numbers.Number` in many tensor APIs; those call sites were
 - Expect substantial binding surface area for arithmetic dunders; mirror both Block–Block and Block–Scalar (and float/complex) overloads or Python will silently fall back to `NotImplemented`.
 - After swapping the public import to `_core`, run the full tensor/backend pytest suite early: most breakages showed up as missing Scalar/Block operator overloads rather than missing named methods.
 
-## TODO checklist (completed)
+## TODO checklist (completed for original C++ conversion)
 
 - [x] initial setup / planning
 - [x] C++ declaration + definition for `BlockBackend`, `Block`, `Scalar`, `NumpyBlockBackend`
@@ -77,5 +96,18 @@ Python still accepts `numbers.Number` in many tensor APIs; those call sites were
 - [x] monkey-patch via `lasyten/block_backends/__init__.py`
 - [x] adjust tensor/backend Python for `Scalar` where needed
 - [x] pytest green with C++ BlockBackend
-- [ ] remove leftover Python `NumpyBlockBackend` / abstract `BlockBackend` once ArrayApi/Torch are ported or otherwise decoupled
 - [x] tighten `apply_basis_perm` when `Space`/`Leg` exists in C++ ([convert_Spaces.md](convert_Spaces.md))
+
+## TODO checklist (#255 follow-up)
+
+- [ ] Eigen/LAPACK backend — [convert_EigenBlockBackend.md](convert_EigenBlockBackend.md)
+- [ ] Decouple `py::array` / `py::object` from `block_backend.h` public API
+- [x] Nanobind bindings
+- [x] `nb::ndarray` I/O for Eigen (`eigen_ndarray.h`) and native Numpy/Torch (`ndarray_dispatch.h`);
+      `to_numpy` / `block_from_numpy` (`py::array`) remain on the C++ API (leftover #10 remainder:
+      models DOF, JAX/TF tags)
+- [ ] Drop `PyBlockBackend` trampoline initially (tenpy does not subclass it)
+- [ ] Default `"cpu"` → Eigen — **deferred** (leftover #5): Eigen suite is correct but ~6× slower
+      than Numpy on tiny-block / densify-check paths; keep Numpy as `"cpu"` for now
+- [x] Gate Numpy/ArrayApi Python-dispatch backends (`LASYTEN_WITH_NUMPY_BACKEND`, marked transitional in `backend_factory.cpp`); removal + `"cpu"` switch still deferred (leftover #5)
+- [ ] `LASYTEN_WITH_PYTHON=OFF` builds without Python (Phase 5)

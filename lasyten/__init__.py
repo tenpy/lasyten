@@ -23,9 +23,19 @@ from . import (
     models,
 )
 
-# import pybind11 bindings from C++ code
+# import nanobind bindings from C++ code
 from .backends import TensorBackend, get_backend
-from .block_backends import Block, BlockBackend, Dtype, NumpyBlockBackend, TorchBlockBackend
+from .block_backends import (
+    Block,
+    BlockBackend,
+    Dtype,
+    EigenBlockBackend,
+    TorchBlockBackend,
+)
+
+# transitional Python-dispatch backend, only built with -DLASYTEN_WITH_NUMPY_BACKEND=ON (default)
+if block_backends.WITH_NUMPY_BACKEND:
+    from .block_backends import NumpyBlockBackend  # noqa: F401
 
 # subpackages
 from .config import get_config, set_options, temporary_options
@@ -160,6 +170,7 @@ __all__ = [
     'DiagonalTensor',
     'DirectSumSpace',
     'Dtype',
+    'EigenBlockBackend',
     'ElementarySpace',
     'FermionNumber',
     'FermionParity',
@@ -173,7 +184,6 @@ __all__ = [
     'LegPipe',
     'Mask',
     'NoSymmetry',
-    'NumpyBlockBackend',
     'PlanarDiagram',
     'PlanarLinearOperator',
     'QuantumDoubleZNAnyonCategory',
@@ -283,6 +293,9 @@ __all__ = [
     'truncated_svd',
     'zero_like',
 ]
+
+if block_backends.WITH_NUMPY_BACKEND:
+    __all__ += ['NumpyBlockBackend']
 
 
 def show_version():

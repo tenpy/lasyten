@@ -1,8 +1,13 @@
 #include <lasyten/block_backend/block_backend.h>
 #include <lasyten/block_backend/dtypes.h>
+#include <lasyten/block_backend/eigen.h>
+#if LASYTEN_WITH_NUMPY_BACKEND
 #include <lasyten/block_backend/numpy.h>
+#endif
+#if LASYTEN_WITH_TORCH_BACKEND
+#include <lasyten/block_backend/torch.h>
+#endif
 #include <lasyten/lasyten.h>
-#include <lasyten/symmetries/spaces.h>
 #include <lasyten/tools.h>
 
 #include <algorithm>
@@ -19,6 +24,7 @@
 
 namespace lasyten {
 
+#if LASYTEN_HAS_PYTHON
 namespace {
 
 bool
@@ -31,7 +37,7 @@ is_py_integer_scalar_key(const py::handle& obj)
     if (py::isinstance<py::slice>(obj))
         return false;
     try {
-        (void)obj.cast<int64>();
+        (void)py::cast<int64>(obj);
         return true;
     } catch (const py::cast_error&) {
         return false;
@@ -42,14 +48,19 @@ std::optional<BlockBackend::BlockIndex>
 try_py_handle_to_block_index(py::handle key)
 {
     if (py::isinstance<BlockBackend::Block>(key)) {
-        return BlockBackend::BlockCPtr(key.cast<BlockPtr>());
+        return BlockBackend::BlockCPtr(py::cast<BlockPtr>(key));
     }
     if (py::isinstance<py::array>(key)) {
         py::array arr = py::reinterpret_borrow<py::array>(key);
         // Bool masks must stay boolean; wrap as a numpy Block so backends can index natively.
         try {
             if (dtype::from_numpy_dtype(arr.dtype()) == Dtype::Bool) {
+
+#if LASYTEN_WITH_NUMPY_BACKEND
                 return BlockBackend::BlockCPtr(std::make_shared<NumpyBlockBackend::Block>(arr));
+#else
+                return BlockBackend::BlockCPtr(std::make_shared<EigenBlockBackend::Block>(arr));
+#endif
             }
         } catch (std::invalid_argument const&) {
             // Unsupported dtype for lasyten — leave for the py::object escape hatch.
@@ -68,7 +79,7 @@ try_py_handle_to_block_index(py::handle key)
         for (py::ssize_t i = 0; i < seq.size(); ++i) {
             if (!is_py_integer_scalar_key(seq[i]))
                 return std::nullopt;
-            vec.push_back(seq[i].cast<int64>());
+            vec.push_back(py::cast<int64>(seq[i]));
         }
         return vec;
     }
@@ -77,14 +88,14 @@ try_py_handle_to_block_index(py::handle key)
         auto as_opt_int = [](py::object o) -> std::optional<int64> {
             if (o.is_none())
                 return std::nullopt;
-            return o.cast<int64>();
+            return py::cast<int64>(o);
         };
         return BlockBackend::AxisSlice{ as_opt_int(sl.attr("start")),
                                         as_opt_int(sl.attr("stop")),
                                         as_opt_int(sl.attr("step")) };
     }
     if (is_py_integer_scalar_key(key))
-        return key.cast<int64>();
+        return py::cast<int64>(key);
     return std::nullopt;
 }
 
@@ -146,6 +157,7 @@ BlockBackend::try_py_key_to_block_indices(py::object key)
         return std::nullopt;
     return std::vector<BlockIndex>{ std::move(*single) };
 }
+#endif // LASYTEN_HAS_PYTHON
 
 // -----------------------------------------------------------------------------
 // Block class
@@ -169,6 +181,7 @@ BlockBackend::Block::abs() const
     return get_backend()->abs(shared_from_this());
 }
 
+#if LASYTEN_HAS_PYTHON
 std::shared_ptr<BlockBackend::Block>
 BlockBackend::Block::operator[](py::object key)
 {
@@ -179,6 +192,7 @@ BlockBackend::Block::operator[](py::object key) const
 {
     return get_item(key);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 std::shared_ptr<BlockBackend::Block>
 BlockBackend::Block::operator[](std::span<const BlockIndex> key)
@@ -242,14 +256,15 @@ BlockBackend::Block::set_item(int64 idx, const Scalar& value)
     set_item(std::vector<int64>{ idx }, value);
 }
 
+#if LASYTEN_HAS_PYTHON
 BlockBackend::Block&
 BlockBackend::Block::operator=(py::object rhs)
 {
     BlockIndex all = AxisSlice::all();
     if (py::isinstance<Block>(rhs)) {
-        set_item(std::span<const BlockIndex>(&all, 1), rhs.cast<Block&>());
+        set_item(std::span<const BlockIndex>(&all, 1), py::cast<Block&>(rhs));
     } else if (py::isinstance<Scalar>(rhs)) {
-        set_item(std::span<const BlockIndex>(&all, 1), rhs.cast<Scalar&>());
+        set_item(std::span<const BlockIndex>(&all, 1), py::cast<Scalar&>(rhs));
     } else {
         // Fall back: assign via Python key path with a converted full-slice key.
         set_item(block_indices_to_py(std::span<const BlockIndex>(&all, 1)), rhs);
@@ -264,6 +279,7 @@ BlockBackend::Block::to_numpy(Dtype dtype) const
     py::module_ np = py::module_::import("numpy");
     return py::array(np.attr("asarray")(arr, dtype::to_numpy_dtype(dtype)));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 int64
 BlockBackend::Block::ndim() const
@@ -331,6 +347,7 @@ BlockBackend::Scalar::as_bool() const
     return z.real() != float64(0) || z.imag() != float64(0);
 }
 
+#if LASYTEN_HAS_PYTHON
 py::object
 BlockBackend::Scalar::to_numpy() const
 {
@@ -355,6 +372,7 @@ BlockBackend::Scalar::to_numpy() const
     }
     return dtype::to_numpy_dtype(block_->dtype())(val);
 }
+#endif // LASYTEN_HAS_PYTHON
 
 BlockBackend::Scalar
 BlockBackend::Scalar::operator+(const Scalar& other) const
@@ -723,6 +741,7 @@ BlockBackend::mul(complex128 a, const BlockCPtr& b)
     return mul(as_scalar(a), b);
 }
 
+#if LASYTEN_HAS_PYTHON
 py::object
 BlockBackend::to_numpy(const BlockCPtr& a, std::optional<py::object> numpy_dtype)
 {
@@ -730,25 +749,133 @@ BlockBackend::to_numpy(const BlockCPtr& a, std::optional<py::object> numpy_dtype
         return py::object(a->to_numpy(dtype::from_numpy_dtype(*numpy_dtype)));
     return py::object(a->to_numpy());
 }
+#endif // LASYTEN_HAS_PYTHON
+
+std::shared_ptr<BlockBackend>
+default_cpu_block_backend_shared()
+{
+#if LASYTEN_WITH_NUMPY_BACKEND
+    // TODO(#255): EigenBlockBackend once it has full test-suite parity.
+    return NumpyBlockBackend::from_factory_shared("cpu");
+#else
+    return EigenBlockBackend::from_factory_shared("eigen");
+#endif
+}
+
+bool
+is_torch_block_backend(const BlockBackend* backend)
+{
+#if LASYTEN_WITH_TORCH_BACKEND
+    return dynamic_cast<const TorchBlockBackend*>(backend) != nullptr;
+#else
+    (void)backend;
+    return false;
+#endif
+}
+
+std::string
+torch_device_for_hdf5_load(std::string const& device, std::optional<std::string> fallback)
+{
+#if LASYTEN_WITH_TORCH_BACKEND
+    return TorchBlockBackend::device_for_hdf5_load(device, std::move(fallback));
+#else
+    (void)fallback;
+    return device;
+#endif
+}
 
 BlockPtr
-BlockBackend::apply_basis_perm(const BlockCPtr& block, const std::vector<LegCPtr>& legs, bool inv)
+BlockBackend::convert_block(BlockCPtr const& block,
+                            std::optional<Dtype> dtype,
+                            std::optional<std::string> device)
 {
-    std::vector<py::array_t<int64>> perms;
-    perms.reserve(legs.size());
-    for (LegCPtr const& leg : legs) {
-        if (!leg) {
-            throw std::invalid_argument("apply_basis_perm: leg must not be None");
+    if (!block) {
+        throw std::invalid_argument("BlockBackend::convert_block: null block");
+    }
+    if (block->get_backend() == this) {
+        BlockPtr out = std::const_pointer_cast<Block>(block);
+        if (dtype && *dtype != block->dtype()) {
+            out = to_dtype(out, *dtype);
         }
-        auto const& perm_vec = inv ? leg.inverse_basis_perm() : leg.basis_perm();
+        if (device) {
+            auto const dev = as_device(device);
+            if (get_device(out) != dev) {
+                out = copy_block(out, dev);
+            }
+        }
+        return out;
+    }
+#if LASYTEN_HAS_PYTHON
+    return as_block(py::cast(block), dtype, device);
+#else
+    throw NotImplemented("BlockBackend::convert_block between different block backends needs "
+                         "Python (LASYTEN_WITH_PYTHON=ON)");
+#endif
+}
+
+std::vector<float64>
+BlockBackend::block_to_float64_vector(BlockCPtr const& block)
+{
+    auto const shp = get_shape(block);
+    if (shp.size() != 1) {
+        throw std::invalid_argument("block_to_float64_vector: expected a 1D block");
+    }
+    std::vector<float64> out(static_cast<std::size_t>(shp[0]));
+    for (int64 i = 0; i < shp[0]; ++i) {
+        out[static_cast<std::size_t>(i)] = get_block_element(block, { i }).as_complex128().real();
+    }
+    return out;
+}
+
+std::vector<bool>
+BlockBackend::block_to_bool_vector(BlockCPtr const& block)
+{
+    auto const shp = get_shape(block);
+    if (shp.size() != 1) {
+        throw std::invalid_argument("block_to_bool_vector: expected a 1D block");
+    }
+    std::vector<bool> out(static_cast<std::size_t>(shp[0]));
+    for (int64 i = 0; i < shp[0]; ++i) {
+        out[static_cast<std::size_t>(i)] = get_block_element(block, { i }).as_bool();
+    }
+    return out;
+}
+
+BlockPtr
+BlockBackend::block_from_bool_vector(std::vector<bool> const& values,
+                                     std::optional<std::string> device)
+{
+    auto block = zeros({ static_cast<int64>(values.size()) }, Dtype::Bool, as_device(device));
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (values[i]) {
+            block->set_item(static_cast<int64>(i), as_scalar(true));
+        }
+    }
+    return block;
+}
+
+BlockPtr
+BlockBackend::apply_axis_permutations(const BlockCPtr& block,
+                                      const std::vector<std::vector<int64>>& perms)
+{
+#if LASYTEN_HAS_PYTHON
+    std::vector<py::array_t<int64>> py_perms;
+    py_perms.reserve(perms.size());
+    for (auto const& perm_vec : perms) {
         py::array_t<int64> arr(static_cast<py::ssize_t>(perm_vec.size()));
         auto buf = arr.mutable_unchecked<1>();
         for (std::size_t i = 0; i < perm_vec.size(); ++i) {
             buf(static_cast<py::ssize_t>(i)) = perm_vec[i];
         }
-        perms.push_back(std::move(arr));
+        py_perms.push_back(std::move(arr));
     }
-    return apply_leg_permutations(block, perms);
+    return apply_leg_permutations(block, py_perms);
+#else
+    (void)block;
+    (void)perms;
+    throw NotImplemented(
+      "BlockBackend::apply_axis_permutations: this backend must override it (no Python)");
+#endif
 }
 
 BlockBackend::Scalar
@@ -1229,15 +1356,25 @@ operator<<(std::ostream& os, const BlockBackend::Block& block)
     if (shape.size() == 1)
         os << ',';
     os << "), dtype=" << dtype::repr(block.dtype()) << ", device=" << block.device() << ")\n";
-    os << py::str(block.to_numpy()).cast<std::string>();
+#if LASYTEN_HAS_PYTHON
+    os << py::cast<std::string>(py::str(block.to_numpy()));
+#else
+    for (auto const& line :
+         block.get_backend()->_block_repr_lines(block.shared_from_this(), "", 80, 40))
+        os << line << '\n';
+#endif
     return os;
 }
 
 std::ostream&
 operator<<(std::ostream& os, const BlockBackend::Scalar& scalar)
 {
-    os << "Scalar(" << py::str(scalar.to_numpy()).cast<std::string>()
+#if LASYTEN_HAS_PYTHON
+    os << "Scalar(" << py::cast<std::string>(py::str(scalar.to_numpy()))
        << ", dtype=" << dtype::repr(scalar.dtype()) << ')';
+#else
+    os << "Scalar(" << scalar.as_complex128() << ", dtype=" << dtype::repr(scalar.dtype()) << ')';
+#endif
     return os;
 }
 

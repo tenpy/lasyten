@@ -57,6 +57,48 @@ For a debug build, you can even enable automatic rebuild upon python import::
 
     pip install -v --no-build-isolation -C editable.rebuild=true -e .
 
+CMake options for the block backends and a Python-free build
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+``LASYTEN_WITH_NUMPY_BACKEND`` (default ON if ``LASYTEN_WITH_PYTHON`` is ON)
+    Build the transitional Python-dispatch backends ``NumpyBlockBackend`` and ``ArrayApiBlockBackend``.
+    The preferred CPU backend is the native ``EigenBlockBackend`` (factory name ``"eigen"``), and
+    ``TorchBlockBackend`` is for GPUs. With ``-DLASYTEN_WITH_NUMPY_BACKEND=OFF`` the two Python-dispatch
+    backends are neither compiled nor exposed in ``lasyten``, and ``"cpu"`` resolves to Eigen::
+
+        pip install -v --no-build-isolation -C cmake.define.LASYTEN_WITH_NUMPY_BACKEND=OFF .
+
+``LASYTEN_WITH_PYTHON`` (default ON)
+    The long-term goal is to be able to use the C++ library without any Python interpreter.
+    With ``-DLASYTEN_WITH_PYTHON=OFF`` CMake does not look for Python, nanobind, numpy or PyTorch, and
+    builds ``liblasyten`` from the Python-free sources: ``EigenBlockBackend``, the symmetry stack,
+    ``Space`` / ``Leg``, the Tensor classes, ``NoSymmetryBackend`` / ``AbelianBackend`` /
+    ``FusionTreeBackend`` (compose/svd/qr/lq/truncate, partial trace/compose, masks,
+    ``partial_trace``, ``from_grid``, … still stubbed — see
+    ``docs/cpp_conversion/convert_FusionTreeBackend.md``), krylov, and native
+    decompositions -- but no ``_core`` extension and no models / Numpy/ArrayApi/Torch backends.
+    CTests ``test_eigen_block_backend_no_python``, ``test_symmetric_blocks_no_python``, and
+    ``test_tensor_no_python`` run without an interpreter (``ldd`` shows no ``libpython``). Needs
+    only a C++ compiler, CMake, Eigen3, LAPACK/LAPACKE and HDF5 (e.g. from the conda env)::
+
+        cmake -S . -B /tmp/lasyten_off -G Ninja -DLASYTEN_WITH_PYTHON=OFF
+        cmake --build /tmp/lasyten_off
+        ctest --test-dir /tmp/lasyten_off --output-on-failure
+
+    The configure step prints which parts are skipped.
+    See ``docs/cpp_conversion/convert_nanobind.md`` (Phase 5 / leftover #1) for the status.
+
+``LASYTEN_STABLE_ABI`` (default ON)
+    Build ``lasyten._core`` (and liblasyten) against the Python Stable ABI: nanobind's ``STABLE_ABI`` mode with
+    ``Py_LIMITED_API`` = 3.12, linked against ``nanobind-static-abi3``. The extension is then called
+    ``_core.abi3.so`` and the wheel is tagged ``cp312-abi3`` (``wheel.py-api = "cp312"`` in ``pyproject.toml``),
+    i.e. it works for every CPython >= 3.12. The option is silently turned OFF for Python < 3.12 or a
+    non-CPython interpreter (then ``_core.cpython-3XX-....so`` is built). pybind11 is not used anymore: it
+    cannot be compiled with ``Py_LIMITED_API``.
+    CI builds and checks these wheels on Linux and macOS (``.github/workflows/publish.yml``,
+    ``scripts/check_abi3_wheel.py``); ``[tool.cibuildwheel]`` configures optional manylinux builds.
+
+
 Building from source on MacOS
 +++++++++++++++++++++++++++++
 Building on MacOS is not carefully tested yet, but Jakob got it running on an M2 MacBook running
@@ -72,6 +114,17 @@ In addition to the above instructions, do the following:
 - This working setup using Clang did not support all features that the GNU/Ubuntu setup did,
   e.g. ``std::numbers`` was not available. In this particular case, we could simply get rid of that
   dependency, but future updates may again introduce features that are not supported by the Clang/MacOS toolchain.
+- After the switch from pybind11 to nanobind, I got linker errors. This is because CMake auto-selected Apple Accelerate
+as BLA_VENDOR, which does not have the required `LAPACKE_*` symbols. The fix for me was to configure the build
+to use OpenBLAS by running
+```
+cmake -S . -B build \
+  -DBLA_VENDOR=OpenBLAS \
+  -DCMAKE_PREFIX_PATH=/opt/homebrew/anaconda3/envs/tenpy_v2
+```
+where the conda env name is obviously custom to my setup.
+Note that this makes gitignored changes in the local `build` directory, and you will have to redo
+this whenever that directory resets.
 
 Hosting and packaging cutover (manual)
 ++++++++++++++++++++++++++++++++++++++

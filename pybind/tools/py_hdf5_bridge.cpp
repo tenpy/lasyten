@@ -26,7 +26,7 @@ check_hdf5(herr_t status, char const* what)
 hid_t
 hid_from_h5py(py::handle obj)
 {
-    return obj.attr("id").attr("id").cast<hid_t>();
+    return py::cast<hid_t>(obj.attr("id").attr("id"));
 }
 
 HighFive::Group
@@ -56,20 +56,20 @@ loader_from_python(py::object hdf5_loader)
 {
     bool ignore = true;
     if (py::hasattr(hdf5_loader, "ignore_unknown"))
-        ignore = hdf5_loader.attr("ignore_unknown").cast<bool>();
+        ignore = py::to_bool(hdf5_loader.attr("ignore_unknown"));
     return Loader(wrap_group(hdf5_loader.attr("h5group")), ignore);
 }
 
 ::hdf5_io::Hdf5Buffer
 buffer_from_numpy(py::array arr)
 {
-    if (!arr.attr("flags").attr("c_contiguous").cast<bool>())
+    if (!py::to_bool(arr.attr("flags").attr("c_contiguous")))
         arr = py::reinterpret_steal<py::array>(arr.attr("copy")("C").release());
     ::hdf5_io::Hdf5Buffer buf;
     py::dtype dt = arr.dtype();
     buf.kind = dt.kind();
     buf.itemsize = static_cast<int>(dt.itemsize());
-    if (buf.kind == 'b' || (buf.kind == 'i' && dt.attr("name").cast<std::string>() == "bool")) {
+    if (buf.kind == 'b' || (buf.kind == 'i' && py::cast<std::string>(dt.attr("name")) == "bool")) {
         buf.kind = 'b';
         buf.itemsize = 1;
     }

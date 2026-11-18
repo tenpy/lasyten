@@ -178,9 +178,16 @@ def _load_live_core() -> ModuleType | None:
     """
     repo = Path(__file__).resolve().parent.parent
 
-    build_candidates = sorted((repo / 'build').glob('_core*.so'))
+    # Prefer the Stable ABI artifact: a leftover ``_core.cpython-*.so`` can
+    # shadow ``_core.abi3.so`` and disagree with the installed / editable module
+    # (same footgun as the old ``nanobind.stubgen -m _core`` CMake rule).
+    build_candidates = list((repo / 'build').glob('_core*.so')) + list(
+        (repo / 'build').glob('_core*.pyd')
+    )
     if build_candidates:
-        mod = _load_so(build_candidates[-1], repo=repo)
+        abi3 = [c for c in build_candidates if '.abi3.' in c.name or c.name.endswith('.abi3.so')]
+        chosen = max(abi3 or build_candidates, key=lambda p: p.stat().st_mtime)
+        mod = _load_so(chosen, repo=repo)
         if mod is not None:
             return mod
 

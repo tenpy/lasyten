@@ -1,6 +1,6 @@
 #include "../../doc_plus.h"
 #include "docstrings/symmetries/factors/sun.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 #include "symmetries/casters.hpp"
 
@@ -20,10 +20,10 @@ std::string
 path_from_file_or_str(py::handle obj)
 {
     if (py::isinstance<py::str>(obj)) {
-        return obj.cast<std::string>();
+        return py::cast<std::string>(obj);
     }
     // Open h5py.File (or anything with a .filename attribute).
-    return py::str(obj.attr("filename")).cast<std::string>();
+    return py::cast<std::string>(py::str(obj.attr("filename")));
 }
 
 py::dict
@@ -43,11 +43,11 @@ sector_int_map_to_py(std::map<Sector, int64> const& m)
 } // namespace
 
 void
-bind_sun(py::module_& m)
+bind_sun(nb::module_& m)
 {
-    py::class_<SUN, Group, py::smart_holder> cls(m, "SUN", DOC(lasyten, SUN));
+    nb::class_<SUN, Group> cls(m, "SUN", DOC(lasyten, SUN));
 
-    cls.def(py::init([](int N,
+    cls.def(nb::new_([](int N,
                         std::optional<int64> hweight,
                         std::optional<int64> cg_hweight,
                         std::optional<int64> f_hweight,
@@ -64,17 +64,17 @@ bind_sun(py::module_& m)
                                         std::move(filename_base),
                                         std::move(descriptive_name));
             }),
-            py::arg("N"),
-            py::arg("hweight") = py::none(),
-            py::kw_only(),
-            py::arg("cg_hweight") = py::none(),
-            py::arg("f_hweight") = py::none(),
-            py::arg("r_hweight") = py::none(),
-            py::arg("path") = py::none(),
-            py::arg("filename_base") = py::none(),
-            py::arg("descriptive_name") = py::none());
+            nb::arg("N"),
+            nb::arg("hweight").none() = nb::none(),
+            nb::kw_only(),
+            nb::arg("cg_hweight").none() = nb::none(),
+            nb::arg("f_hweight").none() = nb::none(),
+            nb::arg("r_hweight").none() = nb::none(),
+            nb::arg("path").none() = nb::none(),
+            nb::arg("filename_base").none() = nb::none(),
+            nb::arg("descriptive_name").none() = nb::none());
 
-    cls.def(py::init([](int N,
+    cls.def(nb::new_([](int N,
                         py::object CGfile,
                         py::object Ffile,
                         py::object Rfile,
@@ -85,95 +85,95 @@ bind_sun(py::module_& m)
                                              path_from_file_or_str(Rfile),
                                              std::move(descriptive_name));
             }),
-            py::arg("N"),
-            py::arg("CGfile"),
-            py::arg("Ffile"),
-            py::arg("Rfile"),
-            py::arg("descriptive_name") = py::none());
+            nb::arg("N"),
+            nb::arg("CGfile"),
+            nb::arg("Ffile"),
+            nb::arg("Rfile"),
+            nb::arg("descriptive_name").none() = nb::none());
 
     m.def("su_n_data_filename",
           &su_n_data_filename,
-          py::arg("N"),
-          py::arg("kind"),
-          py::arg("hweight"),
-          py::arg("filename_base") = py::none(),
+          nb::arg("N"),
+          nb::arg("kind"),
+          nb::arg("hweight"),
+          nb::arg("filename_base").none() = nb::none(),
           DOC(lasyten, su_n_data_filename));
 
     m.def("su_n_data_file_path",
           &su_n_data_file_path,
-          py::arg("N"),
-          py::arg("kind"),
-          py::arg("hweight"),
-          py::arg("path") = py::none(),
-          py::arg("filename_base") = py::none(),
+          nb::arg("N"),
+          nb::arg("kind"),
+          nb::arg("hweight"),
+          nb::arg("path").none() = nb::none(),
+          nb::arg("filename_base").none() = nb::none(),
           DOC(lasyten, su_n_data_file_path));
 
-    cls.def_readonly("N", &SUN::N)
-      .def_readonly("CGpath", &SUN::CGpath)
-      .def_readonly("Fpath", &SUN::Fpath)
-      .def_readonly("Rpath", &SUN::Rpath)
+    cls.def_ro("N", &SUN::N)
+      .def_ro("CGpath", &SUN::CGpath)
+      .def_ro("Fpath", &SUN::Fpath)
+      .def_ro("Rpath", &SUN::Rpath)
       // Back-compat aliases for the former h5py handle attributes (expose paths).
-      .def_property_readonly("CGfile", [](SUN const& self) { return py::str(self.CGpath); })
-      .def_property_readonly("Ffile", [](SUN const& self) { return py::str(self.Fpath); })
-      .def_property_readonly("Rfile", [](SUN const& self) { return py::str(self.Rpath); })
+      .def_prop_ro("CGfile", [](SUN const& self) { return py::str(self.CGpath); })
+      .def_prop_ro("Ffile", [](SUN const& self) { return py::str(self.Fpath); })
+      .def_prop_ro("Rfile", [](SUN const& self) { return py::str(self.Rpath); })
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<SUN>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
 
     cls.def("hweight_from_CG_hdf5", &SUN::hweight_from_CG_hdf5)
       .def("hweight_from_F_hdf5", &SUN::hweight_from_F_hdf5)
       .def("hweight_from_R_hdf5", &SUN::hweight_from_R_hdf5)
       .def("S_index_irrep_weight",
            &SUN::S_index_irrep_weight,
-           py::arg("a"),
+           nb::arg("a"),
            DOC(lasyten, SUN, S_index_irrep_weight))
       .def("highest_irrep_in_decomp",
            &SUN::highest_irrep_in_decomp,
-           py::arg("a"),
-           py::arg("b"),
+           nb::arg("a"),
+           nb::arg("b"),
            DOC(lasyten, SUN, highest_irrep_in_decomp))
       .def(
         "dims_of_irreps",
         [](SUN const& self, Sector a, Sector b) {
             return sector_int_map_to_py(self.dims_of_irreps(a, b));
         },
-        py::arg("a"),
-        py::arg("b"),
+        nb::arg("a"),
+        nb::arg("b"),
         DOC(lasyten, SUN, dims_of_irreps))
       .def(
         "outer_multiplicity_from_CG",
         [](SUN const& self, Sector a, Sector b) {
             return sector_int_map_to_py(self.outer_multiplicity_from_CG(a, b));
         },
-        py::arg("a"),
-        py::arg("b"),
+        nb::arg("a"),
+        nb::arg("b"),
         DOC(lasyten, SUN, outer_multiplicity_from_CG))
       .def("clebschgordan",
            &SUN::clebschgordan,
-           py::arg("a"),
-           py::arg("q_a"),
-           py::arg("b"),
-           py::arg("q_b"),
-           py::arg("c"),
-           py::arg("q_c"),
-           py::arg("mu"),
+           nb::arg("a"),
+           nb::arg("q_a"),
+           nb::arg("b"),
+           nb::arg("q_b"),
+           nb::arg("c"),
+           nb::arg("q_c"),
+           nb::arg("mu"),
            DOC(lasyten, SUN, clebschgordan))
       .def("_f_symbol_from_CG",
            &SUN::_f_symbol_from_CG,
-           py::arg("a"),
-           py::arg("b"),
-           py::arg("c"),
-           py::arg("d"),
-           py::arg("e"),
-           py::arg("f"),
+           nb::arg("a"),
+           nb::arg("b"),
+           nb::arg("c"),
+           nb::arg("d"),
+           nb::arg("e"),
+           nb::arg("f"),
            DOC(lasyten, SUN, _f_symbol_from_CG))
       .def("_r_symbol_from_CG",
            &SUN::_r_symbol_from_CG,
-           py::arg("a"),
-           py::arg("b"),
-           py::arg("c"),
+           nb::arg("a"),
+           nb::arg("b"),
+           nb::arg("c"),
            DOC(lasyten, SUN, _r_symbol_from_CG))
       .def(
         "has_data_in_group",
@@ -183,16 +183,16 @@ bind_sun(py::module_& m)
             if (py::hasattr(group, "id")) {
                 py::object idobj = group.attr("id");
                 if (py::hasattr(idobj, "id")) {
-                    hid = idobj.attr("id").cast<hid_t>();
+                    hid = py::cast<hid_t>(idobj.attr("id"));
                 } else {
-                    hid = idobj.cast<hid_t>();
+                    hid = py::cast<hid_t>(idobj);
                 }
             } else {
                 throw py::type_error("has_data_in_group expects an h5py Group/Dataset");
             }
             return self.has_data_in_group(hid);
         },
-        py::arg("group"))
+        nb::arg("group"))
       .def(
         "sanity_check_hdf5",
         [](SUN const& self, py::object file) {
@@ -200,7 +200,7 @@ bind_sun(py::module_& m)
             HighFive::File hf(path, HighFive::File::ReadOnly);
             self.sanity_check_hdf5(hf);
         },
-        py::arg("file"),
+        nb::arg("file"),
         DOC(lasyten, SUN, sanity_check_hdf5));
 }
 

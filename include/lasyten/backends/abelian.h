@@ -236,7 +236,7 @@ class AbelianBackend : public TensorBackend
 
     DataPtr from_dense_block_trivial_sector(BlockBackend::BlockPtr block, Space::Ptr leg) override;
 
-    DataPtr from_grid(std::vector<std::vector<py::object>> grid,
+    DataPtr from_grid(std::vector<std::vector<TensorCPtr>> grid,
                       TensorProduct::Ptr new_codomain,
                       TensorProduct::Ptr new_domain,
                       std::vector<std::vector<int64>> left_mult_slices,

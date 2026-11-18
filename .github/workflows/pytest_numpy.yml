@@ -24,10 +24,6 @@ jobs:
       run:
         # needed so micromamba activation from setup-micromamba takes effect
         shell: bash -el {0}
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.14"]
 
     steps:
     - name: Checkout
@@ -47,7 +43,7 @@ jobs:
         cache-environment: true
 
     - name: Build and install
-      # build deps (pybind11, scikit-build-core, cmake, pytorch, ...) come from environment.yml
+      # build deps (scikit-build-core, cmake, pytorch, ...) come from environment.yml
       # --no-build-isolation avoids pip pulling a CUDA torch wheel that needs the CUDA toolkit
       # hdf5_io is not on PyPI yet; install the git submodule first so lasyten[io]/test] can resolve it
       run: |

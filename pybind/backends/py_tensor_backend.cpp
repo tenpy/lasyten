@@ -1,5 +1,5 @@
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 #include "../tensors/py_callbacks.hpp"
 #include "docstrings/backends/tensor_backend.h"
 #include "py_trampolines.hpp"
@@ -19,33 +19,33 @@ namespace lasyten {
 
 namespace {
 
-std::optional<py::class_<TensorBackend::Data, py::smart_holder>> g_tensor_backend_data;
-std::optional<py::class_<TensorBackend, PyTensorBackend, py::smart_holder>> g_tensor_backend;
+std::optional<nb::class_<TensorBackend::Data>> g_tensor_backend_data;
+std::optional<nb::class_<TensorBackend>> g_tensor_backend;
 
 } // namespace
 
 void
-declare_tensor_backend(py::module_& m)
+declare_tensor_backend(nb::module_& m)
 {
-    g_tensor_backend_data =
-      py::class_<TensorBackend::Data, py::smart_holder>(m, "TensorBackendData");
+    g_tensor_backend_data = nb::class_<TensorBackend::Data>(m, "TensorBackendData");
     (*g_tensor_backend_data).doc() =
       "Backend-specific payload stored on a tensor (except symmetry data on legs).";
 
-    g_tensor_backend =
-      py::class_<TensorBackend, PyTensorBackend, py::smart_holder>(m, "TensorBackend");
+    g_tensor_backend = nb::class_<TensorBackend>(m, "TensorBackend");
     (*g_tensor_backend).doc() = DOC(lasyten, TensorBackend);
 }
 
 void
-bind_tensor_backend(py::module_& m)
+bind_tensor_backend(nb::module_& m)
 {
     auto& data_cls = *g_tensor_backend_data;
     auto& tensor_backend = *g_tensor_backend;
 
-    tensor_backend.def(py::init<std::shared_ptr<BlockBackend>>(), py::arg("block_backend"))
-      .def_property_readonly("can_decompose_tensors", &TensorBackend::can_decompose_tensors)
-      .def_readwrite("block_backend", &TensorBackend::block_backend);
+    tensor_backend
+      .def(lasyten::ctor<decltype(tensor_backend), std::shared_ptr<BlockBackend>>(),
+           nb::arg("block_backend"))
+      .def_prop_ro("can_decompose_tensors", &TensorBackend::can_decompose_tensors)
+      .def_rw("block_backend", &TensorBackend::block_backend);
 
     tensor_backend //  methods
       .def("__repr__", &TensorBackend::__repr__)
@@ -55,20 +55,20 @@ bind_tensor_backend(py::module_& m)
                if (!py::isinstance<TensorBackend>(other)) {
                    return false;
                }
-               return self == other.cast<TensorBackend const&>();
+               return self == py::cast<TensorBackend const&>(other);
            })
-      .def("item", &TensorBackend::item, py::arg("a"), DOC(lasyten, TensorBackend, item))
+      .def("item", &TensorBackend::item, nb::arg("a"), DOC(lasyten, TensorBackend, item))
       .def("test_tensor_sanity",
            &TensorBackend::test_tensor_sanity,
-           py::arg("a"),
-           py::arg("is_diagonal"),
+           nb::arg("a"),
+           nb::arg("is_diagonal"),
            DOC(lasyten, TensorBackend, test_tensor_sanity))
-      .def("test_mask_sanity", &TensorBackend::test_mask_sanity, py::arg("a"))
+      .def("test_mask_sanity", &TensorBackend::test_mask_sanity, nb::arg("a"))
       .def("make_pipe",
            &TensorBackend::make_pipe,
-           py::arg("legs"),
-           py::arg("is_dual"),
-           py::arg("pipe") = py::none(),
+           nb::arg("legs"),
+           nb::arg("is_dual"),
+           nb::arg("pipe").none() = nb::none(),
            DOC(lasyten, TensorBackend, make_pipe))
       .def(
         "act_block_diagonal_square_matrix",
@@ -79,60 +79,60 @@ bind_tensor_backend(py::module_& m)
             return self.act_block_diagonal_square_matrix(
               a, block_unary_from_python(block_method), dtype_map_from_python(dtype_map));
         },
-        py::arg("a"),
-        py::arg("block_method"),
-        py::arg("dtype_map"),
+        nb::arg("a"),
+        nb::arg("block_method"),
+        nb::arg("dtype_map"),
         DOC(lasyten, TensorBackend, act_block_diagonal_square_matrix))
       .def("add_trivial_leg",
            &TensorBackend::add_trivial_leg,
-           py::arg("a"),
-           py::arg("legs_pos"),
-           py::arg("add_to_domain"),
-           py::arg("co_domain_pos"),
-           py::arg("new_codomain"),
-           py::arg("new_domain"),
+           nb::arg("a"),
+           nb::arg("legs_pos"),
+           nb::arg("add_to_domain"),
+           nb::arg("co_domain_pos"),
+           nb::arg("new_codomain"),
+           nb::arg("new_domain"),
            DOC(lasyten, TensorBackend, add_trivial_leg))
       .def("almost_equal",
            &TensorBackend::almost_equal,
-           py::arg("a"),
-           py::arg("b"),
-           py::arg("rtol"),
-           py::arg("atol"),
+           nb::arg("a"),
+           nb::arg("b"),
+           nb::arg("rtol"),
+           nb::arg("atol"),
            DOC(lasyten, TensorBackend, almost_equal))
       .def("apply_mask_to_DiagonalTensor",
            &TensorBackend::apply_mask_to_DiagonalTensor,
-           py::arg("tensor"),
-           py::arg("mask"))
+           nb::arg("tensor"),
+           nb::arg("mask"))
       .def("combine_legs",
            &TensorBackend::combine_legs,
-           py::arg("tensor"),
-           py::arg("leg_idcs_combine"),
-           py::arg("pipes"),
-           py::arg("new_codomain"),
-           py::arg("new_domain"),
+           nb::arg("tensor"),
+           nb::arg("leg_idcs_combine"),
+           nb::arg("pipes"),
+           nb::arg("new_codomain"),
+           nb::arg("new_domain"),
            DOC(lasyten, TensorBackend, combine_legs))
       .def("compose",
            &TensorBackend::compose,
-           py::arg("a"),
-           py::arg("b"),
+           nb::arg("a"),
+           nb::arg("b"),
            DOC(lasyten, TensorBackend, compose))
       .def("copy_data",
            &TensorBackend::copy_data,
-           py::arg("a"),
-           py::arg("device") = py::none(),
+           nb::arg("a"),
+           nb::arg("device").none() = nb::none(),
            DOC(lasyten, TensorBackend, copy_data))
-      .def("dagger", &TensorBackend::dagger, py::arg("a"), DOC(lasyten, TensorBackend, dagger))
+      .def("dagger", &TensorBackend::dagger, nb::arg("a"), DOC(lasyten, TensorBackend, dagger))
       .def("data_item",
            &TensorBackend::data_item,
-           py::arg("a"),
+           nb::arg("a"),
            DOC(lasyten, TensorBackend, data_item))
       .def("diagonal_all",
            &TensorBackend::diagonal_all,
-           py::arg("a"),
+           nb::arg("a"),
            DOC(lasyten, TensorBackend, diagonal_all))
       .def("diagonal_any",
            &TensorBackend::diagonal_any,
-           py::arg("a"),
+           nb::arg("a"),
            DOC(lasyten, TensorBackend, diagonal_any))
       .def(
         "diagonal_elementwise_binary",
@@ -145,11 +145,11 @@ bind_tensor_backend(py::module_& m)
             return self.diagonal_elementwise_binary(
               a, b, block_binary_from_python(func, func_kwargs), partial_zero_is_zero);
         },
-        py::arg("a"),
-        py::arg("b"),
-        py::arg("func"),
-        py::arg("func_kwargs"),
-        py::arg("partial_zero_is_zero"),
+        nb::arg("a"),
+        nb::arg("b"),
+        nb::arg("func"),
+        nb::arg("func_kwargs"),
+        nb::arg("partial_zero_is_zero"),
         DOC(lasyten, TensorBackend, diagonal_elementwise_binary))
       .def(
         "diagonal_elementwise_unary",
@@ -161,16 +161,16 @@ bind_tensor_backend(py::module_& m)
             return self.diagonal_elementwise_unary(
               a, block_unary_from_python(func, func_kwargs), maps_zero_to_zero);
         },
-        py::arg("a"),
-        py::arg("func"),
-        py::arg("func_kwargs"),
-        py::arg("maps_zero_to_zero"),
+        nb::arg("a"),
+        nb::arg("func"),
+        nb::arg("func_kwargs"),
+        nb::arg("maps_zero_to_zero"),
         DOC(lasyten, TensorBackend, diagonal_elementwise_unary))
       .def("diagonal_from_block",
            &TensorBackend::diagonal_from_block,
-           py::arg("a"),
-           py::arg("co_domain"),
-           py::arg("tol"),
+           nb::arg("a"),
+           nb::arg("co_domain"),
+           nb::arg("tol"),
            DOC(lasyten, TensorBackend, diagonal_from_block))
       .def(
         "diagonal_from_sector_block_func",
@@ -178,86 +178,102 @@ bind_tensor_backend(py::module_& m)
             return self.diagonal_from_sector_block_func(sector_block_factory_from_python(func),
                                                         std::move(co_domain));
         },
-        py::arg("func"),
-        py::arg("co_domain"),
+        nb::arg("func"),
+        nb::arg("co_domain"),
         DOC(lasyten, TensorBackend, diagonal_from_sector_block_func))
       .def("diagonal_tensor_from_full_tensor",
            &TensorBackend::diagonal_tensor_from_full_tensor,
-           py::arg("a"),
-           py::arg("tol") = 1e-12,
+           nb::arg("a"),
+           nb::arg("tol") = 1e-12,
            DOC(lasyten, TensorBackend, diagonal_tensor_from_full_tensor))
-      .def("diagonal_tensor_trace_full", &TensorBackend::diagonal_tensor_trace_full, py::arg("a"))
+      .def("diagonal_tensor_trace_full", &TensorBackend::diagonal_tensor_trace_full, nb::arg("a"))
       .def("diagonal_tensor_to_block",
            &TensorBackend::diagonal_tensor_to_block,
-           py::arg("a"),
+           nb::arg("a"),
            DOC(lasyten, TensorBackend, diagonal_tensor_to_block))
       .def("diagonal_to_mask",
            &TensorBackend::diagonal_to_mask,
-           py::arg("tens"),
+           nb::arg("tens"),
            DOC(lasyten, TensorBackend, diagonal_to_mask))
       .def("diagonal_transpose",
            &TensorBackend::diagonal_transpose,
-           py::arg("tens"),
+           nb::arg("tens"),
            DOC(lasyten, TensorBackend, diagonal_transpose))
       .def("eigh",
            &TensorBackend::eigh,
-           py::arg("a"),
-           py::arg("new_leg_dual"),
-           py::arg("sort") = py::none(),
+           nb::arg("a"),
+           nb::arg("new_leg_dual"),
+           nb::arg("sort").none() = nb::none(),
            DOC(lasyten, TensorBackend, eigh))
       .def("eig",
            &TensorBackend::eig,
-           py::arg("a"),
-           py::arg("new_leg_dual"),
-           py::arg("sort") = py::none(),
+           nb::arg("a"),
+           nb::arg("new_leg_dual"),
+           nb::arg("sort").none() = nb::none(),
            DOC(lasyten, TensorBackend, eig))
       .def("eigvalsh",
            &TensorBackend::eigvalsh,
-           py::arg("a"),
-           py::arg("new_leg_dual"),
-           py::arg("sort") = py::none(),
+           nb::arg("a"),
+           nb::arg("new_leg_dual"),
+           nb::arg("sort").none() = nb::none(),
            DOC(lasyten, TensorBackend, eigvalsh))
       .def("eigvals",
            &TensorBackend::eigvals,
-           py::arg("a"),
-           py::arg("new_leg_dual"),
-           py::arg("sort") = py::none(),
+           nb::arg("a"),
+           nb::arg("new_leg_dual"),
+           nb::arg("sort").none() = nb::none(),
            DOC(lasyten, TensorBackend, eigvals))
       .def("eye_data",
            &TensorBackend::eye_data,
-           py::arg("co_domain"),
-           py::arg("dtype"),
-           py::arg("device"),
+           nb::arg("co_domain"),
+           nb::arg("dtype"),
+           nb::arg("device"),
            DOC(lasyten, TensorBackend, eye_data))
       .def("from_dense_block",
            &TensorBackend::from_dense_block,
-           py::arg("a"),
-           py::arg("codomain"),
-           py::arg("domain"),
-           py::arg("tol"),
+           nb::arg("a"),
+           nb::arg("codomain"),
+           nb::arg("domain"),
+           nb::arg("tol"),
            DOC(lasyten, TensorBackend, from_dense_block))
       .def("from_dense_block_trivial_sector",
            &TensorBackend::from_dense_block_trivial_sector,
-           py::arg("block"),
-           py::arg("leg"),
+           nb::arg("block"),
+           nb::arg("leg"),
            DOC(lasyten, TensorBackend, from_dense_block_trivial_sector))
-      .def("from_grid",
-           &TensorBackend::from_grid,
-           py::arg("grid"),
-           py::arg("new_codomain"),
-           py::arg("new_domain"),
-           py::arg("left_mult_slices"),
-           py::arg("right_mult_slices"),
-           py::arg("dtype"),
-           py::arg("device"),
-           DOC(lasyten, TensorBackend, from_grid))
+      .def(
+        "from_grid",
+        [](TensorBackend& self,
+           py::object grid,
+           TensorProduct::Ptr new_codomain,
+           TensorProduct::Ptr new_domain,
+           std::vector<std::vector<int64>> left_mult_slices,
+           std::vector<std::vector<int64>> right_mult_slices,
+           Dtype dtype,
+           std::string device) {
+            return self.from_grid(tensor_grid_from_python(std::move(grid)),
+                                  std::move(new_codomain),
+                                  std::move(new_domain),
+                                  std::move(left_mult_slices),
+                                  std::move(right_mult_slices),
+                                  dtype,
+                                  std::move(device));
+        },
+        nb::arg("grid"),
+        nb::arg("new_codomain"),
+        nb::arg("new_domain"),
+        nb::arg("left_mult_slices"),
+        nb::arg("right_mult_slices"),
+        nb::arg("dtype"),
+        nb::arg("device"),
+        DOC(lasyten, TensorBackend, from_grid))
       .def("from_random_normal",
            &TensorBackend::from_random_normal,
-           py::arg("codomain"),
-           py::arg("domain"),
-           py::arg("sigma"),
-           py::arg("dtype"),
-           py::arg("device"))
+           nb::arg("codomain"),
+           nb::arg("domain"),
+           nb::arg("sigma"),
+           nb::arg("dtype"),
+           nb::arg("device"))
       .def(
         "from_sector_block_func",
         [](TensorBackend& self,
@@ -267,159 +283,159 @@ bind_tensor_backend(py::module_& m)
             return self.from_sector_block_func(
               sector_block_factory_from_python(func), std::move(codomain), std::move(domain));
         },
-        py::arg("func"),
-        py::arg("codomain"),
-        py::arg("domain"),
+        nb::arg("func"),
+        nb::arg("codomain"),
+        nb::arg("domain"),
         DOC(lasyten, TensorBackend, from_sector_block_func))
       .def("from_tree_pairs",
            &TensorBackend::from_tree_pairs,
-           py::arg("trees"),
-           py::arg("codomain"),
-           py::arg("domain"),
-           py::arg("dtype"),
-           py::arg("device"),
+           nb::arg("trees"),
+           nb::arg("codomain"),
+           nb::arg("domain"),
+           nb::arg("dtype"),
+           nb::arg("device"),
            DOC(lasyten, TensorBackend, from_tree_pairs))
       .def("full_data_from_diagonal_tensor",
            &TensorBackend::full_data_from_diagonal_tensor,
-           py::arg("a"))
+           nb::arg("a"))
       .def("full_data_from_mask",
            &TensorBackend::full_data_from_mask,
-           py::arg("a"),
-           py::arg("dtype"),
+           nb::arg("a"),
+           nb::arg("dtype"),
            DOC(lasyten, TensorBackend, full_data_from_mask))
       .def("get_device_from_data",
            &TensorBackend::get_device_from_data,
-           py::arg("a"),
+           nb::arg("a"),
            DOC(lasyten, TensorBackend, get_device_from_data))
-      .def("get_dtype_from_data", &TensorBackend::get_dtype_from_data, py::arg("a"))
+      .def("get_dtype_from_data", &TensorBackend::get_dtype_from_data, nb::arg("a"))
       .def("get_element",
            &TensorBackend::get_element,
-           py::arg("a"),
-           py::arg("idcs"),
+           nb::arg("a"),
+           nb::arg("idcs"),
            DOC(lasyten, TensorBackend, get_element))
       .def("get_element_diagonal",
            &TensorBackend::get_element_diagonal,
-           py::arg("a"),
-           py::arg("idx"),
+           nb::arg("a"),
+           nb::arg("idx"),
            DOC(lasyten, TensorBackend, get_element_diagonal))
       .def("get_element_mask",
            &TensorBackend::get_element_mask,
-           py::arg("a"),
-           py::arg("idcs"),
+           nb::arg("a"),
+           nb::arg("idcs"),
            DOC(lasyten, TensorBackend, get_element_mask))
       .def("inner",
            &TensorBackend::inner,
-           py::arg("a"),
-           py::arg("b"),
-           py::arg("do_dagger"),
+           nb::arg("a"),
+           nb::arg("b"),
+           nb::arg("do_dagger"),
            DOC(lasyten, TensorBackend, inner))
       .def("inv_part_from_dense_block_single_sector",
            &TensorBackend::inv_part_from_dense_block_single_sector,
-           py::arg("vector"),
-           py::arg("space"),
-           py::arg("charge_leg"),
+           nb::arg("vector"),
+           nb::arg("space"),
+           nb::arg("charge_leg"),
            DOC(lasyten, TensorBackend, inv_part_from_dense_block_single_sector))
       .def("inv_part_to_dense_block_single_sector",
            &TensorBackend::inv_part_to_dense_block_single_sector,
-           py::arg("tensor"),
+           nb::arg("tensor"),
            DOC(lasyten, TensorBackend, inv_part_to_dense_block_single_sector))
       .def("linear_combination",
            &TensorBackend::linear_combination,
-           py::arg("a"),
-           py::arg("v"),
-           py::arg("b"),
-           py::arg("w"),
+           nb::arg("a"),
+           nb::arg("v"),
+           nb::arg("b"),
+           nb::arg("w"),
            DOC(lasyten, TensorBackend, linear_combination))
       .def("lq",
            &TensorBackend::lq,
-           py::arg("tensor"),
-           py::arg("new_co_domain"),
+           nb::arg("tensor"),
+           nb::arg("new_co_domain"),
            DOC(lasyten, TensorBackend, lq))
       .def(
         "mask_binary_operand",
         [](TensorBackend& self, MaskCPtr mask1, MaskCPtr mask2, py::function func) {
             return self.mask_binary_operand(mask1, mask2, block_binary_from_python(func));
         },
-        py::arg("mask1"),
-        py::arg("mask2"),
-        py::arg("func"),
+        nb::arg("mask1"),
+        nb::arg("mask2"),
+        nb::arg("func"),
         DOC(lasyten, TensorBackend, mask_binary_operand))
       .def("mask_contract_large_leg",
            &TensorBackend::mask_contract_large_leg,
-           py::arg("tensor"),
-           py::arg("mask"),
-           py::arg("leg_idx"),
+           nb::arg("tensor"),
+           nb::arg("mask"),
+           nb::arg("leg_idx"),
            DOC(lasyten, TensorBackend, mask_contract_large_leg))
       .def("mask_contract_small_leg",
            &TensorBackend::mask_contract_small_leg,
-           py::arg("tensor"),
-           py::arg("mask"),
-           py::arg("leg_idx"),
+           nb::arg("tensor"),
+           nb::arg("mask"),
+           nb::arg("leg_idx"),
            DOC(lasyten, TensorBackend, mask_contract_small_leg))
-      .def("mask_dagger", &TensorBackend::mask_dagger, py::arg("mask"))
+      .def("mask_dagger", &TensorBackend::mask_dagger, nb::arg("mask"))
       .def("mask_from_block",
            &TensorBackend::mask_from_block,
-           py::arg("a"),
-           py::arg("large_leg"),
+           nb::arg("a"),
+           nb::arg("large_leg"),
            DOC(lasyten, TensorBackend, mask_from_block))
       .def("mask_to_block",
            &TensorBackend::mask_to_block,
-           py::arg("a"),
+           nb::arg("a"),
            DOC(lasyten, TensorBackend, mask_to_block))
-      .def("mask_to_diagonal", &TensorBackend::mask_to_diagonal, py::arg("a"), py::arg("dtype"))
+      .def("mask_to_diagonal", &TensorBackend::mask_to_diagonal, nb::arg("a"), nb::arg("dtype"))
       .def("mask_transpose",
            &TensorBackend::mask_transpose,
-           py::arg("tens"),
+           nb::arg("tens"),
            DOC(lasyten, TensorBackend, mask_transpose))
       .def(
         "mask_unary_operand",
         [](TensorBackend& self, MaskCPtr mask, py::function func) {
             return self.mask_unary_operand(mask, block_unary_from_python(func));
         },
-        py::arg("mask"),
-        py::arg("func"),
+        nb::arg("mask"),
+        nb::arg("func"),
         DOC(lasyten, TensorBackend, mask_unary_operand))
       .def("move_to_device",
            &TensorBackend::move_to_device,
-           py::arg("a"),
-           py::arg("device"),
+           nb::arg("a"),
+           nb::arg("device"),
            DOC(lasyten, TensorBackend, move_to_device))
-      .def("mul", &TensorBackend::mul, py::arg("a"), py::arg("b"))
-      .def("norm", &TensorBackend::norm, py::arg("a"), DOC(lasyten, TensorBackend, norm))
+      .def("mul", &TensorBackend::mul, nb::arg("a"), nb::arg("b"))
+      .def("norm", &TensorBackend::norm, nb::arg("a"), DOC(lasyten, TensorBackend, norm))
       .def("outer",
            &TensorBackend::outer,
-           py::arg("a"),
-           py::arg("b"),
+           nb::arg("a"),
+           nb::arg("b"),
            DOC(lasyten, TensorBackend, outer))
       .def("partial_compose",
            &TensorBackend::partial_compose,
-           py::arg("a"),
-           py::arg("b"),
-           py::arg("a_first_leg"),
-           py::arg("new_codomain"),
-           py::arg("new_domain"),
+           nb::arg("a"),
+           nb::arg("b"),
+           nb::arg("a_first_leg"),
+           nb::arg("new_codomain"),
+           nb::arg("new_domain"),
            DOC(lasyten, TensorBackend, partial_compose))
       .def("partial_trace",
            &TensorBackend::partial_trace,
-           py::arg("tensor"),
-           py::arg("pairs"),
-           py::arg("levels"),
+           nb::arg("tensor"),
+           nb::arg("pairs"),
+           nb::arg("levels"),
            DOC(lasyten, TensorBackend, partial_trace))
       .def("permute_legs",
            &TensorBackend::permute_legs,
-           py::arg("a"),
-           py::arg("codomain_idcs"),
-           py::arg("domain_idcs"),
-           py::arg("new_codomain"),
-           py::arg("new_domain"),
-           py::arg("mixes_codomain_domain"),
-           py::arg("levels"),
-           py::arg("bend_right"),
+           nb::arg("a"),
+           nb::arg("codomain_idcs"),
+           nb::arg("domain_idcs"),
+           nb::arg("new_codomain"),
+           nb::arg("new_domain"),
+           nb::arg("mixes_codomain_domain"),
+           nb::arg("levels"),
+           nb::arg("bend_right"),
            DOC(lasyten, TensorBackend, permute_legs))
       .def("qr",
            &TensorBackend::qr,
-           py::arg("a"),
-           py::arg("new_co_domain"),
+           nb::arg("a"),
+           nb::arg("new_co_domain"),
            DOC(lasyten, TensorBackend, qr))
       .def(
         "reduce_DiagonalTensor",
@@ -430,133 +446,143 @@ bind_tensor_backend(py::module_& m)
             return self.reduce_DiagonalTensor(
               tensor, block_to_scalar_from_python(block_func), scalar_reduce_from_python(func));
         },
-        py::arg("tensor"),
-        py::arg("block_func"),
-        py::arg("func"),
+        nb::arg("tensor"),
+        nb::arg("block_func"),
+        nb::arg("func"),
         DOC(lasyten, TensorBackend, reduce_DiagonalTensor))
       .def("scale_axis",
            &TensorBackend::scale_axis,
-           py::arg("a"),
-           py::arg("b"),
-           py::arg("leg"),
+           nb::arg("a"),
+           nb::arg("b"),
+           nb::arg("leg"),
            DOC(lasyten, TensorBackend, scale_axis))
       .def("split_legs",
            &TensorBackend::split_legs,
-           py::arg("a"),
-           py::arg("leg_idcs"),
-           py::arg("new_codomain"),
-           py::arg("new_domain"),
+           nb::arg("a"),
+           nb::arg("leg_idcs"),
+           nb::arg("new_codomain"),
+           nb::arg("new_domain"),
            DOC(lasyten, TensorBackend, split_legs))
       .def("squeeze_legs",
            &TensorBackend::squeeze_legs,
-           py::arg("a"),
-           py::arg("idcs"),
+           nb::arg("a"),
+           nb::arg("idcs"),
            DOC(lasyten, TensorBackend, squeeze_legs))
-      .def("supports_symmetry", &TensorBackend::supports_symmetry, py::arg("symmetry"))
+      .def("supports_symmetry", &TensorBackend::supports_symmetry, nb::arg("symmetry"))
       .def("svd",
            &TensorBackend::svd,
-           py::arg("a"),
-           py::arg("new_co_domain"),
-           py::arg("algorithm"),
+           nb::arg("a"),
+           nb::arg("new_co_domain"),
+           nb::arg("algorithm"),
            DOC(lasyten, TensorBackend, svd))
       .def("state_tensor_product",
            &TensorBackend::state_tensor_product,
-           py::arg("state1"),
-           py::arg("state2"),
-           py::arg("pipe"),
+           nb::arg("state1"),
+           nb::arg("state2"),
+           nb::arg("pipe"),
            DOC(lasyten, TensorBackend, state_tensor_product))
       .def("to_block_backend",
            &TensorBackend::to_block_backend,
-           py::arg("data"),
-           py::arg("block_backend"),
-           py::arg("dtype") = py::none(),
-           py::arg("device") = py::none())
+           nb::arg("data"),
+           nb::arg("block_backend"),
+           nb::arg("dtype").none() = nb::none(),
+           nb::arg("device").none() = nb::none())
       .def("to_dense_block",
            &TensorBackend::to_dense_block,
-           py::arg("a"),
+           nb::arg("a"),
            DOC(lasyten, TensorBackend, to_dense_block))
       .def("to_dense_block_trivial_sector",
            &TensorBackend::to_dense_block_trivial_sector,
-           py::arg("tensor"),
+           nb::arg("tensor"),
            DOC(lasyten, TensorBackend, to_dense_block_trivial_sector))
       .def("to_dtype",
            &TensorBackend::to_dtype,
-           py::arg("a"),
-           py::arg("dtype"),
+           nb::arg("a"),
+           nb::arg("dtype"),
            DOC(lasyten, TensorBackend, to_dtype))
       .def("trace_full",
            &TensorBackend::trace_full,
-           py::arg("a"),
-           py::arg("idcs1") = std::vector<int64>{},
-           py::arg("idcs2") = std::vector<int64>{})
+           nb::arg("a"),
+           nb::arg("idcs1") = std::vector<int64>{},
+           nb::arg("idcs2") = std::vector<int64>{})
       .def("truncate_singular_values",
            &TensorBackend::truncate_singular_values,
-           py::arg("S"),
-           py::arg("chi_max"),
-           py::arg("chi_min"),
-           py::arg("degeneracy_tol"),
-           py::arg("trunc_cut"),
-           py::arg("svd_min"),
-           py::arg("minimize_error") = true,
+           nb::arg("S"),
+           nb::arg("chi_max"),
+           nb::arg("chi_min"),
+           nb::arg("degeneracy_tol"),
+           nb::arg("trunc_cut"),
+           nb::arg("svd_min"),
+           nb::arg("minimize_error") = true,
            DOC(lasyten, TensorBackend, truncate_singular_values))
       .def("_truncate_singular_values_selection",
-           &TensorBackend::_truncate_singular_values_selection,
-           py::arg("S"),
-           py::arg("qdims"),
-           py::arg("chi_max"),
-           py::arg("chi_min"),
-           py::arg("degeneracy_tol"),
-           py::arg("trunc_cut"),
-           py::arg("svd_min"),
-           py::arg("minimize_error") = true,
+           static_cast<std::tuple<py::array, float64, float64> (TensorBackend::*)(
+             py::array,
+             py::object,
+             std::optional<int64>,
+             int64,
+             float64,
+             float64,
+             std::optional<float64>,
+             bool)>(&TensorBackend::_truncate_singular_values_selection),
+           nb::arg("S"),
+           nb::arg("qdims"),
+           nb::arg("chi_max"),
+           nb::arg("chi_min"),
+           nb::arg("degeneracy_tol"),
+           nb::arg("trunc_cut"),
+           nb::arg("svd_min"),
+           nb::arg("minimize_error") = true,
            DOC(lasyten, TensorBackend, _truncate_singular_values_selection))
       .def("zero_data",
            &TensorBackend::zero_data,
-           py::arg("codomain"),
-           py::arg("domain"),
-           py::arg("dtype"),
-           py::arg("device"),
-           py::arg("all_blocks") = false,
+           nb::arg("codomain"),
+           nb::arg("domain"),
+           nb::arg("dtype"),
+           nb::arg("device"),
+           nb::arg("all_blocks") = false,
            DOC(lasyten, TensorBackend, zero_data))
       .def("zero_diagonal_data",
            &TensorBackend::zero_diagonal_data,
-           py::arg("co_domain"),
-           py::arg("dtype"),
-           py::arg("device"))
+           nb::arg("co_domain"),
+           nb::arg("dtype"),
+           nb::arg("device"))
       .def(
-        "zero_mask_data", &TensorBackend::zero_mask_data, py::arg("large_leg"), py::arg("device"))
-      .def("is_real", &TensorBackend::is_real, py::arg("a"), DOC(lasyten, TensorBackend, is_real))
+        "zero_mask_data", &TensorBackend::zero_mask_data, nb::arg("large_leg"), nb::arg("device"))
+      .def("is_real", &TensorBackend::is_real, nb::arg("a"), DOC(lasyten, TensorBackend, is_real))
       .def("save_hdf5",
            lasyten::hdf5::wrap_save_hdf5<TensorBackend>(),
-           py::arg("hdf5_saver"),
-           py::arg("h5gr"),
-           py::arg("subpath"));
+           nb::arg("hdf5_saver"),
+           nb::arg("h5gr"),
+           nb::arg("subpath"));
 
-    py::object classmethod = py::module_::import("builtins").attr("classmethod");
+    nb::object classmethod = nb::module_::import_("builtins").attr("classmethod");
     tensor_backend.attr("from_hdf5") = classmethod(
-      py::cpp_function(lasyten::hdf5::wrap_from_hdf5_classmethod<TensorBackend>(),
-                       py::name("from_hdf5"),
-                       py::arg("cls"),
-                       py::arg("hdf5_loader"),
-                       py::arg("h5gr"),
-                       py::arg("subpath"),
+      nb::cpp_function(lasyten::hdf5::wrap_from_hdf5_classmethod<TensorBackend>(),
+                       nb::name("from_hdf5"),
+                       nb::arg("cls"),
+                       nb::arg("hdf5_loader"),
+                       nb::arg("h5gr"),
+                       nb::arg("subpath"),
                        "Reconstruct a tensor backend from HDF5 by loading its BlockBackend."));
 
     // Nested Data type under TensorBackend for Python parity with BlockBackend.BlockCls style.
     tensor_backend.attr("Data") = data_cls;
 
     m.def("conventional_leg_order",
-          py::overload_cast<py::object, py::object>(&conventional_leg_order),
-          py::arg("tensor_or_codomain"),
-          py::arg("domain") = py::none(),
+          nb::overload_cast<py::object, py::object>(&conventional_leg_order),
+          nb::arg("tensor_or_codomain"),
+          nb::arg("domain").none() = nb::none(),
           doc_cpp_ref(R"pydoc(conventional_leg_order)pydoc", "lasyten::conventional_leg_order()"));
 
     m.def(
       "get_same_backend",
-      [](py::args objs, py::kwargs kwargs) {
+      [](nb::args objs_nb, nb::kwargs kwargs_nb) {
+          auto kwargs = pykwargs(kwargs_nb);
+          auto objs = pyargs(objs_nb);
           std::string error_msg = "Incompatible backends.";
           if (kwargs.contains("error_msg"))
-              error_msg = kwargs["error_msg"].cast<std::string>();
+              error_msg = py::cast<std::string>(kwargs["error_msg"]);
           std::vector<py::object> vec;
           vec.reserve(objs.size());
           for (auto const& o : objs)

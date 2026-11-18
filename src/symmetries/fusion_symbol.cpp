@@ -1,5 +1,8 @@
 #include <lasyten/symmetries/fusion_symbol.h>
 
+#include <lasyten/block_backend/eigen.h>
+#include <lasyten/tools.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -596,6 +599,7 @@ kron(FusionSymbol const& a, FusionSymbol const& b)
     return out;
 }
 
+#if LASYTEN_HAS_PYTHON
 py::array
 fusion_symbol_to_numpy(FusionSymbol const& src)
 {
@@ -657,6 +661,7 @@ fusion_symbol_from_numpy(py::array arr)
     auto const* ptr = static_cast<complex128 const*>(cinfo.ptr);
     return FusionSymbol::from_complex128(rank, shape, std::vector<complex128>(ptr, ptr + n));
 }
+#endif // LASYTEN_HAS_PYTHON
 
 BlockBackend::BlockPtr
 block_from_fusion_symbol(BlockBackend& backend,
@@ -664,7 +669,32 @@ block_from_fusion_symbol(BlockBackend& backend,
                          std::optional<Dtype> dtype,
                          std::optional<std::string> device)
 {
+    if (auto* eigen = dynamic_cast<EigenBlockBackend*>(&backend)) {
+        // Python-free path: copy the symbol's (C-ordered) data into an Eigen block.
+        (void)eigen->as_device(device);
+        auto const shape = arr.shape_as_int64();
+        std::vector<std::byte> bytes;
+        if (arr.dtype() == Dtype::Float64) {
+            auto const span = arr.as_float64();
+            bytes.resize(span.size() * sizeof(float64));
+            std::memcpy(bytes.data(), span.data(), bytes.size());
+        } else {
+            auto const span = arr.as_complex128();
+            bytes.resize(span.size() * sizeof(complex128));
+            std::memcpy(bytes.data(), span.data(), bytes.size());
+        }
+        BlockBackend::BlockPtr block =
+          std::make_shared<EigenBlockBackend::Block>(arr.dtype(), shape, std::move(bytes));
+        if (dtype && *dtype != block->dtype()) {
+            block = eigen->to_dtype(block, *dtype);
+        }
+        return block;
+    }
+#if LASYTEN_HAS_PYTHON
     return backend.block_from_numpy(fusion_symbol_to_numpy(arr), dtype, device);
+#else
+    throw NotImplemented("block_from_fusion_symbol for non-Eigen block backends needs Python");
+#endif
 }
 
 FusionSymbol
@@ -677,7 +707,30 @@ fusion_symbol_from_block(BlockBackend::BlockCPtr const& block)
     if (shape.size() < 1 || shape.size() > 4) {
         throw std::invalid_argument("fusion_symbol_from_block: block ndim must be 1..4");
     }
+    if (auto const* eb = dynamic_cast<EigenBlockBackend::Block const*>(block.get())) {
+        // Python-free path. Promote ints / bools / float32 like the numpy path does.
+        auto const rank = static_cast<std::uint8_t>(shape.size());
+        FusionSymbol::Shape sym_shape{ { 1, 1, 1, 1 } };
+        for (std::uint8_t i = 0; i < rank; ++i) {
+            sym_shape[i] = static_cast<std::size_t>(shape[i]);
+        }
+        auto const n = FusionSymbol::product(sym_shape);
+        auto* backend = eb->get_backend();
+        if (dtype::is_complex(eb->dtype())) {
+            auto const conv = backend->to_dtype(block, Dtype::Complex128);
+            auto const* p = static_cast<EigenBlockBackend::Block const&>(*conv).data<complex128>();
+            return FusionSymbol::from_complex128(
+              rank, sym_shape, std::vector<complex128>(p, p + n));
+        }
+        auto const conv = backend->to_dtype(block, Dtype::Float64);
+        auto const* p = static_cast<EigenBlockBackend::Block const&>(*conv).data<float64>();
+        return FusionSymbol::from_float64(rank, sym_shape, std::vector<float64>(p, p + n));
+    }
+#if LASYTEN_HAS_PYTHON
     return fusion_symbol_from_numpy(block->to_numpy());
+#else
+    throw NotImplemented("fusion_symbol_from_block for non-Eigen blocks needs Python");
+#endif
 }
 
 } // namespace lasyten

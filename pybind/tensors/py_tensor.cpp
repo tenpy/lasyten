@@ -3,12 +3,9 @@
 #include "py_trampolines.hpp"
 
 #include "../doc_plus.h"
-#include "../py_lasyten_pybind11.h"
+#include "../py_lasyten_nanobind.h"
 
 #include "docstrings/tensors/tensor.h"
-
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
 
 #include <cmath>
 #include <format>
@@ -30,9 +27,9 @@ optional_leg_order(py::object obj)
     std::vector<std::variant<int64, std::string>> out;
     for (auto item : to_iterable(obj)) {
         if (py::isinstance<py::str>(item)) {
-            out.emplace_back(item.cast<std::string>());
+            out.emplace_back(py::cast<std::string>(item));
         } else {
-            out.emplace_back(item.cast<int64>());
+            out.emplace_back(py::cast<int64>(item));
         }
     }
     return out;
@@ -42,68 +39,61 @@ std::variant<int64, std::string>
 as_leg_ref(py::handle obj)
 {
     if (py::isinstance<py::str>(obj)) {
-        return obj.cast<std::string>();
+        return py::cast<std::string>(obj);
     }
-    return obj.cast<int64>();
+    return py::cast<int64>(obj);
 }
 
-std::optional<py::class_<Tensor, VectorLike, PyTensor, py::smart_holder>> g_tensor;
+std::optional<nb::class_<Tensor, VectorLike>> g_tensor;
 
 } // namespace
 
 void
-declare_tensors_tensor(py::module_& m)
+declare_tensors_tensor(nb::module_& m)
 {
-    g_tensor = py::class_<Tensor, VectorLike, PyTensor, py::smart_holder>(m, "Tensor");
+    g_tensor = nb::class_<Tensor, VectorLike>(m, "Tensor");
     (*g_tensor).doc() = DOC(lasyten, Tensor);
 }
 
 void
-bind_tensors_tensor(py::module_& m)
+bind_tensors_tensor(nb::module_& m)
 {
     auto& cls = *g_tensor;
 
-    cls.def(py::init([](py::object codomain,
-                        py::object domain,
-                        TensorBackend::Ptr backend,
-                        py::object labels,
-                        Dtype dtype,
-                        std::string device) {
-                auto [c, d, b, s] = parse_tensor_init_args(codomain, domain, std::move(backend));
-                auto labs = parse_tensor_init_labels(labels, c, d);
-                return std::make_shared<PyTensor>(std::move(c),
-                                                  std::move(d),
-                                                  std::move(b),
-                                                  std::move(s),
-                                                  std::move(labs),
-                                                  dtype,
-                                                  device);
+    // ``Tensor`` is abstract and (per the nanobind port policy) has no trampoline, so it can
+    // neither be instantiated directly nor through a Python subclass; use the concrete classes.
+    cls.def(nb::new_([](py::object, py::object, TensorBackend::Ptr, py::object, Dtype, std::string)
+                       -> std::shared_ptr<Tensor> {
+                throw nb::type_error(
+                  "Tensor is abstract and cannot be instantiated or subclassed from Python "
+                  "(no trampoline); use SymmetricTensor, DiagonalTensor, ... instead.");
             }),
-            py::arg("codomain"),
-            py::arg("domain"),
-            py::arg("backend"),
-            py::arg("labels"),
-            py::arg("dtype"),
-            py::arg("device"));
+            nb::arg("codomain"),
+            nb::arg("domain"),
+            nb::arg("backend"),
+            nb::arg("labels"),
+            nb::arg("dtype"),
+            nb::arg("device"));
 
-    cls.def_readwrite("codomain", &Tensor::codomain)
-      .def_readwrite("domain", &Tensor::domain)
-      .def_readwrite("backend", &Tensor::backend)
-      .def_readwrite("symmetry", &Tensor::symmetry)
-      .def_readwrite("dtype", &Tensor::dtype)
-      .def_readwrite("device", &Tensor::device)
-      .def_readwrite("num_legs", &Tensor::num_legs)
-      .def_property("labels",
-                    py::cpp_function([](Tensor& self) -> LegLabels& { return self.labels; },
-                                     py::return_value_policy::reference_internal),
-                    py::cpp_function([](Tensor& self, py::object value) {
-                        if (py::isinstance<LegLabels>(value)) {
-                            self.labels.set(value.cast<LegLabels const&>().as_list());
-                        } else {
-                            self.labels.set(value.cast<LegLabelList>());
-                        }
-                    }))
-      .def_property(
+    cls.def_rw("codomain", &Tensor::codomain)
+      .def_rw("domain", &Tensor::domain)
+      .def_rw("backend", &Tensor::backend)
+      .def_rw("symmetry", &Tensor::symmetry)
+      .def_rw("dtype", &Tensor::dtype)
+      .def_rw("device", &Tensor::device)
+      .def_rw("num_legs", &Tensor::num_legs)
+      .def_prop_rw(
+        "labels",
+        [](Tensor& self) -> LegLabels& { return self.labels; },
+        [](Tensor& self, py::object value) {
+            if (py::isinstance<LegLabels>(value)) {
+                self.labels.set(py::cast<LegLabels const&>(value).as_list());
+            } else {
+                self.labels.set(py::cast<LegLabelList>(value));
+            }
+        },
+        nb::rv_policy::reference_internal)
+      .def_prop_rw(
         "shape",
         [](Tensor const& self) {
             // Match Space.dim / Leg.dim: whole-number dims as int (np.zeros etc.).
@@ -118,7 +108,7 @@ bind_tensors_tensor(py::module_& m)
             return py::tuple(out);
         },
         [](Tensor& self, py::object shape_obj) {
-            self.shape = shape_obj.cast<std::vector<float64>>();
+            self.shape = py::cast<std::vector<float64>>(shape_obj);
         });
 
     cls.def_static(
@@ -126,9 +116,9 @@ bind_tensors_tensor(py::module_& m)
       [](py::object codomain, py::object domain, TensorBackend::Ptr backend) {
           return parse_tensor_init_args(codomain, domain, std::move(backend));
       },
-      py::arg("codomain"),
-      py::arg("domain"),
-      py::arg("backend"),
+      nb::arg("codomain"),
+      nb::arg("domain"),
+      nb::arg("backend"),
       DOC(lasyten, Tensor, _init_parse_args));
 
     cls.def_static(
@@ -139,30 +129,29 @@ bind_tensors_tensor(py::module_& m)
          bool is_endomorphism) {
           return parse_tensor_init_labels(labels, codomain, domain, is_endomorphism);
       },
-      py::arg("labels"),
-      py::arg("codomain"),
-      py::arg("domain"),
-      py::arg("is_endomorphism") = false,
+      nb::arg("labels"),
+      nb::arg("codomain"),
+      nb::arg("domain"),
+      nb::arg("is_endomorphism") = false,
       DOC(lasyten, Tensor, _init_parse_labels));
 
     cls.def("test_sanity", &Tensor::test_sanity, DOC(lasyten, Tensor, test_sanity));
 
-    cls.def_property_readonly(
-      "ascii_diagram", &Tensor::ascii_diagram, DOC(lasyten, Tensor, ascii_diagram));
+    cls.def_prop_ro("ascii_diagram", &Tensor::ascii_diagram, DOC(lasyten, Tensor, ascii_diagram));
 
-    cls.def("as_dtype", &Tensor::as_dtype, py::arg("dtype"), DOC(lasyten, Tensor, as_dtype));
+    cls.def("as_dtype", &Tensor::as_dtype, nb::arg("dtype"), DOC(lasyten, Tensor, as_dtype));
 
     cls.def(
       "as_SymmetricTensor",
       [](Tensor& self, bool guarantee_copy, py::object warning) {
           std::optional<std::string> w;
           if (!warning.is_none()) {
-              w = warning.cast<std::string>();
+              w = py::cast<std::string>(warning);
           }
           return self.as_SymmetricTensor(guarantee_copy, w);
       },
-      py::arg("guarantee_copy") = false,
-      py::arg("warning") = py::none(),
+      nb::arg("guarantee_copy") = false,
+      nb::arg("warning").none() = nb::none(),
       DOC(lasyten, Tensor, as_SymmetricTensor));
 
     cls.def(
@@ -171,16 +160,16 @@ bind_tensors_tensor(py::module_& m)
           std::optional<std::string> dev;
           std::optional<Dtype> dt;
           if (!device.is_none()) {
-              dev = device.cast<std::string>();
+              dev = py::cast<std::string>(device);
           }
           if (!dtype.is_none()) {
-              dt = dtype.cast<Dtype>();
+              dt = py::cast<Dtype>(dtype);
           }
           return self.copy(deep, dev, dt);
       },
-      py::arg("deep") = true,
-      py::arg("device") = py::none(),
-      py::arg("dtype") = py::none(),
+      nb::arg("deep") = true,
+      nb::arg("device").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
       DOC(lasyten, Tensor, copy));
 
     cls.def(
@@ -189,16 +178,16 @@ bind_tensors_tensor(py::module_& m)
           std::optional<Dtype> dt;
           std::optional<std::string> dev;
           if (!dtype.is_none()) {
-              dt = dtype.cast<Dtype>();
+              dt = py::cast<Dtype>(dtype);
           }
           if (!device.is_none()) {
-              dev = device.cast<std::string>();
+              dev = py::cast<std::string>(device);
           }
           return self.to_backend(std::move(backend), dt, dev);
       },
-      py::arg("backend"),
-      py::arg("dtype") = py::none(),
-      py::arg("device") = py::none(),
+      nb::arg("backend"),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("device").none() = nb::none(),
       DOC(lasyten, Tensor, to_backend));
 
     cls.def(
@@ -206,55 +195,53 @@ bind_tensors_tensor(py::module_& m)
       [](Tensor& self, py::object leg_order, py::object dtype, bool understood_braiding) {
           std::optional<Dtype> dt;
           if (!dtype.is_none()) {
-              dt = dtype.cast<Dtype>();
+              dt = py::cast<Dtype>(dtype);
           }
           return self.to_dense_block(optional_leg_order(leg_order), dt, understood_braiding);
       },
-      py::arg("leg_order") = py::none(),
-      py::arg("dtype") = py::none(),
-      py::arg("understood_braiding") = false,
+      nb::arg("leg_order").none() = nb::none(),
+      nb::arg("dtype").none() = nb::none(),
+      nb::arg("understood_braiding") = false,
       DOC(lasyten, Tensor, to_dense_block));
 
-    cls.def_property_readonly(
+    cls.def_prop_ro(
       "codomain_labels", &Tensor::codomain_labels, DOC(lasyten, Tensor, codomain_labels));
-    cls.def_property_readonly(
+    cls.def_prop_ro(
       "dagger",
       [](py::object self) {
           return py::module_::import("lasyten.tensors._tensors").attr("dagger")(self);
       },
       DOC(lasyten, Tensor, dagger));
-    cls.def_property_readonly(
-      "domain_labels", &Tensor::domain_labels, DOC(lasyten, Tensor, domain_labels));
-    cls.def_property_readonly("has_pipes", &Tensor::has_pipes, DOC(lasyten, Tensor, has_pipes));
-    cls.def_property_readonly(
+    cls.def_prop_ro("domain_labels", &Tensor::domain_labels, DOC(lasyten, Tensor, domain_labels));
+    cls.def_prop_ro("has_pipes", &Tensor::has_pipes, DOC(lasyten, Tensor, has_pipes));
+    cls.def_prop_ro(
       "hc",
       [](py::object self) {
           return py::module_::import("lasyten.tensors._tensors").attr("dagger")(self);
       },
       DOC(lasyten, Tensor, dagger));
-    cls.def_property_readonly("legs", &Tensor::legs, DOC(lasyten, Tensor, legs));
+    cls.def_prop_ro("legs", &Tensor::legs, DOC(lasyten, Tensor, legs));
 
     cls.def("move_to_device",
             &Tensor::move_to_device,
-            py::arg("device"),
+            nb::arg("device"),
             DOC(lasyten, Tensor, move_to_device));
 
-    cls.def_property_readonly(
+    cls.def_prop_ro(
       "num_codomain_legs", &Tensor::num_codomain_legs, DOC(lasyten, Tensor, num_codomain_legs));
-    cls.def_property_readonly(
+    cls.def_prop_ro(
       "num_domain_legs", &Tensor::num_domain_legs, DOC(lasyten, Tensor, num_domain_legs));
-    cls.def_property_readonly("num_codomain_flat_legs",
-                              &Tensor::num_codomain_flat_legs,
-                              DOC(lasyten, Tensor, num_codomain_flat_legs));
-    cls.def_property_readonly("num_domain_flat_legs",
-                              &Tensor::num_domain_flat_legs,
-                              DOC(lasyten, Tensor, num_domain_flat_legs));
-    cls.def_property_readonly(
-      "num_flat_legs", &Tensor::num_flat_legs, DOC(lasyten, Tensor, num_flat_legs));
-    cls.def_property_readonly(
+    cls.def_prop_ro("num_codomain_flat_legs",
+                    &Tensor::num_codomain_flat_legs,
+                    DOC(lasyten, Tensor, num_codomain_flat_legs));
+    cls.def_prop_ro("num_domain_flat_legs",
+                    &Tensor::num_domain_flat_legs,
+                    DOC(lasyten, Tensor, num_domain_flat_legs));
+    cls.def_prop_ro("num_flat_legs", &Tensor::num_flat_legs, DOC(lasyten, Tensor, num_flat_legs));
+    cls.def_prop_ro(
       "num_parameters", &Tensor::num_parameters, DOC(lasyten, Tensor, num_parameters));
-    cls.def_property_readonly("size", &Tensor::size, DOC(lasyten, Tensor, size));
-    cls.def_property_readonly(
+    cls.def_prop_ro("size", &Tensor::size, DOC(lasyten, Tensor, size));
+    cls.def_prop_ro(
       "T",
       [](py::object self) {
           return py::module_::import("lasyten.tensors._tensors").attr("transpose")(self);
@@ -271,7 +258,7 @@ bind_tensors_tensor(py::module_& m)
           auto it = to_iterable(idx);
           std::vector<int64> parsed;
           for (auto item : it) {
-              parsed.push_back(item.cast<int64>());
+              parsed.push_back(py::cast<int64>(item));
           }
           if (static_cast<int64>(parsed.size()) != self.num_legs) {
               throw py::index_error(std::format(
@@ -282,7 +269,7 @@ bind_tensors_tensor(py::module_& m)
           }
           return self._get_item(parsed);
       },
-      py::arg("idx"));
+      nb::arg("idx"));
 
     cls
       .def("__setitem__",
@@ -353,26 +340,26 @@ bind_tensors_tensor(py::module_& m)
       .def(
         "_as_codomain_leg",
         [](Tensor const& self, py::object idx) { return self._as_codomain_leg(as_leg_ref(idx)); },
-        py::arg("idx"),
+        nb::arg("idx"),
         DOC(lasyten, Tensor, _as_codomain_leg))
       .def(
         "_as_domain_leg",
         [](Tensor const& self, py::object idx) { return self._as_domain_leg(as_leg_ref(idx)); },
-        py::arg("idx"),
+        nb::arg("idx"),
         DOC(lasyten, Tensor, _as_codomain_leg))
       .def("dbg", &Tensor::dbg)
-      .def("_get_item", &Tensor::_get_item, py::arg("idx"), DOC(lasyten, Tensor, _as_codomain_leg))
+      .def("_get_item", &Tensor::_get_item, nb::arg("idx"), DOC(lasyten, Tensor, _as_codomain_leg))
       .def(
         "_parse_leg_idx",
         [](Tensor const& self, py::object which_leg) {
             return self._parse_leg_idx(as_leg_ref(which_leg));
         },
-        py::arg("which_leg"),
+        nb::arg("which_leg"),
         DOC(lasyten, Tensor, _as_codomain_leg))
       .def("_repr_header_lines",
            &Tensor::_repr_header_lines,
-           py::arg("indent"),
-           py::arg("use_symm_str") = false);
+           nb::arg("indent"),
+           nb::arg("use_symm_str") = false);
 
     cls
       .def(
@@ -391,7 +378,7 @@ bind_tensors_tensor(py::module_& m)
             }
             return py::cast(self.get_leg(as_leg_ref(which_leg)));
         },
-        py::arg("which_leg"),
+        nb::arg("which_leg"),
         DOC(lasyten, Tensor, get_leg))
       .def(
         "get_leg_co_domain",
@@ -409,17 +396,20 @@ bind_tensors_tensor(py::module_& m)
             }
             return py::cast(self.get_leg_co_domain(as_leg_ref(which_leg)));
         },
-        py::arg("which_leg"),
+        nb::arg("which_leg"),
         DOC(lasyten, Tensor, get_leg_co_domain));
 
+    // Always an owning NumPy copy (dual path: use BlockBackend.to_ndarray for DLPack /
+    // framework-tagged views). Torch block_to_ndarray defaults to a torch.Tensor and breaks
+    // callers that expect np.ndarray.
     cls.def(
       "to_numpy",
       [](Tensor& self, py::object leg_order, py::object numpy_dtype, bool understood_braiding) {
           return self.to_numpy(optional_leg_order(leg_order), numpy_dtype, understood_braiding);
       },
-      py::arg("leg_order") = py::none(),
-      py::arg("numpy_dtype") = py::none(),
-      py::arg("understood_braiding") = false,
+      nb::arg("leg_order").none() = nb::none(),
+      nb::arg("numpy_dtype").none() = nb::none(),
+      nb::arg("understood_braiding") = false,
       DOC(lasyten, Tensor, to_numpy));
 }
 

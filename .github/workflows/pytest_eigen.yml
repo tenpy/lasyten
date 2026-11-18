@@ -1,0 +1,58 @@
+name: Run Pytest (eigen)
+# Run the test suite using the native Eigen/LAPACK BlockBackend
+
+on:
+  # pushes to main
+  push:
+    branches:
+      - main
+  # PRs
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+
+jobs:
+  build:
+    if: github.event.pull_request.draft == false
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # make pytest output in color
+      PY_COLORS: 1
+    defaults:
+      run:
+        # needed so micromamba activation from setup-micromamba takes effect
+        shell: bash -el {0}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+      with:
+        # external/hdf5_io: CMake (LASYTEN_WITH_HDF5) and the Python hdf5_io package
+        # external/SUN_symbols: required symbols for tests
+        submodules: true
+
+    - name: Set up micromamba
+      uses: mamba-org/setup-micromamba@v3
+      with:
+        environment-file: environment.yml
+        # pin Python from the matrix; other deps (incl. eigen, openblas, CPU pytorch) come from environment.yml
+        create-args: >-
+          python=${{ matrix.python-version }}
+        cache-environment: true
+
+    - name: Build and install
+      # build deps (nanobind, eigen, scikit-build-core, cmake, pytorch, ...) come from environment.yml
+      # --no-build-isolation avoids pip pulling a CUDA torch wheel that needs the CUDA toolkit
+      # hdf5_io is not on PyPI yet; install the git submodule first so lasyten[io]/test] can resolve it
+      run: |
+        pip install --no-build-isolation -e ./external/hdf5_io
+        pip install --no-build-isolation -e ".[test]"
+
+    - name: Run pytest
+      # configuration in pyproject.toml
+      # Note: This runs in the repo root directory, which contains the lasyten source folder.
+      #       To use the version we just installed, it is important to run `pytest`
+      #       instead of `python -m pytest`.
+      run: pytest --block-backends "eigen" -vv

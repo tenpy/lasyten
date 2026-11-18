@@ -1,9 +1,18 @@
 #pragma once
 
 #include <lasyten/block_backend/block_backend.h>
+#include <lasyten/detail/python_api.h>
 #include <lasyten/tools/hdf5.h>
 #include <memory>
-#include <pybind11/pytypes.h>
+
+#if !LASYTEN_HAS_PYTHON
+#error                                                                                            \
+  "NumpyBlockBackend needs a Python interpreter: configure with -DLASYTEN_WITH_PYTHON=ON and -DLASYTEN_WITH_NUMPY_BACKEND=ON"
+#endif
+#if defined(LASYTEN_WITH_NUMPY_BACKEND) && !LASYTEN_WITH_NUMPY_BACKEND
+#error                                                                                            \
+  "NumpyBlockBackend is compiled out (-DLASYTEN_WITH_NUMPY_BACKEND=OFF); use EigenBlockBackend"
+#endif
 
 namespace lasyten {
 
@@ -15,7 +24,7 @@ class NumpyBlockBackend : public BlockBackend
 {
   public:
     /// Block that holds a numpy array in a py::array.
-    class PYBIND11_EXPORT Block : public BlockBackend::Block
+    class LASYTEN_EXPORT Block : public BlockBackend::Block
     {
       public:
         explicit Block(py::array arr);

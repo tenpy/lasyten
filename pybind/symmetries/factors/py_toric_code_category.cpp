@@ -1,6 +1,6 @@
 #include "../../doc_plus.h"
 #include "docstrings/symmetries/factors/toric_code_category.h"
-#include "py_lasyten_pybind11.h"
+#include "py_lasyten_nanobind.h"
 
 #include "symmetries/casters.hpp"
 
@@ -13,16 +13,18 @@
 namespace lasyten {
 
 void
-bind_toric_code_category(py::module_& m)
+bind_toric_code_category(nb::module_& m)
 {
-    py::class_<ToricCodeCategory, QuantumDoubleZNAnyonCategory, py::smart_holder> cls(
+    nb::class_<ToricCodeCategory, QuantumDoubleZNAnyonCategory> cls(
       m, "ToricCodeCategory", DOC(lasyten, ToricCodeCategory));
-    cls.def(py::init<std::optional<std::string>>(), py::arg("descriptive_name") = py::none())
+    cls
+      .def(lasyten::ctor<decltype(cls), std::optional<std::string>>(),
+           nb::arg("descriptive_name").none() = nb::none())
       .def_static("from_hdf5",
                   lasyten::hdf5::wrap_from_hdf5<ToricCodeCategory>(),
-                  py::arg("hdf5_loader"),
-                  py::arg("h5gr"),
-                  py::arg("subpath"));
+                  nb::arg("hdf5_loader"),
+                  nb::arg("h5gr"),
+                  nb::arg("subpath"));
     cls.attr("vacuum") = ToricCodeCategory::vacuum;
     cls.attr("electric_charge") = ToricCodeCategory::electric_charge;
     cls.attr("magnetic_flux") = ToricCodeCategory::magnetic_flux;
