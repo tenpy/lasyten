@@ -1,2 +1,2 @@
-- Add :meth:`lasyten.Mask.from_sectors``
+- Add :meth:`lasyten.Mask.from_sectors_kept` and :meth:`lasyten.Mask.from_sectors_discarded`
 - Expose :func:`lasyten.apply_mask_DiagonalTensor`
