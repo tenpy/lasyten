@@ -25,8 +25,6 @@
 #include <cstdint>
 #include <format>
 #include <functional>
-#include <hdf5_io/constants.h>
-#include <hdf5_io/h5_ops.h>
 #include <initializer_list>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
@@ -36,6 +34,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tenpy_hdf5/constants.h>
+#include <tenpy_hdf5/h5_ops.h>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -936,16 +936,16 @@ Site::from_hdf5(py::object cls,
                 std::string const& subpath)
 {
     hid_t kw_id = loader.open(subpath + "init_kwargs");
-    HighFive::Group kw_g = hdf5_io::group_from_hid(kw_id);
+    HighFive::Group kw_g = tenpy_hdf5::group_from_hid(kw_id);
     lasyten::hdf5::Loader kw_loader(kw_g);
     py::dict kwargs;
     kwargs["leg"] = hdf5_export::load_elementary_space(kw_loader, "leg");
     {
         hid_t labels_id = kw_loader.open("state_labels");
-        HighFive::Group labels_g = hdf5_io::group_from_hid(labels_id);
+        HighFive::Group labels_g = tenpy_hdf5::group_from_hid(labels_id);
         lasyten::hdf5::Loader labels_loader(labels_g);
         std::map<std::string, int64> state_labels;
-        for (auto const& name : hdf5_io::h5_link_names(labels_g.getId())) {
+        for (auto const& name : tenpy_hdf5::h5_link_names(labels_g.getId())) {
             hid_t id = labels_loader.open(name);
             state_labels[name] = labels_loader.load_int64(id);
             H5Idec_ref(id);
@@ -954,10 +954,10 @@ Site::from_hdf5(py::object cls,
     }
     {
         hid_t ops_id = kw_loader.open("onsite_operators");
-        HighFive::Group ops_g = hdf5_io::group_from_hid(ops_id);
+        HighFive::Group ops_g = tenpy_hdf5::group_from_hid(ops_id);
         lasyten::hdf5::Loader ops_loader(ops_g);
         std::map<std::string, SymmetricTensorPtr> ops;
-        for (auto const& name : hdf5_io::h5_link_names(ops_g.getId())) {
+        for (auto const& name : tenpy_hdf5::h5_link_names(ops_g.getId())) {
             ops[name] = hdf5_export::load_instance<SymmetricTensor>(
               ops_loader, name, [&](HighFive::Group& g, std::string const& sub) {
                   return SymmetricTensor::from_hdf5(ops_loader, g, sub);

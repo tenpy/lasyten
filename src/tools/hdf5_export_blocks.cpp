@@ -21,7 +21,7 @@ namespace lasyten::hdf5_export {
 std::string
 class_attr(HighFive::Group& h5gr)
 {
-    auto cls = hdf5_io::h5_get_attr_string(h5gr.getId(), hdf5_io::ATTR_CLASS);
+    auto cls = tenpy_hdf5::h5_get_attr_string(h5gr.getId(), tenpy_hdf5::ATTR_CLASS);
     if (!cls) {
         throw std::runtime_error("hdf5_export: missing class attribute");
     }
@@ -29,12 +29,12 @@ class_attr(HighFive::Group& h5gr)
 }
 
 #if LASYTEN_HAS_PYTHON
-hdf5_io::Hdf5Buffer
+tenpy_hdf5::Hdf5Buffer
 buffer_from_numpy(py::array arr)
 {
     if (!py::to_bool(arr.attr("flags").attr("c_contiguous")))
         arr = py::reinterpret_steal<py::array>(arr.attr("copy")("C").release());
-    hdf5_io::Hdf5Buffer buf;
+    tenpy_hdf5::Hdf5Buffer buf;
     py::dtype dt = arr.dtype();
     buf.kind = dt.kind();
     buf.itemsize = static_cast<int>(dt.itemsize());
@@ -56,7 +56,7 @@ buffer_from_numpy(py::array arr)
 }
 
 py::array
-numpy_from_buffer(hdf5_io::Hdf5Buffer const& buf)
+numpy_from_buffer(tenpy_hdf5::Hdf5Buffer const& buf)
 {
     std::string descr;
     if (buf.kind == 'f' && buf.itemsize == 4)

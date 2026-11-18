@@ -11,10 +11,10 @@
 #include <algorithm>
 #include <cassert>
 #include <format>
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <stdexcept>
+#include <tenpy_hdf5/h5_ops.h>
 #include <utility>
 #include <vector>
 
@@ -947,7 +947,7 @@ DiagonalTensor::from_hdf5(lasyten::hdf5::Loader& loader,
     auto symmetry = hdf5_export::load_symmetry(loader, subpath + "symmetry");
     auto backend = hdf5_export::load_tensor_backend(loader, subpath + "backend");
     auto data = hdf5_export::load_tensor_backend_data(loader, subpath + "data");
-    if (hdf5_io::h5_contains(loader.root(), subpath + "device")) {
+    if (tenpy_hdf5::h5_contains(loader.root(), subpath + "device")) {
         hid_t id = loader.open(subpath + "device");
         (void)loader.load_string(id);
         H5Idec_ref(id);

@@ -1915,7 +1915,7 @@ EigenBlockBackend::Block::save_hdf5(lasyten::hdf5::Saver& saver,
                                     const std::string& subpath)
 {
     // Python-free: the owning C-ordered buffer is exactly what HDF5 wants.
-    hdf5_io::Hdf5Buffer buf;
+    tenpy_hdf5::Hdf5Buffer buf;
     buf.kind = hdf5_kind(dtype_);
     buf.itemsize = static_cast<int>(dtype::itemsize(dtype_));
     buf.shape.assign(shape_.begin(), shape_.end());

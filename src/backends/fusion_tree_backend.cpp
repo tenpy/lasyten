@@ -40,11 +40,11 @@
 #include <variant>
 #include <vector>
 
-#include <hdf5_io/constants.h>
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/symmetries/fusion_symbol.h>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
+#include <tenpy_hdf5/constants.h>
+#include <tenpy_hdf5/h5_ops.h>
 
 namespace lasyten {
 
@@ -133,7 +133,7 @@ FusionTreeData::save_hdf5(lasyten::hdf5::Saver& saver,
     HighFive::Group blocks_g;
     std::string blocks_sub;
     saver.save_sequence_begin(subpath + "blocks",
-                              hdf5_io::REPR_LIST,
+                              tenpy_hdf5::REPR_LIST,
                               static_cast<std::int64_t>(blocks.size()),
                               blocks_g,
                               blocks_sub);
@@ -152,8 +152,8 @@ FusionTreeData::from_hdf5(lasyten::hdf5::Loader& loader,
 {
     auto block_inds = hdf5_export::load_block_inds(loader, subpath + "block_inds");
     hid_t blocks_id = loader.open(subpath + "blocks");
-    auto const n = hdf5_io::h5_get_attr_int64(blocks_id, hdf5_io::ATTR_LEN).value_or(0);
-    HighFive::Group blocks_g = hdf5_io::group_from_hid(blocks_id);
+    auto const n = tenpy_hdf5::h5_get_attr_int64(blocks_id, tenpy_hdf5::ATTR_LEN).value_or(0);
+    HighFive::Group blocks_g = tenpy_hdf5::group_from_hid(blocks_id);
     lasyten::hdf5::Loader blocks_loader(blocks_g);
     std::vector<BlockBackend::BlockPtr> blocks;
     blocks.reserve(static_cast<std::size_t>(n));

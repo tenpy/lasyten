@@ -6,9 +6,9 @@
 #include <algorithm>
 #include <cassert>
 #include <format>
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <stdexcept>
+#include <tenpy_hdf5/h5_ops.h>
 #include <unordered_set>
 #include <utility>
 
@@ -320,7 +320,7 @@ HiddenLegTensor::save_hdf5(lasyten::hdf5::Saver& saver,
                            std::string const& subpath) const
 {
     SymmetricTensor::save_hdf5(saver, h5gr, subpath);
-    hdf5_io::h5_set_attr(h5gr.getId(), "is_hidden_leg_tensor", true);
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "is_hidden_leg_tensor", true);
 }
 
 HiddenLegTensor::Ptr

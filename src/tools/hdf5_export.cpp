@@ -39,10 +39,10 @@ namespace lasyten::hdf5_export {
 namespace {
 
 template<typename T>
-hdf5_io::Hdf5Buffer
+tenpy_hdf5::Hdf5Buffer
 vector_to_buffer(std::vector<T> const& v, char kind, int itemsize)
 {
-    hdf5_io::Hdf5Buffer buf;
+    tenpy_hdf5::Hdf5Buffer buf;
     buf.kind = kind;
     buf.itemsize = itemsize;
     buf.shape = { v.size() };
@@ -56,7 +56,7 @@ vector_to_buffer(std::vector<T> const& v, char kind, int itemsize)
 
 template<typename T>
 std::vector<T>
-vector_from_buffer(hdf5_io::Hdf5Buffer const& buf, char expect_kind, int expect_itemsize)
+vector_from_buffer(tenpy_hdf5::Hdf5Buffer const& buf, char expect_kind, int expect_itemsize)
 {
     if (buf.kind != expect_kind || buf.itemsize != expect_itemsize) {
         throw std::invalid_argument("hdf5_export: unexpected buffer dtype");
@@ -74,7 +74,7 @@ vector_from_buffer(hdf5_io::Hdf5Buffer const& buf, char expect_kind, int expect_
 std::int64_t
 sequence_len(lasyten::hdf5::Loader& loader, hid_t id)
 {
-    auto len = hdf5_io::h5_get_attr_int64(id, hdf5_io::ATTR_LEN);
+    auto len = tenpy_hdf5::h5_get_attr_int64(id, tenpy_hdf5::ATTR_LEN);
     if (!len) {
         throw std::runtime_error("hdf5_export: sequence missing len attribute");
     }
@@ -83,14 +83,14 @@ sequence_len(lasyten::hdf5::Loader& loader, hid_t id)
 
 } // namespace
 
-hdf5_io::Hdf5Buffer
+tenpy_hdf5::Hdf5Buffer
 i64_vector_to_buffer(std::vector<std::int64_t> const& v)
 {
     return vector_to_buffer(v, 'i', 8);
 }
 
 std::vector<std::int64_t>
-i64_vector_from_buffer(hdf5_io::Hdf5Buffer const& buf)
+i64_vector_from_buffer(tenpy_hdf5::Hdf5Buffer const& buf)
 {
     if (buf.kind == 'i' && buf.itemsize == 8) {
         return vector_from_buffer<std::int64_t>(buf, 'i', 8);
@@ -102,13 +102,13 @@ i64_vector_from_buffer(hdf5_io::Hdf5Buffer const& buf)
     throw std::invalid_argument("hdf5_export: expected int buffer");
 }
 
-hdf5_io::Hdf5Buffer
+tenpy_hdf5::Hdf5Buffer
 i64_matrix_to_buffer(std::vector<std::int64_t> const& flat, std::size_t rows, std::size_t cols)
 {
     if (flat.size() != rows * cols) {
         throw std::invalid_argument("hdf5_export: matrix size mismatch");
     }
-    hdf5_io::Hdf5Buffer buf;
+    tenpy_hdf5::Hdf5Buffer buf;
     buf.kind = 'i';
     buf.itemsize = 8;
     buf.shape = { rows, cols };
@@ -121,7 +121,7 @@ i64_matrix_to_buffer(std::vector<std::int64_t> const& flat, std::size_t rows, st
 }
 
 std::pair<std::vector<std::int64_t>, std::pair<std::size_t, std::size_t>>
-i64_matrix_from_buffer(hdf5_io::Hdf5Buffer const& buf)
+i64_matrix_from_buffer(tenpy_hdf5::Hdf5Buffer const& buf)
 {
     if (buf.shape.size() == 1) {
         auto v = i64_vector_from_buffer(buf);
@@ -149,14 +149,14 @@ i64_matrix_from_buffer(hdf5_io::Hdf5Buffer const& buf)
     return { std::move(flat), { rows, cols } };
 }
 
-hdf5_io::Hdf5Buffer
+tenpy_hdf5::Hdf5Buffer
 f64_vector_to_buffer(std::vector<double> const& v)
 {
     return vector_to_buffer(v, 'f', 8);
 }
 
 std::vector<double>
-f64_vector_from_buffer(hdf5_io::Hdf5Buffer const& buf)
+f64_vector_from_buffer(tenpy_hdf5::Hdf5Buffer const& buf)
 {
     return vector_from_buffer<double>(buf, 'f', 8);
 }
@@ -210,7 +210,7 @@ load_optional_i64_vector(lasyten::hdf5::Loader& loader, std::string const& path)
 {
     hid_t id = loader.open(path);
     auto type = loader.type_of(id);
-    if (type == hdf5_io::REPR_NONE) {
+    if (type == tenpy_hdf5::REPR_NONE) {
         H5Idec_ref(id);
         return std::nullopt;
     }
@@ -225,7 +225,7 @@ save_leg_labels(lasyten::hdf5::Saver& saver, std::string const& path, LegLabelLi
     HighFive::Group seq_g;
     std::string seq_sub;
     saver.save_sequence_begin(
-      path, hdf5_io::REPR_LIST, static_cast<std::int64_t>(labels.size()), seq_g, seq_sub);
+      path, tenpy_hdf5::REPR_LIST, static_cast<std::int64_t>(labels.size()), seq_g, seq_sub);
     lasyten::hdf5::Saver seq_saver(seq_g);
     for (std::size_t i = 0; i < labels.size(); ++i) {
         // Empty string = unset; still stored as a string (not REPR_NONE).
@@ -238,7 +238,7 @@ load_leg_labels(lasyten::hdf5::Loader& loader, std::string const& path)
 {
     hid_t id = loader.open(path);
     auto const n = sequence_len(loader, id);
-    HighFive::Group seq_g = hdf5_io::group_from_hid(id);
+    HighFive::Group seq_g = tenpy_hdf5::group_from_hid(id);
     lasyten::hdf5::Loader seq_loader(seq_g);
     LegLabelList out;
     out.reserve(static_cast<std::size_t>(n));
@@ -246,7 +246,7 @@ load_leg_labels(lasyten::hdf5::Loader& loader, std::string const& path)
         hid_t child = seq_loader.open(std::to_string(i));
         auto type = seq_loader.type_of(child);
         // Backward compat: older files stored unset labels as HDF5 None.
-        if (type == hdf5_io::REPR_NONE) {
+        if (type == tenpy_hdf5::REPR_NONE) {
             out.emplace_back("");
         } else {
             out.emplace_back(seq_loader.load_string(child));
@@ -287,7 +287,7 @@ Sector
 load_sector(lasyten::hdf5::Loader& loader, std::string const& path)
 {
     hid_t id = loader.open(path);
-    HighFive::Group g = hdf5_io::group_from_hid(id);
+    HighFive::Group g = tenpy_hdf5::group_from_hid(id);
     return Sector::from_hdf5(loader, g, lasyten::hdf5::ensure_slash(path));
 }
 
@@ -307,7 +307,7 @@ SectorArray
 load_sector_array(lasyten::hdf5::Loader& loader, std::string const& path)
 {
     hid_t id = loader.open(path);
-    HighFive::Group g = hdf5_io::group_from_hid(id);
+    HighFive::Group g = tenpy_hdf5::group_from_hid(id);
     return SectorArray::from_hdf5(loader, g, lasyten::hdf5::ensure_slash(path));
 }
 
@@ -327,7 +327,7 @@ BlockInds
 load_block_inds(lasyten::hdf5::Loader& loader, std::string const& path)
 {
     hid_t id = loader.open(path);
-    HighFive::Group g = hdf5_io::group_from_hid(id);
+    HighFive::Group g = tenpy_hdf5::group_from_hid(id);
     return BlockInds::from_hdf5(loader, g, lasyten::hdf5::ensure_slash(path));
 }
 

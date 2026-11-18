@@ -2,16 +2,16 @@
 
 /// Native HDF5 I/O helpers for lasyten ``src/`` (Python-free headers).
 
-#include <hdf5_io/core_io.h>
-#include <hdf5_io/h5_ops.h>
+#include <tenpy_hdf5/core_io.h>
+#include <tenpy_hdf5/h5_ops.h>
 
 #include <highfive/highfive.hpp>
 #include <string>
 
 namespace lasyten::hdf5 {
 
-using Saver = ::hdf5_io::core::Saver;
-using Loader = ::hdf5_io::core::Loader;
+using Saver = ::tenpy_hdf5::core::Saver;
+using Loader = ::tenpy_hdf5::core::Loader;
 
 inline std::string
 ensure_slash(std::string path)

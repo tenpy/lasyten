@@ -13,8 +13,8 @@
 #include <lasyten/tensors/labels.h>
 #include <lasyten/tools/hdf5.h>
 
-#include <hdf5_io/constants.h>
-#include <hdf5_io/h5_ops.h>
+#include <tenpy_hdf5/constants.h>
+#include <tenpy_hdf5/h5_ops.h>
 
 #include <cstdint>
 #include <memory>
@@ -27,17 +27,17 @@ namespace lasyten::hdf5_export {
 
 inline constexpr char const* kModule = "lasyten._core";
 
-[[nodiscard]] hdf5_io::Hdf5Buffer i64_vector_to_buffer(std::vector<std::int64_t> const& v);
-[[nodiscard]] std::vector<std::int64_t> i64_vector_from_buffer(hdf5_io::Hdf5Buffer const& buf);
+[[nodiscard]] tenpy_hdf5::Hdf5Buffer i64_vector_to_buffer(std::vector<std::int64_t> const& v);
+[[nodiscard]] std::vector<std::int64_t> i64_vector_from_buffer(tenpy_hdf5::Hdf5Buffer const& buf);
 
-[[nodiscard]] hdf5_io::Hdf5Buffer i64_matrix_to_buffer(std::vector<std::int64_t> const& flat,
-                                                       std::size_t rows,
-                                                       std::size_t cols);
+[[nodiscard]] tenpy_hdf5::Hdf5Buffer i64_matrix_to_buffer(std::vector<std::int64_t> const& flat,
+                                                          std::size_t rows,
+                                                          std::size_t cols);
 [[nodiscard]] std::pair<std::vector<std::int64_t>, std::pair<std::size_t, std::size_t>>
-i64_matrix_from_buffer(hdf5_io::Hdf5Buffer const& buf);
+i64_matrix_from_buffer(tenpy_hdf5::Hdf5Buffer const& buf);
 
-[[nodiscard]] hdf5_io::Hdf5Buffer f64_vector_to_buffer(std::vector<double> const& v);
-[[nodiscard]] std::vector<double> f64_vector_from_buffer(hdf5_io::Hdf5Buffer const& buf);
+[[nodiscard]] tenpy_hdf5::Hdf5Buffer f64_vector_to_buffer(std::vector<double> const& v);
+[[nodiscard]] std::vector<double> f64_vector_from_buffer(tenpy_hdf5::Hdf5Buffer const& buf);
 
 void save_i64_vector(lasyten::hdf5::Saver& saver,
                      std::string const& path,
@@ -135,7 +135,7 @@ load_instance(lasyten::hdf5::Loader& loader, std::string const& path, Make&& mak
         H5Idec_ref(id);
         return std::static_pointer_cast<T>(memo);
     }
-    HighFive::Group group = hdf5_io::group_from_hid(id);
+    HighFive::Group group = tenpy_hdf5::group_from_hid(id);
     return make(group, lasyten::hdf5::ensure_slash(path));
 }
 
@@ -143,8 +143,8 @@ load_instance(lasyten::hdf5::Loader& loader, std::string const& path, Make&& mak
 
 #if LASYTEN_HAS_PYTHON
 /// NumPy ↔ ``Hdf5Buffer`` (used by numpy/torch/array_api block backends).
-[[nodiscard]] hdf5_io::Hdf5Buffer buffer_from_numpy(py::array arr);
-[[nodiscard]] py::array numpy_from_buffer(hdf5_io::Hdf5Buffer const& buf);
+[[nodiscard]] tenpy_hdf5::Hdf5Buffer buffer_from_numpy(py::array arr);
+[[nodiscard]] py::array numpy_from_buffer(tenpy_hdf5::Hdf5Buffer const& buf);
 #endif // LASYTEN_HAS_PYTHON
 
 } // namespace lasyten::hdf5_export

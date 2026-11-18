@@ -16,7 +16,7 @@
 #include <lasyten/symmetries/sector.h>
 #include <lasyten/tools/lru_cache.h>
 
-#include <hdf5_io/h5_ops.h>
+#include <tenpy_hdf5/h5_ops.h>
 
 #include <highfive/highfive.hpp>
 
@@ -76,10 +76,10 @@ class PackedIndex
     int N_ = 2; // length of a label
     int rank_ = 4;
     std::size_t n_ = 0;
-    std::vector<std::int16_t> labels_;  // n * k * N, rows sorted and unique
-    std::vector<std::uint32_t> shapes_; // n * rank
-    std::vector<std::int64_t> offsets_; // n + 1
-    hdf5_io::Hdf5Buffer data_buffer_;   // all block data, if small enough
+    std::vector<std::int16_t> labels_;   // n * k * N, rows sorted and unique
+    std::vector<std::uint32_t> shapes_;  // n * rank
+    std::vector<std::int64_t> offsets_;  // n + 1
+    tenpy_hdf5::Hdf5Buffer data_buffer_; // all block data, if small enough
     complex128 const* data_ptr_ = nullptr;
     hid_t data_dataset_ = -1; // for reading one block at a time
     hid_t data_type_ = -1;

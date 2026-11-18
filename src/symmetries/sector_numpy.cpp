@@ -122,10 +122,10 @@ load_sector_array_from_buffer(py::buffer_info const& info, SectorArray& out)
 }
 #endif // LASYTEN_HAS_PYTHON (numpy buffer loaders)
 
-hdf5_io::Hdf5Buffer
+tenpy_hdf5::Hdf5Buffer
 sector_to_hdf5_buffer(Sector const& src)
 {
-    hdf5_io::Hdf5Buffer buf;
+    tenpy_hdf5::Hdf5Buffer buf;
     buf.kind = 'i';
     buf.itemsize = 8;
     buf.shape = { static_cast<std::size_t>(src.len()) };
@@ -138,10 +138,10 @@ sector_to_hdf5_buffer(Sector const& src)
     return buf;
 }
 
-hdf5_io::Hdf5Buffer
+tenpy_hdf5::Hdf5Buffer
 sector_array_to_hdf5_buffer(SectorArray const& src)
 {
-    hdf5_io::Hdf5Buffer buf;
+    tenpy_hdf5::Hdf5Buffer buf;
     buf.kind = 'i';
     buf.itemsize = 8;
     buf.shape = { src.size(), static_cast<std::size_t>(src.sector_ind_len()) };
@@ -157,7 +157,7 @@ sector_array_to_hdf5_buffer(SectorArray const& src)
 }
 
 Sector
-sector_from_hdf5_buffer(hdf5_io::Hdf5Buffer const& buf)
+sector_from_hdf5_buffer(tenpy_hdf5::Hdf5Buffer const& buf)
 {
     if (buf.shape.size() != 1) {
         throw std::invalid_argument("sector_from_hdf5_buffer: expected 1D array");
@@ -178,7 +178,7 @@ sector_from_hdf5_buffer(hdf5_io::Hdf5Buffer const& buf)
 }
 
 SectorArray
-sector_array_from_hdf5_buffer(hdf5_io::Hdf5Buffer const& buf)
+sector_array_from_hdf5_buffer(tenpy_hdf5::Hdf5Buffer const& buf)
 {
     if (buf.shape.size() != 2) {
         throw std::invalid_argument("sector_array_from_hdf5_buffer: expected 2D array");

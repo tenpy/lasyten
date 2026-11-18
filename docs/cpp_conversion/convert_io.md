@@ -10,7 +10,7 @@ state* but target different workflows.
 
 ## Decisions
 
-- **Keep `tenpy-hdf5` / `hdf5_io_core`.** HDF5 stays the on-disk format. Pickle does not replace it
+- **Keep `tenpy-hdf5` / `tenpy_hdf5_core`.** HDF5 stays the on-disk format. Pickle does not replace it
   and is not a stable file format: do not store pickles long-term or load untrusted ones.
 - **Pickle and HDF5 share logical state.** A type's pickle state is the set of fields that its
   `save_hdf5` persists, and it is rebuilt equivalently to `from_hdf5` (same constructor, same

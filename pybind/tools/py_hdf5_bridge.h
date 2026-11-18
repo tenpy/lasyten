@@ -24,9 +24,9 @@ Saver saver_from_python(py::object hdf5_saver);
 Loader loader_from_python(py::object hdf5_loader);
 
 /// Convert a contiguous numpy array into an owned ``Hdf5Buffer``.
-::hdf5_io::Hdf5Buffer buffer_from_numpy(py::array arr);
+::tenpy_hdf5::Hdf5Buffer buffer_from_numpy(py::array arr);
 
 /// Convert an ``Hdf5Buffer`` back to a numpy array (copies).
-py::array numpy_from_buffer(::hdf5_io::Hdf5Buffer const& buf);
+py::array numpy_from_buffer(::tenpy_hdf5::Hdf5Buffer const& buf);
 
 } // namespace lasyten::hdf5
