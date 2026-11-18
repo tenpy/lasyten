@@ -15,6 +15,7 @@
 #include <lasyten/tensors/symmetric_tensor.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <memory>
 #include <optional>
 #include <string>
@@ -91,6 +92,14 @@ bind_abelian_backend_data(nb::module_& m)
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
+
+    // Pickle: ``AbelianBackendData(dtype, device, blocks, block_inds, is_sorted=True)`` -- the
+    // fields HDF5 persists (``block_inds``, ``blocks``, ``dtype``, ``device``). Like HDF5, we
+    // assume the stored data is sorted. The blocks pickle through their block backend.
+    lasyten::pickle::def_reduce_ctor(cls, [](AbelianBackendData const& self) {
+        return nb::make_tuple(
+          self.dtype, self.device, nb::cast(self.blocks), self.block_inds, /*is_sorted=*/true);
+    });
 }
 
 void
@@ -104,6 +113,11 @@ bind_abelian_backend(nb::module_& m)
                 return std::make_shared<AbelianBackend>(as_shared_block_backend(block_backend));
             }),
             nb::arg("block_backend"));
+
+    // Pickle: ``AbelianBackend(block_backend)`` (what HDF5 ``from_hdf5`` does as well).
+    lasyten::pickle::def_reduce_ctor(cls, [](AbelianBackend const& self) {
+        return nb::make_tuple(nb::cast(self.block_backend));
+    });
 
     cls.def_static("wrap", &AbelianBackend::wrap, nb::arg("data"));
     cls.def_static("unwrap", &AbelianBackend::unwrap, nb::arg("data"));

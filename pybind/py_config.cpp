@@ -2,6 +2,8 @@
 
 #include "py_lasyten_nanobind.h"
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
+#include <type_traits>
 
 namespace py = lasyten::py;
 namespace lasyten {
@@ -46,8 +48,8 @@ class TemporaryOptions
 void
 bind_config(nb::module_& m)
 {
-    nb::class_<LasytenConfig>(m, "LasytenConfig")
-      .def(nb::init<>())
+    nb::class_<LasytenConfig> cfg_cls(m, "LasytenConfig");
+    cfg_cls.def(nb::init<>())
       .def_ro("print_linewidth", &LasytenConfig::print_linewidth)
       .def_ro("print_indent", &LasytenConfig::print_indent)
       .def_ro("maxlines_spaces", &LasytenConfig::maxlines_spaces)
@@ -128,6 +130,66 @@ bind_config(nb::module_& m)
                   nb::arg("h5gr"),
                   nb::arg("subpath"),
                   "Load config from hdf5");
+
+    // Pickle state: the same keys as the HDF5 datasets written by ``save_hdf5``.
+    lasyten::pickle::def_value_pickle(
+      cfg_cls,
+      [](LasytenConfig const& self) -> nb::object {
+          nb::dict d;
+          d["print_linewidth"] = self.print_linewidth;
+          d["print_indent"] = self.print_indent;
+          d["maxlines_spaces"] = self.maxlines_spaces;
+          d["maxlines_tensors"] = self.maxlines_tensors;
+          d["check_fusion"] = self.check_fusion;
+          d["implicit_scalar_conversion"] = self.implicit_scalar_conversion;
+          d["default_tensor_backend"] = self.default_tensor_backend;
+          d["default_block_backend"] = self.default_block_backend;
+          d["fusion_tree_eps"] = self.fusion_tree_eps;
+          d["su_n_data_path"] = self.su_n_data_path;
+          d["su_n_data_filename_base"] = self.su_n_data_filename_base;
+          d["su_n_symbol_cache_mb"] = self.su_n_symbol_cache_mb;
+          d["tree_plan_cache_mb"] = self.tree_plan_cache_mb;
+          d["tree_size_memo_mb"] = self.tree_size_memo_mb;
+          d["su_n_packed_ram_mb"] = self.su_n_packed_ram_mb;
+          d["su2_cg_hweight"] = self.su2_cg_hweight;
+          d["su2_f_hweight"] = self.su2_f_hweight;
+          d["su2_r_hweight"] = self.su2_r_hweight;
+          d["su_n_hweights"] = self.su_n_hweights;
+          d["coupling_cutoff"] = self.coupling_cutoff;
+          return d;
+      },
+      [](nb::object state_obj) {
+          nb::dict state = nb::cast<nb::dict>(state_obj);
+          LasytenConfig obj;
+          // options missing from the state keep their defaults (like ``from_hdf5``)
+          auto load = [&](char const* key, auto& member) {
+              nb::str k(key);
+              if (state.contains(k)) {
+                  member = nb::cast<std::decay_t<decltype(member)>>(state[k]);
+              }
+          };
+          load("print_linewidth", obj.print_linewidth);
+          load("print_indent", obj.print_indent);
+          load("maxlines_spaces", obj.maxlines_spaces);
+          load("maxlines_tensors", obj.maxlines_tensors);
+          load("check_fusion", obj.check_fusion);
+          load("implicit_scalar_conversion", obj.implicit_scalar_conversion);
+          load("default_tensor_backend", obj.default_tensor_backend);
+          load("default_block_backend", obj.default_block_backend);
+          load("fusion_tree_eps", obj.fusion_tree_eps);
+          load("su_n_data_path", obj.su_n_data_path);
+          load("su_n_data_filename_base", obj.su_n_data_filename_base);
+          load("su_n_symbol_cache_mb", obj.su_n_symbol_cache_mb);
+          load("tree_plan_cache_mb", obj.tree_plan_cache_mb);
+          load("tree_size_memo_mb", obj.tree_size_memo_mb);
+          load("su_n_packed_ram_mb", obj.su_n_packed_ram_mb);
+          load("su2_cg_hweight", obj.su2_cg_hweight);
+          load("su2_f_hweight", obj.su2_f_hweight);
+          load("su2_r_hweight", obj.su2_r_hweight);
+          load("su_n_hweights", obj.su_n_hweights);
+          load("coupling_cutoff", obj.coupling_cutoff);
+          return obj;
+      });
 
     nb::class_<TemporaryOptions>(m, "TemporaryOptions")
       .def(nb::init<py::dict>(), nb::arg("options"))

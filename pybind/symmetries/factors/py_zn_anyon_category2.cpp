@@ -7,6 +7,7 @@
 #include <lasyten/symmetries/factors/zn_anyon_category2.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <optional>
 #include <string>
 
@@ -15,8 +16,9 @@ namespace lasyten {
 void
 bind_zn_anyon_category2(nb::module_& m)
 {
-    nb::class_<ZNAnyonCategory2, SymmetryFactor>(
-      m, "ZNAnyonCategory2", DOC(lasyten, ZNAnyonCategory2))
+    nb::class_<ZNAnyonCategory2, SymmetryFactor> cls(
+      m, "ZNAnyonCategory2", DOC(lasyten, ZNAnyonCategory2));
+    cls
       .def(lasyten::ctor_for<ZNAnyonCategory2, int, int, std::optional<std::string>>(),
            nb::arg("N"),
            nb::arg("n"),
@@ -31,6 +33,10 @@ bind_zn_anyon_category2(nb::module_& m)
 
     m.def("semion_category", &semion_category, DOC(lasyten, semion_category));
     m.def("double_semion_category", &double_semion_category, DOC(lasyten, double_semion_category));
+
+    lasyten::pickle::def_reduce_ctor(cls, [](ZNAnyonCategory2 const& self) {
+        return nb::make_tuple(self.N, self.n, self.descriptive_name);
+    });
 }
 
 } // namespace lasyten

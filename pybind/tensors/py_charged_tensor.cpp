@@ -8,6 +8,7 @@
 
 #include "docstrings/tensors/charged_tensor.h"
 
+#include "tensor_pickle.h"
 #include "tools/hdf5_bind.h"
 #include <optional>
 #include <string>
@@ -267,6 +268,24 @@ bind_tensors_charged_tensor(nb::module_& m)
             nb::arg("h5gr"),
             nb::arg("subpath"),
             DOC(lasyten, ChargedTensor, save_hdf5));
+
+    // Pickle state: the HDF5 sub-groups ``invariant_part`` and ``charged_state`` (``dtype``,
+    // ``shape`` and ``labels`` are derived from the invariant part by the constructor).
+    lasyten::pickle::def_state_pickle(
+      cls,
+      [](ChargedTensor const& self) {
+          nb::dict d;
+          d["invariant_part"] = self.invariant_part;
+          d["charged_state"] = self.charged_state;
+          return d;
+      },
+      [](nb::dict state) {
+          auto inv = lasyten::pickle::get_item<SymmetricTensor::Ptr>(state, "invariant_part");
+          inv->allow_charge_leg_label = true;
+          return std::make_shared<ChargedTensor>(
+            std::move(inv),
+            lasyten::pickle::get_item<BlockBackend::BlockPtr>(state, "charged_state"));
+      });
 
     cls.def("as_dtype",
             &ChargedTensor::as_dtype,

@@ -7,6 +7,7 @@
 #include <lasyten/symmetries/factors/su2.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <optional>
 #include <string>
 
@@ -43,6 +44,9 @@ bind_su2(nb::module_& m)
     cls.attr("spin_zero") = _SU2::spin_zero;
     cls.attr("spin_half") = _SU2::spin_half;
     cls.attr("spin_one") = _SU2::spin_one;
+
+    lasyten::pickle::def_reduce_ctor(
+      cls, [](_SU2 const& self) { return nb::make_tuple(self.descriptive_name); });
 }
 
 } // namespace lasyten

@@ -7,6 +7,7 @@
 #include <lasyten/symmetries/factors/sun.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <map>
 #include <optional>
 #include <string>
@@ -202,6 +203,11 @@ bind_sun(nb::module_& m)
         },
         nb::arg("file"),
         DOC(lasyten, SUN, sanity_check_hdf5));
+
+    // Pickle: SUN(N, CGfile, Ffile, Rfile, descriptive_name) -- the fields HDF5 persists.
+    lasyten::pickle::def_reduce_ctor(cls, [](SUN const& self) {
+        return nb::make_tuple(self.N, self.CGpath, self.Fpath, self.Rpath, self.descriptive_name);
+    });
 }
 
 } // namespace lasyten

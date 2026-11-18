@@ -7,6 +7,7 @@
 #include "docstrings/models/degrees_of_freedom.h"
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <cmath>
 #include <memory>
 #include <optional>
@@ -223,6 +224,26 @@ bind_models_degrees_of_freedom(nb::module_& m)
       nb::arg("h5gr"),
       nb::arg("subpath"),
       "Reconstruct a Site (or subclass) from HDF5."));
+
+    // Pickle: same logical state as ``save_hdf5`` (``init_kwargs``); unpickling calls
+    // ``cls(**init_kwargs)`` like ``from_hdf5``.
+    site.def(
+      "__getstate__",
+      [](Site const& self) { return self.hdf5_init_kwargs(); },
+      "Pickle state: the constructor keyword arguments persisted by ``save_hdf5``.");
+    site.attr("_from_pickle_state") = classmethod(nb::cpp_function(
+      [](py::object cls, py::dict kwargs) { return cls(**kwargs); },
+      nb::name("_from_pickle_state"),
+      nb::arg("cls"),
+      nb::arg("state"),
+      "Rebuild a Site (or subclass) from the dict returned by ``__getstate__``."));
+    site.def(
+      "__reduce__",
+      [](nb::object self) -> nb::tuple {
+          return lasyten::pickle::reduce_via_method(
+            lasyten::pickle::type_of(self), "_from_pickle_state", self.attr("__getstate__")());
+      },
+      "Pickle support: ``(methodcaller('_from_pickle_state', state), (type(self),))``.");
 
     nb::class_<SpinDOF, DegreeOfFreedom> spin_dof(m, "SpinDOF");
     spin_dof.doc() = DOC(lasyten, SpinDOF);
