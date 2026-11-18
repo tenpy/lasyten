@@ -57,6 +57,14 @@ For a debug build, you can even enable automatic rebuild upon python import::
 
     pip install -v --no-build-isolation -C editable.rebuild=true -e .
 
+Input / output extras
++++++++++++++++++++++
+
+HDF5 support uses the ``tenpy-hdf5`` package (import ``tenpy_hdf5``; C++ library still
+``hdf5_io_core``). Install via ``pip install -e ".[io]"`` or the submodule
+``pip install --no-build-isolation -e ./external/hdf5_io``. Bound types also support
+:mod:`pickle` for in-Python workflows; see ``docs/cpp_conversion/convert_io.md``.
+
 CMake options for the block backends and a Python-free build
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
