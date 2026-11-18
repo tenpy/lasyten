@@ -3498,6 +3498,74 @@ def test_block_backend_as_scalar_passthrough(make_compatible_tensor):
     assert bb.as_scalar(True).as_bool() is True
 
 
+# numpy scalars as numbers, see tenpy/lasyten#330. ``np.complex128.__float__`` drops the imaginary part and only emits a
+# ComplexWarning. pytest turns that warning into an error, which makes nanobind skip the lossy float64 overload, so the
+# result is correct under pytest, but not for users with the default warning filters. So we ignore this particular
+# warning here, i.e. the tests check the behaviour under the default filters.
+numpy_complex_cast_warning_is_ignored = pytest.mark.filterwarnings(
+    'ignore:Casting complex values to real discards the imaginary part:numpy.exceptions.ComplexWarning'
+)
+numpy_numbers = pytest.mark.parametrize(
+    'number',
+    [np.complex128(2.0 + 3.0j), np.complex64(2.0 + 3.0j), np.float64(1.5), np.float32(1.5), np.int64(-4)],
+    ids=lambda x: type(x).__name__,
+)
+
+
+@numpy_complex_cast_warning_is_ignored
+@numpy_numbers
+def test_block_backend_as_scalar_numpy_number(number, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    res = bb.as_scalar(number)
+    expect = bb.as_scalar(number.item())  # the same with a Python number
+    assert res.dtype == expect.dtype
+    assert complex(res.to_numpy()) == complex(number)
+
+
+@numpy_complex_cast_warning_is_ignored
+@numpy_numbers
+@pytest.mark.parametrize(
+    'op',
+    [
+        pytest.param(lambda a, T: tensors.scalar_multiply(a, T), id='scalar_multiply'),
+        pytest.param(lambda a, T: tensors.linear_combination(a, T, 0, T), id='linear_combination'),
+        pytest.param(lambda a, T: a * T, id='rmul'),
+        pytest.param(lambda a, T: T * a, id='mul'),
+        pytest.param(lambda a, T: T / a, id='truediv'),
+        pytest.param(lambda a, T: T.scaled(a), id='scaled'),
+        pytest.param(lambda a, T: T.axpy(a, T), id='axpy'),
+    ],
+)
+def test_tensor_numpy_number(op, number, make_compatible_tensor):
+    T = make_compatible_tensor(cls=SymmetricTensor)
+    expect = op(number.item(), T)  # the same with a Python number
+    res = op(number, T)
+    res.test_sanity()
+    assert res.dtype == expect.dtype
+    assert tensors.almost_equal(res, expect)
+
+
+@numpy_complex_cast_warning_is_ignored
+@numpy_numbers
+@pytest.mark.parametrize(
+    'op',
+    [
+        pytest.param(lambda a, D: a * D, id='rmul'),
+        pytest.param(lambda a, D: D * a, id='mul'),
+        pytest.param(lambda a, D: D / a, id='truediv'),
+        pytest.param(lambda a, D: D + a, id='add'),
+        pytest.param(lambda a, D: a - D, id='rsub'),
+    ],
+)
+def test_diagonal_tensor_numpy_number(op, number, make_compatible_tensor):
+    D = make_compatible_tensor(cls=DiagonalTensor)
+    expect = op(number.item(), D)  # the same with a Python number
+    res = op(number, D)
+    res.test_sanity()
+    assert res.dtype == expect.dtype
+    assert tensors.almost_equal(res, expect)
+
+
 @pytest.mark.deselect_invalid_ChargedTensor_cases
 @pytest.mark.parametrize(
     'cls, codom, dom, which_leg',
