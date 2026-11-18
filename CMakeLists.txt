@@ -54,7 +54,7 @@ endif()
 option(BUILD_DOC "Build API documentation" OFF)
 option(LINTING "Use clang-tidy for linting" OFF)
 option(BUILD_TESTING "Build ctest tests" ON)
-option(LASYTEN_WITH_HDF5 "Link hdf5_io_core for native HDF5 I/O" ON)
+option(LASYTEN_WITH_HDF5 "Link tenpy_hdf5_core for native HDF5 I/O" ON)
 # When ON (default): build Numpy/Torch/Array-API backends, models, _SU2, and
 # the nanobind ``_core`` extension. NumpyBlockBackend requires a live Python
 # interpreter (extension or an embedding program) — it is not a pure-C++ backend.
@@ -371,23 +371,23 @@ set_source_files_properties(
   PROPERTIES COMPILE_DEFINITIONS EIGEN_USE_BLAS)
 
 # #####################################################################
-# ## hdf5_io_core (optional native HDF5)
+# ## tenpy_hdf5_core (optional native HDF5)
 # #####################################################################
 if(LASYTEN_WITH_HDF5)
   set(_lasyten_hdf5_io_default "${CMAKE_CURRENT_SOURCE_DIR}/external/hdf5_io")
   # Prefer a sibling checkout that already has the Python-free core (Phase B).
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tenpy_other/hdf5_io/include/hdf5_io/core_io.h")
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tenpy_other/hdf5_io/include/tenpy_hdf5/core_io.h")
     set(_lasyten_hdf5_io_default "${CMAKE_CURRENT_SOURCE_DIR}/../tenpy_other/hdf5_io")
-  elseif(NOT EXISTS "${_lasyten_hdf5_io_default}/include/hdf5_io/core_io.h")
+  elseif(NOT EXISTS "${_lasyten_hdf5_io_default}/include/tenpy_hdf5/core_io.h")
     message(FATAL_ERROR
-      "LASYTEN_WITH_HDF5=ON but hdf5_io core not found. "
-      "Init submodule external/hdf5_io or set LASYTEN_HDF5_IO_DIR to a Phase-B hdf5_io tree.")
+      "LASYTEN_WITH_HDF5=ON but tenpy_hdf5_core not found. "
+      "Init submodule external/hdf5_io or set LASYTEN_HDF5_IO_DIR to a tenpy_hdf5 source tree.")
   endif()
   set(LASYTEN_HDF5_IO_DIR "${_lasyten_hdf5_io_default}" CACHE PATH
-    "Source tree of hdf5_io (must provide hdf5_io_core)")
-  set(HDF5_IO_BUILD_PYTHON OFF CACHE BOOL "Build hdf5_io Python module when embedded" FORCE)
+    "Source tree of the hdf5_io git checkout (must provide tenpy_hdf5_core)")
+  set(TENPY_HDF5_BUILD_PYTHON OFF CACHE BOOL "Build tenpy_hdf5 Python module when embedded" FORCE)
   add_subdirectory("${LASYTEN_HDF5_IO_DIR}" "${CMAKE_BINARY_DIR}/_deps/hdf5_io")
-  target_link_libraries(lasyten PUBLIC hdf5_io_core)
+  target_link_libraries(lasyten PUBLIC tenpy_hdf5_core)
   target_compile_definitions(lasyten PUBLIC LASYTEN_WITH_HDF5=1)
   message(STATUS "LASYTEN_WITH_HDF5: using ${LASYTEN_HDF5_IO_DIR}")
 endif()

@@ -7,6 +7,7 @@
 #include <lasyten/symmetries/factors/fermion_parity.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <optional>
 #include <string>
 
@@ -27,6 +28,10 @@ bind_fermion_parity(nb::module_& m)
                   nb::arg("subpath"));
     cls.attr("even") = FermionParity::even;
     cls.attr("odd") = FermionParity::odd;
+
+    lasyten::pickle::def_reduce_ctor(cls, [](FermionParity const& self) {
+        return nb::make_tuple(self.descriptive_name, self.trivial_shift);
+    });
 }
 
 } // namespace lasyten

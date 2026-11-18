@@ -14,6 +14,7 @@
 #include <lasyten/tensors/symmetric_tensor.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -463,6 +464,11 @@ the sector multiplicities.)pydoc")
       .def_ro("num_legs", &LegPipe::num_legs)
       .def_rw("combine_cstyle", &LegPipe::combine_cstyle);
 
+    // Pickle (beyond HDF5, which has no schema for a plain LegPipe): ``LegPipe(legs, ...)``.
+    lasyten::pickle::def_reduce_ctor(pipe, [](LegPipe const& self) {
+        return nb::make_tuple(nb::cast(self.legs), self.is_dual, self.combine_cstyle);
+    });
+
     bind_axis_common<decltype(pipe), LegPipe>(pipe);
 
     pipe
@@ -770,6 +776,29 @@ bind_elementary_space(nb::module_& m)
       .def_prop_ro("is_direct_sum_space",
                    &ElementarySpace::is_direct_sum_space,
                    DOC(lasyten, ElementarySpace, is_direct_sum_space));
+
+    // Pickle state: the fields ``ElementarySpace.from_hdf5`` consumes (HDF5 sub-group names);
+    // everything else (sector_decomposition, slices, ...) is derived by the constructor.
+    lasyten::pickle::def_state_pickle(
+      cls,
+      [](ElementarySpace const& self) {
+          nb::dict d;
+          d["symmetry"] = self.symmetry;
+          d["defining_sectors"] = self.defining_sectors;
+          d["multiplicities"] = perm_to_numpy(self.multiplicities);
+          d["_basis_perm"] =
+            self.has_custom_basis_perm() ? perm_to_numpy(self.basis_perm()) : nb::none();
+          d["is_dual"] = self.is_dual;
+          return d;
+      },
+      [](nb::dict state) {
+          return std::make_shared<ElementarySpace>(
+            lasyten::pickle::get_item<Symmetry::Ptr>(state, "symmetry"),
+            lasyten::pickle::get_item<SectorArray>(state, "defining_sectors"),
+            multiplicities_from_python(state["multiplicities"]),
+            lasyten::pickle::get_item<bool>(state, "is_dual"),
+            perm_from_python(state["_basis_perm"]));
+      });
 }
 
 void
@@ -979,6 +1008,23 @@ bind_direct_sum_space(nb::module_& m)
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
+
+    // Pickle state: ``spaces``, ``is_dual``, ``summand_labels`` (as consumed by ``from_hdf5``).
+    lasyten::pickle::def_state_pickle(
+      cls,
+      [](DirectSumSpace const& self) {
+          nb::dict d;
+          d["spaces"] = nb::cast(self.spaces);
+          d["is_dual"] = self.is_dual;
+          d["summand_labels"] = nb::cast(self.summand_labels);
+          return d;
+      },
+      [](nb::dict state) {
+          return DirectSumSpace::from_spaces(
+            lasyten::pickle::get_item<std::vector<ElementarySpace::Ptr>>(state, "spaces"),
+            lasyten::pickle::get_item<bool>(state, "is_dual"),
+            lasyten::pickle::get_item<std::optional<LegLabelList>>(state, "summand_labels"));
+      });
 }
 
 void
@@ -1228,6 +1274,26 @@ bind_tensor_product(nb::module_& m)
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
+
+    // Pickle state: ``factors``, ``symmetry``, ``sector_decomposition``, ``multiplicities``
+    // (as consumed by ``from_hdf5``).
+    lasyten::pickle::def_state_pickle(
+      cls,
+      [](TensorProduct const& self) {
+          nb::dict d;
+          d["factors"] = nb::cast(self.factors);
+          d["symmetry"] = self.symmetry;
+          d["sector_decomposition"] = self.sector_decomposition;
+          d["multiplicities"] = perm_to_numpy(self.multiplicities);
+          return d;
+      },
+      [](nb::dict state) {
+          return std::make_shared<TensorProduct>(
+            lasyten::pickle::get_item<std::vector<Leg::Ptr>>(state, "factors"),
+            lasyten::pickle::get_item<Symmetry::Ptr>(state, "symmetry"),
+            lasyten::pickle::get_item<SectorArray>(state, "sector_decomposition"),
+            multiplicities_from_python(state["multiplicities"]));
+      });
 }
 
 void
@@ -1400,6 +1466,23 @@ bind_abelian_leg_pipe(nb::module_& m)
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
+
+    // Pickle state: ``legs``, ``is_dual``, ``combine_cstyle`` (as consumed by ``from_hdf5``).
+    lasyten::pickle::def_state_pickle(
+      cls,
+      [](AbelianLegPipe const& self) {
+          nb::dict d;
+          d["legs"] = nb::cast(self.legs);
+          d["is_dual"] = self.is_dual;
+          d["combine_cstyle"] = self.combine_cstyle;
+          return d;
+      },
+      [](nb::dict state) {
+          return std::make_shared<AbelianLegPipe>(
+            lasyten::pickle::get_item<std::vector<ElementarySpace::Ptr>>(state, "legs"),
+            lasyten::pickle::get_item<bool>(state, "is_dual"),
+            lasyten::pickle::get_item<bool>(state, "combine_cstyle"));
+      });
 
     m.def("swap_gate",
           &swap_gate,

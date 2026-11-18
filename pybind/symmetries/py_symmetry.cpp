@@ -9,6 +9,7 @@
 #include <lasyten/symmetries/symmetry_factor.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <memory>
 #include <optional>
 #include <vector>
@@ -248,6 +249,16 @@ bind_symmetry(nb::module_& m)
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
+
+    // Pickle: ``Symmetry(factors)`` -- ``factors`` is the field HDF5 persists; the sector slices
+    // etc. are derived by the constructor.
+    lasyten::pickle::def_reduce_ctor(cls, [](Symmetry const& self) {
+        nb::list factors;
+        for (auto const& f : self.factors) {
+            factors.append(nb::cast(f));
+        }
+        return nb::make_tuple(factors);
+    });
 }
 
 } // namespace lasyten

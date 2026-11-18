@@ -3,6 +3,7 @@
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
 #include "../tools/hdf5_bind.h"
+#include "../tools/pickle_bind.h"
 
 #include "docstrings/tensors/labels.h"
 
@@ -248,6 +249,10 @@ In Python, unset labels are empty strings (``""``).
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
+
+    // Pickle: ``LegLabels(labels)`` -- the ``labels`` list HDF5 persists.
+    lasyten::pickle::def_reduce_ctor(
+      labelled_legs, [](LegLabels const& self) { return nb::make_tuple(self.as_list()); });
 }
 
 } // namespace lasyten

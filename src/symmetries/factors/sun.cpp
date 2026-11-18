@@ -9,7 +9,7 @@
 
 #include "sun_packed.h"
 
-#include <hdf5_io/h5_ops.h>
+#include <tenpy_hdf5/h5_ops.h>
 
 #include <algorithm>
 #include <array>
@@ -93,7 +93,7 @@ sector_bracket(Sector const& a)
 std::string
 cg_key(int N, Sector const& a, Sector const& b)
 {
-    // Absolute-style path without leading slash (hdf5_io::normalized_path strips it).
+    // Absolute-style path without leading slash (tenpy_hdf5::normalized_path strips it).
     return "N_" + std::to_string(N) + "/" + sector_slash_path(a) + sector_slash_path(b);
 }
 
@@ -107,11 +107,11 @@ bool
 cg_key_usable(HighFive::File& CGfile, std::string const& key)
 {
     auto root = file_root(CGfile);
-    if (!hdf5_io::h5_contains(root, key)) {
+    if (!tenpy_hdf5::h5_contains(root, key)) {
         return false;
     }
-    hid_t loc = hdf5_io::h5_open(root, key);
-    auto names = hdf5_io::h5_link_names(loc);
+    hid_t loc = tenpy_hdf5::h5_open(root, key);
+    auto names = tenpy_hdf5::h5_link_names(loc);
     H5Idec_ref(loc);
     return !names.empty();
 }
@@ -119,7 +119,7 @@ cg_key_usable(HighFive::File& CGfile, std::string const& key)
 int64
 file_attr_int64(HighFive::File& file, char const* name)
 {
-    auto v = hdf5_io::h5_get_attr_int64(file.getId(), name);
+    auto v = tenpy_hdf5::h5_get_attr_int64(file.getId(), name);
     if (!v) {
         throw std::runtime_error(
           std::format("SUN HDF5 file '{}' is missing attribute '{}'", file.getName(), name));
@@ -230,7 +230,7 @@ read_irrep_label_attr(hid_t loc)
         throw std::runtime_error("SUN: dataset missing Irreplabel attribute");
     }
     hid_t attr = H5Aopen(loc, "Irreplabel", H5P_DEFAULT);
-    hdf5_io::check_hdf5(attr < 0 ? -1 : 0, "H5Aopen Irreplabel");
+    tenpy_hdf5::check_hdf5(attr < 0 ? -1 : 0, "H5Aopen Irreplabel");
     hid_t type = H5Aget_type(attr);
     hid_t space = H5Aget_space(attr);
     int ndims = H5Sget_simple_extent_ndims(space);
@@ -258,7 +258,7 @@ read_irrep_label_attr(hid_t loc)
 
     std::vector<std::uint8_t> storage(n * sz);
     hid_t ntype = H5Tget_native_type(type, H5T_DIR_ASCEND);
-    hdf5_io::check_hdf5(H5Aread(attr, ntype, storage.data()), "H5Aread Irreplabel");
+    tenpy_hdf5::check_hdf5(H5Aread(attr, ntype, storage.data()), "H5Aread Irreplabel");
     H5Tclose(ntype);
     H5Sclose(space);
     H5Tclose(type);
@@ -267,7 +267,7 @@ read_irrep_label_attr(hid_t loc)
 }
 
 FusionSymbol
-fusion_symbol_from_hdf5_buffer(hdf5_io::Hdf5Buffer const& buf)
+fusion_symbol_from_hdf5_buffer(tenpy_hdf5::Hdf5Buffer const& buf)
 {
     if (buf.shape.size() > 4) {
         throw std::invalid_argument("fusion_symbol_from_hdf5_buffer: rank must be <= 4");
@@ -306,9 +306,9 @@ std::vector<std::array<double, 4>>
 read_cg_rows(HighFive::File& file, std::string const& group_key, std::string const& dset_name)
 {
     auto root = file_root(file);
-    hid_t grp = hdf5_io::h5_open(root, group_key);
-    hid_t dset = hdf5_io::h5_open(grp, dset_name);
-    auto buf = hdf5_io::h5_read_buffer(dset);
+    hid_t grp = tenpy_hdf5::h5_open(root, group_key);
+    hid_t dset = tenpy_hdf5::h5_open(grp, dset_name);
+    auto buf = tenpy_hdf5::h5_read_buffer(dset);
     H5Idec_ref(dset);
     H5Idec_ref(grp);
 
@@ -615,14 +615,14 @@ void
 check_symbol_group(HighFive::Group& root, char kind, int64 highest_weight)
 {
     std::string const group_name = std::string(1, kind) + "_sym";
-    if (!hdf5_io::h5_contains(root, group_name)) {
+    if (!tenpy_hdf5::h5_contains(root, group_name)) {
         throw std::invalid_argument("HDF5 file does not contain '/" + group_name + "/' group.");
     }
     CheckSymbolGroupState state;
     state.kind = kind;
     state.prefix = std::string(1, kind) + "[";
     state.highest_weight = highest_weight;
-    hid_t group = hdf5_io::h5_open(root, group_name);
+    hid_t group = tenpy_hdf5::h5_open(root, group_name);
     hsize_t position = 0;
 #if H5_VERSION_GE(1, 12, 0)
     herr_t const status = H5Literate2(
@@ -649,7 +649,7 @@ check_symbol_group(HighFive::Group& root, char kind, int64 highest_weight)
         H5Idec_ref(group);
         throw std::runtime_error("SUN: iterating over the keys of '/" + group_name + "/' failed");
     }
-    bool const has_zero_key = state.have_first && hdf5_io::h5_contains(group, state.zero_key);
+    bool const has_zero_key = state.have_first && tenpy_hdf5::h5_contains(group, state.zero_key);
     H5Idec_ref(group);
     if (!state.have_first) {
         throw std::invalid_argument(std::string("No valid ") + kind + "-symbol keys found in '/" +
@@ -694,14 +694,14 @@ build_outcomes(HighFive::File& CGfile, int N, Sector a, Sector b)
     if (!cg_key_usable(CGfile, key)) {
         key = cg_key(N, b, a);
     }
-    hid_t grp = hdf5_io::h5_open(root, key);
+    hid_t grp = tenpy_hdf5::h5_open(root, key);
     SunOutcomes res;
-    for (auto const& name : hdf5_io::h5_link_names(grp)) {
-        hid_t child = hdf5_io::h5_open(grp, name);
+    for (auto const& name : tenpy_hdf5::h5_link_names(grp)) {
+        hid_t child = tenpy_hdf5::h5_open(grp, name);
         Sector lab = read_irrep_label_attr(child);
         res.labels.push_back(lab);
         if (name == std::string("Irrep") + sector_concat(lab) + "a1") {
-            auto mult = hdf5_io::h5_get_attr_int64(child, "Outer Multiplicity");
+            auto mult = tenpy_hdf5::h5_get_attr_int64(child, "Outer Multiplicity");
             if (!mult) {
                 H5Idec_ref(child);
                 H5Idec_ref(grp);
@@ -783,14 +783,14 @@ SUN::SUN(int N_,
         auto const recorded = [](std::optional<std::string> const& v) {
             return v.has_value() && !v->empty() && *v != "unknown";
         };
-        auto const id_cg = hdf5_io::h5_get_attr_string(CGfile_->getId(), "CG_Run_Id");
-        auto const gauge_cg = hdf5_io::h5_get_attr_string(CGfile_->getId(), "Gauge_Version");
+        auto const id_cg = tenpy_hdf5::h5_get_attr_string(CGfile_->getId(), "CG_Run_Id");
+        auto const gauge_cg = tenpy_hdf5::h5_get_attr_string(CGfile_->getId(), "Gauge_Version");
         auto const show = [&](std::optional<std::string> const& v) {
             return recorded(v) ? "'" + *v + "'" : std::string("not recorded");
         };
         for (auto const& [file, what, path] : { std::tuple{ Ffile_.get(), "F", &Fpath },
                                                 std::tuple{ Rfile_.get(), "R", &Rpath } }) {
-            auto const gauge = hdf5_io::h5_get_attr_string(file->getId(), "Gauge_Version");
+            auto const gauge = tenpy_hdf5::h5_get_attr_string(file->getId(), "Gauge_Version");
             if (recorded(gauge_cg) && (!recorded(gauge) || *gauge_cg != *gauge)) {
                 throw std::invalid_argument(std::format(
                   "SUN: the {} file '{}' (Gauge_Version {}) and the CG file '{}' (Gauge_Version "
@@ -803,7 +803,7 @@ SUN::SUN(int N_,
                   CGpath,
                   show(gauge_cg)));
             }
-            auto const id = hdf5_io::h5_get_attr_string(file->getId(), "CG_Run_Id");
+            auto const id = tenpy_hdf5::h5_get_attr_string(file->getId(), "CG_Run_Id");
             if (recorded(id_cg) && recorded(id) && *id_cg != *id) {
                 throw std::invalid_argument(std::format(
                   "SUN: the {} file '{}' and the CG file '{}' come from different generator runs "
@@ -1109,13 +1109,13 @@ SUN::dims_of_irreps(Sector a, Sector b) const
     auto outcomes = fusion_outcomes(a, b);
     auto key = cg_key(N, a, b);
     auto root = cg_root();
-    hid_t grp = hdf5_io::h5_open(root, key);
+    hid_t grp = tenpy_hdf5::h5_open(root, key);
     std::map<Sector, int64> C;
     for (std::size_t i = 0; i < outcomes.size(); ++i) {
         Sector ir = outcomes[i];
         auto obj = std::string("Irrep") + sector_concat(ir) + "a1";
-        hid_t dset = hdf5_io::h5_open(grp, obj);
-        auto dim = hdf5_io::h5_get_attr_int64(dset, "Dimension");
+        hid_t dset = tenpy_hdf5::h5_open(grp, obj);
+        auto dim = tenpy_hdf5::h5_get_attr_int64(dset, "Dimension");
         H5Idec_ref(dset);
         if (!dim) {
             H5Idec_ref(grp);
@@ -1133,13 +1133,13 @@ SUN::outer_multiplicity_from_CG(Sector a, Sector b) const
     auto outcomes = fusion_outcomes(a, b);
     auto key = cg_key(N, a, b);
     auto root = cg_root();
-    hid_t grp = hdf5_io::h5_open(root, key);
+    hid_t grp = tenpy_hdf5::h5_open(root, key);
     std::map<Sector, int64> C;
     for (std::size_t i = 0; i < outcomes.size(); ++i) {
         Sector ir = outcomes[i];
         auto obj = std::string("Irrep") + sector_concat(ir) + "a1";
-        hid_t dset = hdf5_io::h5_open(grp, obj);
-        auto mult = hdf5_io::h5_get_attr_int64(dset, "Outer Multiplicity");
+        hid_t dset = tenpy_hdf5::h5_open(grp, obj);
+        auto mult = tenpy_hdf5::h5_get_attr_int64(dset, "Outer Multiplicity");
         H5Idec_ref(dset);
         if (!mult) {
             H5Idec_ref(grp);
@@ -1281,10 +1281,10 @@ SUN::_f_symbol(Sector a, Sector b, Sector c, Sector d, Sector e, Sector f) const
               if (auto const i = state.f_packed->find(std::array<Sector, 6>{ a, b, c, d, e, f })) {
                   return SymbolValue{ state.f_packed->read(*i) };
               }
-          } else if (hdf5_io::h5_contains(root, std::string("F_sym/") + key)) {
-              hid_t fsym = hdf5_io::h5_open(root, "F_sym");
-              hid_t dset = hdf5_io::h5_open(fsym, key);
-              auto buf = hdf5_io::h5_read_buffer(dset);
+          } else if (tenpy_hdf5::h5_contains(root, std::string("F_sym/") + key)) {
+              hid_t fsym = tenpy_hdf5::h5_open(root, "F_sym");
+              hid_t dset = tenpy_hdf5::h5_open(fsym, key);
+              auto buf = tenpy_hdf5::h5_read_buffer(dset);
               H5Idec_ref(dset);
               H5Idec_ref(fsym);
               return SymbolValue{ fusion_symbol_from_hdf5_buffer(buf) };
@@ -1356,10 +1356,10 @@ SUN::_r_symbol(Sector a, Sector b, Sector c) const
             if (auto const i = state.r_packed->find(std::array<Sector, 3>{ a, b, c })) {
                 return SymbolValue{ state.r_packed->read(*i) };
             }
-        } else if (hdf5_io::h5_contains(root, std::string("R_sym/") + key)) {
-            hid_t rsym = hdf5_io::h5_open(root, "R_sym");
-            hid_t dset = hdf5_io::h5_open(rsym, key);
-            auto buf = hdf5_io::h5_read_buffer(dset);
+        } else if (tenpy_hdf5::h5_contains(root, std::string("R_sym/") + key)) {
+            hid_t rsym = tenpy_hdf5::h5_open(root, "R_sym");
+            hid_t dset = tenpy_hdf5::h5_open(rsym, key);
+            auto buf = tenpy_hdf5::h5_read_buffer(dset);
             H5Idec_ref(dset);
             H5Idec_ref(rsym);
             return SymbolValue{ fusion_symbol_from_hdf5_buffer(buf) };
@@ -1410,8 +1410,8 @@ SUN::has_data_in_group(hid_t loc) const
         return n > 0;
     }
     if (info.type == H5O_TYPE_GROUP) {
-        for (auto const& name : hdf5_io::h5_link_names(loc)) {
-            hid_t child = hdf5_io::h5_open(loc, name);
+        for (auto const& name : tenpy_hdf5::h5_link_names(loc)) {
+            hid_t child = tenpy_hdf5::h5_open(loc, name);
             bool ok = has_data_in_group(child);
             H5Idec_ref(child);
             if (ok) {
@@ -1432,13 +1432,13 @@ SUN::sanity_check_hdf5(HighFive::File const& file) const
     auto root = file_root(f);
     if (sun_packed::is_packed_layout(f, f.getName())) {
         // symbol file in the packed layout: check its index (the data is not needed)
-        char const kind = hdf5_io::h5_contains(root, "F_packed") ? 'F' : 'R';
+        char const kind = tenpy_hdf5::h5_contains(root, "F_packed") ? 'F' : 'R';
         std::shared_ptr<HighFive::File> borrowed(&f, [](HighFive::File*) {});
         sun_packed::PackedIndex::load(borrowed, f.getName(), kind, static_cast<int>(Nattr), false)
           ->check(H);
         return;
     }
-    auto keys0 = hdf5_io::h5_link_names(root.getId());
+    auto keys0 = tenpy_hdf5::h5_link_names(root.getId());
     if (keys0.empty()) {
         throw std::invalid_argument("SUN sanity_check_hdf5: empty HDF5 file");
     }
@@ -1448,18 +1448,18 @@ SUN::sanity_check_hdf5(HighFive::File const& file) const
         check_symbol_group(root, ft, H);
     } else if (ft == 'N') {
         auto path = std::string("N_") + std::to_string(Nattr);
-        if (!hdf5_io::h5_contains(root, path)) {
+        if (!tenpy_hdf5::h5_contains(root, path)) {
             throw std::invalid_argument("HDF5 file does not contain /" + path + "/ group.");
         }
-        hid_t parent = hdf5_io::h5_open(root, path);
-        auto keys = hdf5_io::h5_link_names(parent);
+        hid_t parent = tenpy_hdf5::h5_open(root, path);
+        auto keys = tenpy_hdf5::h5_link_names(parent);
         if (static_cast<int64>(keys.size()) != H + 1) {
             H5Idec_ref(parent);
             throw std::runtime_error("SUN sanity_check_hdf5: unexpected CG key count");
         }
         for (auto const& idx : { keys.back(), keys.front() }) {
-            hid_t group = hdf5_io::h5_open(parent, idx);
-            if (hdf5_io::h5_link_names(group).empty()) {
+            hid_t group = tenpy_hdf5::h5_open(parent, idx);
+            if (tenpy_hdf5::h5_link_names(group).empty()) {
                 H5Idec_ref(group);
                 H5Idec_ref(parent);
                 throw std::runtime_error("SUN sanity_check_hdf5: empty weight group");
@@ -1514,8 +1514,8 @@ unusable_data_file_reason(std::string const& path, int N, int64 h)
 {
     try {
         HighFive::File file(path, HighFive::File::ReadOnly);
-        auto const n = hdf5_io::h5_get_attr_int64(file.getId(), "N");
-        auto const stored = hdf5_io::h5_get_attr_int64(file.getId(), "Highest_Weight");
+        auto const n = tenpy_hdf5::h5_get_attr_int64(file.getId(), "N");
+        auto const stored = tenpy_hdf5::h5_get_attr_int64(file.getId(), "Highest_Weight");
         if (!stored) {
             return "it has no attribute 'Highest_Weight' (a generator run that has not finished "
                    "or "

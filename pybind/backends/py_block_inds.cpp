@@ -9,6 +9,7 @@
 #include <lasyten/backends/block_inds_numpy.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -412,6 +413,13 @@ bind_block_inds(nb::module_& m)
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
+
+    // Pickle state: the 2D int64 NumPy array of shape (nrows, ncols), as persisted by HDF5
+    // (``values``).
+    lasyten::pickle::def_value_pickle(
+      cls,
+      [](BlockInds const& self) { return block_inds_to_ndarray(self); },
+      [](nb::object state) { return block_inds_from_numpy(state); });
 
     nb::implicitly_convertible<py::array, BlockInds>();
 }

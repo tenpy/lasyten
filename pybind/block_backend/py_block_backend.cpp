@@ -14,6 +14,7 @@
 #include "py_trampolines.hpp"
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <lasyten/block_backend/block_backend.h>
 #if LASYTEN_WITH_NUMPY_BACKEND
 #include <lasyten/block_backend/array_api.h>
@@ -1132,6 +1133,36 @@ bind_block_backend(nb::module_& m)
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath")); // completed block_backend methods
+
+    // --- pickle support (state mirrors save_hdf5 / from_hdf5; no HDF5 round trip) ---
+
+    // BlockBackend: backends are per-device singletons, so unpickling calls
+    // ``type(self).from_factory(default_device)`` (what HDF5 ``from_hdf5`` does as well).
+    block_backend.def(
+      "__reduce__",
+      [](nb::object self) {
+          auto const& bb = nb::cast<BlockBackend const&>(self);
+          return lasyten::pickle::reduce_via_method(
+            lasyten::pickle::type_of(self), "from_factory", bb.default_device);
+      },
+      "Pickle support: ``type(self).from_factory(default_device)``.");
+
+    // Block: state = owning NumPy copy (dtype + shape are encoded in the array), rebuilt with
+    // ``backend.block_from_numpy(arr, dtype, device)``. The backend itself pickles as above.
+    block_cls.def(
+      "__reduce__",
+      [](nb::object self) {
+          auto const& b = nb::cast<BlockBackend::Block const&>(self);
+          nb::object arr = self.attr("to_numpy")();
+          nb::object backend = nb::cast(b.get_backend(), nb::rv_policy::reference);
+          return lasyten::pickle::reduce_via_method(
+            backend, "block_from_numpy", arr, nb::cast(b.dtype()), b.device());
+      },
+      "Pickle support: ``backend.block_from_numpy(self.to_numpy(), dtype, device)``.");
+
+    // Scalar: state = the underlying 0-d block (``Scalar(block)``).
+    lasyten::pickle::def_reduce_ctor(
+      scalar, [](BlockBackend::Scalar const& self) { return nb::make_tuple(self._block()); });
 
     // Transitional Python-dispatch backends (LASYTEN_WITH_NUMPY_BACKEND, convert_nanobind.md
     // leftover #5); EigenBlockBackend is the preferred CPU backend.

@@ -10,6 +10,7 @@
 
 #include "docstrings/tensors/mask.h"
 
+#include "tensor_pickle.h"
 #include "tools/hdf5_bind.h"
 #include <format>
 #include <optional>
@@ -274,6 +275,33 @@ bind_tensors_mask(nb::module_& m)
             nb::arg("h5gr"),
             nb::arg("subpath"),
             DOC(lasyten, Mask, save_hdf5));
+
+    // Pickle state: the HDF5 sub-groups ``domain``, ``codomain``, ``backend``, ``data``,
+    // ``symmetry``, ``dtype``, ``shape``, ``labels`` plus the ``is_projection`` attribute.
+    lasyten::pickle::def_state_pickle(
+      cls,
+      [](Mask const& self) {
+          nb::dict d;
+          lasyten::pickle::tensor_common_to_dict(self, d);
+          d["data"] = self.data;
+          d["is_projection"] = self.is_projection;
+          return d;
+      },
+      [](nb::dict state) {
+          auto c = lasyten::pickle::tensor_common_from_dict(state);
+          auto data = lasyten::pickle::get_item<TensorBackend::DataPtr>(state, "data");
+          auto obj =
+            std::make_shared<Mask>(std::move(data),
+                                   as_space(c.domain->factors[0]),
+                                   as_space(c.codomain->factors[0]),
+                                   lasyten::pickle::get_item<bool>(state, "is_projection"),
+                                   c.backend,
+                                   c.symmetry,
+                                   std::move(c.labels),
+                                   c.device);
+          obj->shape = std::move(c.shape);
+          return obj;
+      });
 
     cls.def("as_dtype", &Mask::as_dtype, nb::arg("dtype"), DOC(lasyten, Mask, as_dtype));
 

@@ -2,9 +2,9 @@
 
 #include <lasyten/symmetries/symmetry.h>
 
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <stdexcept>
+#include <tenpy_hdf5/h5_ops.h>
 
 namespace lasyten {
 
@@ -117,8 +117,8 @@ SymmetryFactor::save_hdf5(lasyten::hdf5::Saver& saver,
     saver.save_int64(subpath + "sector_ind_len", static_cast<std::int64_t>(sector_ind_len));
     saver.save_bool(subpath + "trivial_shift", trivial_shift);
     std::string descr = descriptive_name.has_value() ? *descriptive_name : "None";
-    hdf5_io::h5_set_attr(h5gr.getId(), "descriptive_name", descr);
-    hdf5_io::h5_set_attr(
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "descriptive_name", descr);
+    tenpy_hdf5::h5_set_attr(
       h5gr.getId(), "has_complex_topological_data", has_complex_topological_data);
 }
 
@@ -144,7 +144,7 @@ SymmetryFactor::load_hdf5_common(lasyten::hdf5::Loader& loader,
     }
     {
         hid_t id = loader.open(subpath + "trivial_sector");
-        HighFive::Group sector_gr = hdf5_io::group_from_hid(id);
+        HighFive::Group sector_gr = tenpy_hdf5::group_from_hid(id);
         trivial_sector = Sector::from_hdf5(
           loader, sector_gr, lasyten::hdf5::ensure_slash(subpath + "trivial_sector"));
     }
@@ -162,14 +162,14 @@ SymmetryFactor::load_hdf5_common(lasyten::hdf5::Loader& loader,
     // trivial_shift was added later; default true if missing.
     trivial_shift = trivial_shift_from_hdf5(loader, subpath);
     descriptive_name = descriptive_name_from_hdf5_attrs(h5gr);
-    auto has_complex = hdf5_io::h5_get_attr_int64(h5gr.getId(), "has_complex_topological_data");
+    auto has_complex = tenpy_hdf5::h5_get_attr_int64(h5gr.getId(), "has_complex_topological_data");
     has_complex_topological_data = has_complex.value_or(0) != 0;
 }
 
 std::optional<std::string>
 descriptive_name_from_hdf5_attrs(HighFive::Group& h5gr)
 {
-    auto descr = hdf5_io::h5_get_attr_string(h5gr.getId(), "descriptive_name");
+    auto descr = tenpy_hdf5::h5_get_attr_string(h5gr.getId(), "descriptive_name");
     if (!descr || *descr == "None") {
         return std::nullopt;
     }
@@ -179,7 +179,7 @@ descriptive_name_from_hdf5_attrs(HighFive::Group& h5gr)
 bool
 trivial_shift_from_hdf5(lasyten::hdf5::Loader& loader, std::string const& subpath)
 {
-    if (!hdf5_io::h5_contains(loader.root(), subpath + "trivial_shift")) {
+    if (!tenpy_hdf5::h5_contains(loader.root(), subpath + "trivial_shift")) {
         return true;
     }
     hid_t id = loader.open(subpath + "trivial_shift");

@@ -13,13 +13,13 @@
 #include <cmath>
 #include <format>
 #include <functional>
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <numeric>
 #include <random>
 #include <ranges>
 #include <stdexcept>
+#include <tenpy_hdf5/h5_ops.h>
 #include <utility>
 #include <vector>
 
@@ -956,10 +956,10 @@ Mask::save_hdf5(lasyten::hdf5::Saver& saver,
     hdf5_export::save_tensor_backend(saver, subpath + "backend", backend);
     hdf5_export::save_tensor_backend_data(saver, subpath + "data", data);
     hdf5_export::save_symmetry(saver, subpath + "symmetry", symmetry);
-    hdf5_io::h5_set_attr(h5gr.getId(), "dtype", dtype::repr(dtype));
-    hdf5_io::h5_set_attr(h5gr.getId(), "num_legs", static_cast<std::int64_t>(num_legs));
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "dtype", dtype::repr(dtype));
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "num_legs", static_cast<std::int64_t>(num_legs));
     hdf5_export::save_f64_vector(saver, subpath + "shape", shape);
-    hdf5_io::h5_set_attr(h5gr.getId(), "is_projection", is_projection);
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "is_projection", is_projection);
     hdf5_export::save_leg_labels(saver, subpath + "labels", labels.as_list());
 }
 
@@ -974,7 +974,7 @@ Mask::from_hdf5(lasyten::hdf5::Loader& loader, HighFive::Group& h5gr, std::strin
     auto shape_in = hdf5_export::load_f64_vector(loader, subpath + "shape");
 
     bool proj = true;
-    auto proj_attr = hdf5_io::h5_get_attr_int64(h5gr.getId(), "is_projection");
+    auto proj_attr = tenpy_hdf5::h5_get_attr_int64(h5gr.getId(), "is_projection");
     if (proj_attr.has_value()) {
         proj = *proj_attr != 0;
     } else {
@@ -984,7 +984,7 @@ Mask::from_hdf5(lasyten::hdf5::Loader& loader, HighFive::Group& h5gr, std::strin
     }
 
     LegLabelList labels_in(2, "");
-    if (hdf5_io::h5_contains(loader.root(), subpath + "labels")) {
+    if (tenpy_hdf5::h5_contains(loader.root(), subpath + "labels")) {
         labels_in = hdf5_export::load_leg_labels(loader, subpath + "labels");
         if (labels_in.empty()) {
             labels_in.assign(2, "");

@@ -10,6 +10,7 @@
 
 #include "docstrings/tensors/symmetric_tensor.h"
 
+#include "tensor_pickle.h"
 #include "tools/hdf5_bind.h"
 #include <map>
 #include <optional>
@@ -422,6 +423,13 @@ bind_tensors_symmetric_tensor(nb::module_& m)
                    nb::arg("h5gr"),
                    nb::arg("subpath"),
                    DOC(lasyten, SymmetricTensor, from_hdf5));
+
+    // Pickle state: the HDF5 sub-groups ``domain``, ``codomain``, ``backend``, ``data``,
+    // ``symmetry``, ``dtype``, ``device``, ``shape``, ``labels``.
+    lasyten::pickle::def_state_pickle(
+      cls,
+      [](SymmetricTensor const& self) { return lasyten::pickle::symmetric_tensor_to_dict(self); },
+      [](nb::dict state) { return lasyten::pickle::symmetric_tensor_from_dict(state); });
 }
 
 } // namespace lasyten

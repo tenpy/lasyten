@@ -4,6 +4,7 @@
 
 #include "py_trampolines.hpp"
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <lasyten/block_backend/array_api.h>
 
 namespace lasyten {
@@ -27,6 +28,13 @@ bind_block_backend_array_api(nb::module_& m)
       nb::arg("h5gr"),
       nb::arg("subpath"),
       "Load an ArrayApiBlockBackend from an HDF5 file (not generally supported).");
+    // Pickle: ``ArrayApiBlockBackend(api_namespace, default_device)``. This succeeds only if the
+    // Array API namespace object itself is picklable (e.g. a module is not), unlike the generic
+    // ``from_factory`` route of the other block backends. Blocks pickle through this backend.
+    lasyten::pickle::def_reduce_ctor(array_api_block_backend,
+                                     [](ArrayApiBlockBackend const& self) {
+                                         return nb::make_tuple(self.api(), self.default_device);
+                                     });
 
     nb::class_<ArrayApiBlockBackend::Block, BlockBackend::Block>(
       array_api_block_backend,

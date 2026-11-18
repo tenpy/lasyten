@@ -13,12 +13,12 @@
 #include <algorithm>
 #include <cassert>
 #include <format>
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <numeric>
 #include <ranges>
 #include <stdexcept>
+#include <tenpy_hdf5/h5_ops.h>
 #include <utility>
 #include <vector>
 
@@ -916,9 +916,9 @@ SymmetricTensor::save_hdf5(lasyten::hdf5::Saver& saver,
     hdf5_export::save_symmetry(saver, subpath + "symmetry", symmetry);
     hdf5_export::save_dtype_string(saver, subpath + "dtype", dtype);
     saver.save_string(subpath + "device", device);
-    hdf5_io::h5_set_attr(h5gr.getId(), "num_legs", static_cast<std::int64_t>(num_legs));
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "num_legs", static_cast<std::int64_t>(num_legs));
     hdf5_export::save_f64_vector(saver, subpath + "shape", shape);
-    hdf5_io::h5_set_attr(h5gr.getId(), "cls", class_name());
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "cls", class_name());
     hdf5_export::save_leg_labels(saver, subpath + "labels", labels.as_list());
 }
 
@@ -932,7 +932,7 @@ SymmetricTensor::from_hdf5(lasyten::hdf5::Loader& loader,
     auto symmetry = hdf5_export::load_symmetry(loader, subpath + "symmetry");
     auto backend = hdf5_export::load_tensor_backend(loader, subpath + "backend");
     auto data = hdf5_export::load_tensor_backend_data(loader, subpath + "data");
-    if (hdf5_io::h5_contains(loader.root(), subpath + "device")) {
+    if (tenpy_hdf5::h5_contains(loader.root(), subpath + "device")) {
         hid_t id = loader.open(subpath + "device");
         (void)loader.load_string(id);
         H5Idec_ref(id);

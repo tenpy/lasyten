@@ -5,6 +5,7 @@
 #include "symmetries/casters.hpp"
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <lasyten/symmetries/factors/ising_anyon_category.h>
 
 namespace lasyten {
@@ -24,6 +25,24 @@ bind_ising_anyon_category(nb::module_& m)
     cls.attr("sigma") = IsingAnyonCategory::sigma;
     cls.attr("psi") = IsingAnyonCategory::psi;
     cls.def_ro("nu", &IsingAnyonCategory::nu);
+
+    // Pickle state mirrors ``save_hdf5``: the constructor fields plus ``descriptive_name`` (which
+    // the C++ constructor does not take, but HDF5 restores as an attribute).
+    lasyten::pickle::def_state_pickle(
+      cls,
+      [](IsingAnyonCategory const& self) {
+          nb::dict d;
+          d["nu"] = self.nu;
+          d["descriptive_name"] = self.descriptive_name;
+          return d;
+      },
+      [](nb::dict state) {
+          auto obj =
+            std::make_shared<IsingAnyonCategory>(lasyten::pickle::get_item<int>(state, "nu"));
+          obj->descriptive_name =
+            lasyten::pickle::get_item<std::optional<std::string>>(state, "descriptive_name");
+          return obj;
+      });
 }
 
 } // namespace lasyten

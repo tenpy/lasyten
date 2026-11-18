@@ -11,6 +11,7 @@
 
 #include "docstrings/tensors/diagonal_tensor.h"
 
+#include "tensor_pickle.h"
 #include "tools/hdf5_bind.h"
 #include <format>
 #include <optional>
@@ -549,6 +550,24 @@ bind_tensors_diagonal_tensor(nb::module_& m)
             nb::arg("subpath"),
             DOC(lasyten, DiagonalTensor, save_hdf5));
 
+    // Pickle state: as for ``SymmetricTensor``; rebuilt like ``DiagonalTensor::from_hdf5``
+    // (the single leg is the first codomain factor).
+    lasyten::pickle::def_state_pickle(
+      cls,
+      [](DiagonalTensor const& self) { return lasyten::pickle::symmetric_tensor_to_dict(self); },
+      [](nb::dict state) {
+          auto c = lasyten::pickle::tensor_common_from_dict(state);
+          auto data = lasyten::pickle::get_item<TensorBackend::DataPtr>(state, "data");
+          auto obj = std::make_shared<DiagonalTensor>(std::move(data),
+                                                      as_space(c.codomain->factors[0]),
+                                                      c.backend,
+                                                      c.symmetry,
+                                                      std::move(c.labels));
+          obj->dtype = c.dtype;
+          obj->device = c.device;
+          return obj;
+      });
+
     // Elementwise dunders
     cls.def("__abs__", &DiagonalTensor::abs);
     cls.def("__bool__", [](DiagonalTensor& self) {
@@ -664,6 +683,25 @@ bind_tensors_diagonal_tensor(nb::module_& m)
                       nb::arg("h5gr"),
                       nb::arg("subpath"),
                       DOC(lasyten, Identity, from_hdf5));
+
+    // Pickle state: as for ``SymmetricTensor`` but without ``data``, which ``Identity`` (like
+    // ``Identity::from_hdf5``) regenerates from ``dtype`` / ``device``.
+    lasyten::pickle::def_state_pickle(
+      id_cls,
+      [](Identity const& self) {
+          nb::dict d;
+          lasyten::pickle::tensor_common_to_dict(self, d);
+          return d;
+      },
+      [](nb::dict state) {
+          auto c = lasyten::pickle::tensor_common_from_dict(state);
+          return std::make_shared<Identity>(as_space(c.domain->factors[0]),
+                                            c.backend,
+                                            c.symmetry,
+                                            std::move(c.labels),
+                                            c.dtype,
+                                            c.device);
+      });
 
     id_cls.def(
       "as_dtype", &Identity::as_dtype, nb::arg("dtype"), DOC(lasyten, Identity, as_dtype));

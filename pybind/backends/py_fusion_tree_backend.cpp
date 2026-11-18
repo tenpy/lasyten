@@ -15,6 +15,7 @@
 #include <lasyten/tensors/symmetric_tensor.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <memory>
 #include <optional>
 #include <string>
@@ -98,6 +99,13 @@ bind_fusion_tree_data(nb::module_& m)
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
+
+    // Pickle: ``FusionTreeData(block_inds, blocks, dtype, device, is_sorted=True)`` -- the
+    // fields HDF5 persists. Like HDF5, we assume the stored data is sorted.
+    lasyten::pickle::def_reduce_ctor(cls, [](FusionTreeData const& self) {
+        return nb::make_tuple(
+          self.block_inds, nb::cast(self.blocks), self.dtype, self.device, /*is_sorted=*/true);
+    });
 }
 
 void
@@ -110,6 +118,10 @@ bind_fusion_tree_backend(nb::module_& m)
                 return std::make_shared<FusionTreeBackend>(as_shared_block_backend(block_backend));
             }),
             nb::arg("block_backend"));
+    // Pickle: ``FusionTreeBackend(block_backend)`` (what HDF5 ``from_hdf5`` does as well).
+    lasyten::pickle::def_reduce_ctor(cls, [](FusionTreeBackend const& self) {
+        return nb::make_tuple(nb::cast(self.block_backend));
+    });
     cls.def_static("wrap", &FusionTreeBackend::wrap, nb::arg("data"));
     cls.def_static("unwrap", &FusionTreeBackend::unwrap, nb::arg("data"));
 

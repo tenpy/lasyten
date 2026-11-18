@@ -12,14 +12,14 @@
 #include <complex>
 #include <format>
 #include <functional>
-#include <hdf5_io/constants.h>
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <numeric>
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
+#include <tenpy_hdf5/constants.h>
+#include <tenpy_hdf5/h5_ops.h>
 #include <tuple>
 #include <unordered_set>
 
@@ -2269,7 +2269,7 @@ ElementarySpace::save_hdf5(lasyten::hdf5::Saver& saver,
     } else {
         saver.save_none(subpath + "sector_dims");
     }
-    hdf5_io::h5_set_attr(h5gr.getId(), "is_dual", is_dual);
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "is_dual", is_dual);
 }
 
 ElementarySpace::Ptr
@@ -2281,7 +2281,7 @@ ElementarySpace::from_hdf5(lasyten::hdf5::Loader& loader,
     auto defining_sectors = hdf5_export::load_sector_array(loader, subpath + "defining_sectors");
     auto multiplicities = hdf5_export::load_i64_vector(loader, subpath + "multiplicities");
     auto basis_perm = hdf5_export::load_optional_i64_vector(loader, subpath + "_basis_perm");
-    auto const is_dual_attr = hdf5_io::h5_get_attr_int64(h5gr.getId(), "is_dual");
+    auto const is_dual_attr = tenpy_hdf5::h5_get_attr_int64(h5gr.getId(), "is_dual");
     bool const is_dual = is_dual_attr.value_or(0) != 0;
     auto obj = std::make_shared<ElementarySpace>(std::move(symmetry),
                                                  std::move(defining_sectors),
@@ -2748,7 +2748,7 @@ DirectSumSpace::save_hdf5(lasyten::hdf5::Saver& saver,
     HighFive::Group spaces_g;
     std::string spaces_sub;
     saver.save_sequence_begin(subpath + "spaces",
-                              hdf5_io::REPR_LIST,
+                              tenpy_hdf5::REPR_LIST,
                               static_cast<std::int64_t>(spaces.size()),
                               spaces_g,
                               spaces_sub);
@@ -2756,7 +2756,7 @@ DirectSumSpace::save_hdf5(lasyten::hdf5::Saver& saver,
     for (std::size_t i = 0; i < spaces.size(); ++i) {
         hdf5_export::save_elementary_space(spaces_saver, std::to_string(i), spaces[i]);
     }
-    hdf5_io::h5_set_attr(h5gr.getId(), "is_direct_sum_space", true);
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "is_direct_sum_space", true);
     hdf5_export::save_leg_labels(saver, subpath + "summand_labels", summand_labels);
 }
 
@@ -2766,18 +2766,18 @@ DirectSumSpace::from_hdf5(lasyten::hdf5::Loader& loader,
                           std::string const& subpath)
 {
     hid_t spaces_id = loader.open(subpath + "spaces");
-    auto const n = hdf5_io::h5_get_attr_int64(spaces_id, hdf5_io::ATTR_LEN).value_or(0);
-    HighFive::Group spaces_g = hdf5_io::group_from_hid(spaces_id);
+    auto const n = tenpy_hdf5::h5_get_attr_int64(spaces_id, tenpy_hdf5::ATTR_LEN).value_or(0);
+    HighFive::Group spaces_g = tenpy_hdf5::group_from_hid(spaces_id);
     lasyten::hdf5::Loader spaces_loader(spaces_g);
     std::vector<ElementarySpace::Ptr> spaces_;
     spaces_.reserve(static_cast<std::size_t>(n));
     for (std::int64_t i = 0; i < n; ++i) {
         spaces_.push_back(hdf5_export::load_elementary_space(spaces_loader, std::to_string(i)));
     }
-    auto const is_dual_attr = hdf5_io::h5_get_attr_int64(h5gr.getId(), "is_dual");
+    auto const is_dual_attr = tenpy_hdf5::h5_get_attr_int64(h5gr.getId(), "is_dual");
     bool const is_dual = is_dual_attr.value_or(0) != 0;
     std::optional<LegLabelList> summand_labels_;
-    if (hdf5_io::h5_contains(loader.root(), subpath + "summand_labels")) {
+    if (tenpy_hdf5::h5_contains(loader.root(), subpath + "summand_labels")) {
         auto labs = hdf5_export::load_leg_labels(loader, subpath + "summand_labels");
         summand_labels_ =
           labs.empty() && !spaces_.empty() ? LegLabelList(spaces_.size(), "") : std::move(labs);
@@ -3620,7 +3620,7 @@ TensorProduct::save_hdf5(lasyten::hdf5::Saver& saver,
     HighFive::Group factor_g;
     std::string factor_sub;
     saver.save_sequence_begin(subpath + "factors",
-                              hdf5_io::REPR_LIST,
+                              tenpy_hdf5::REPR_LIST,
                               static_cast<std::int64_t>(factors.size()),
                               factor_g,
                               factor_sub);
@@ -3669,8 +3669,8 @@ TensorProduct::from_hdf5(lasyten::hdf5::Loader& loader,
 {
     auto symmetry = hdf5_export::load_symmetry(loader, subpath + "symmetry");
     hid_t factors_id = loader.open(subpath + "factors");
-    auto const n = hdf5_io::h5_get_attr_int64(factors_id, hdf5_io::ATTR_LEN).value_or(0);
-    HighFive::Group factors_g = hdf5_io::group_from_hid(factors_id);
+    auto const n = tenpy_hdf5::h5_get_attr_int64(factors_id, tenpy_hdf5::ATTR_LEN).value_or(0);
+    HighFive::Group factors_g = tenpy_hdf5::group_from_hid(factors_id);
     lasyten::hdf5::Loader factors_loader(factors_g);
     std::vector<Leg::Ptr> factors;
     factors.reserve(static_cast<std::size_t>(n));
@@ -4478,7 +4478,7 @@ AbelianLegPipe::save_hdf5(lasyten::hdf5::Saver& saver,
     HighFive::Group leg_g;
     std::string leg_sub;
     saver.save_sequence_begin(subpath + "legs",
-                              hdf5_io::REPR_LIST,
+                              tenpy_hdf5::REPR_LIST,
                               static_cast<std::int64_t>(legs.size()),
                               leg_g,
                               leg_sub);
@@ -4486,7 +4486,7 @@ AbelianLegPipe::save_hdf5(lasyten::hdf5::Saver& saver,
     for (std::size_t i = 0; i < legs.size(); ++i) {
         hdf5_export::save_leg(leg_saver, std::to_string(i), legs[i]);
     }
-    hdf5_io::h5_set_attr(h5gr.getId(), "combine_cstyle", combine_cstyle);
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "combine_cstyle", combine_cstyle);
 }
 
 AbelianLegPipe::Ptr
@@ -4495,17 +4495,17 @@ AbelianLegPipe::from_hdf5(lasyten::hdf5::Loader& loader,
                           std::string const& subpath)
 {
     hid_t legs_id = loader.open(subpath + "legs");
-    auto const n = hdf5_io::h5_get_attr_int64(legs_id, hdf5_io::ATTR_LEN).value_or(0);
-    HighFive::Group legs_g = hdf5_io::group_from_hid(legs_id);
+    auto const n = tenpy_hdf5::h5_get_attr_int64(legs_id, tenpy_hdf5::ATTR_LEN).value_or(0);
+    HighFive::Group legs_g = tenpy_hdf5::group_from_hid(legs_id);
     lasyten::hdf5::Loader legs_loader(legs_g);
     std::vector<ElementarySpace::Ptr> legs;
     legs.reserve(static_cast<std::size_t>(n));
     for (std::int64_t i = 0; i < n; ++i) {
         legs.push_back(hdf5_export::load_elementary_space(legs_loader, std::to_string(i)));
     }
-    auto const is_dual_attr = hdf5_io::h5_get_attr_int64(h5gr.getId(), "is_dual");
+    auto const is_dual_attr = tenpy_hdf5::h5_get_attr_int64(h5gr.getId(), "is_dual");
     bool const is_dual = is_dual_attr.value_or(0) != 0;
-    auto const combine_attr = hdf5_io::h5_get_attr_int64(h5gr.getId(), "combine_cstyle");
+    auto const combine_attr = tenpy_hdf5::h5_get_attr_int64(h5gr.getId(), "combine_cstyle");
     bool const combine_cstyle = combine_attr.value_or(0) != 0;
     auto obj = std::make_shared<AbelianLegPipe>(std::move(legs), is_dual, combine_cstyle);
     loader.memorize_load(h5gr.getId(), std::static_pointer_cast<void>(obj));

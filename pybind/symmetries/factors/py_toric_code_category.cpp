@@ -7,6 +7,7 @@
 #include <lasyten/symmetries/factors/toric_code_category.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <optional>
 #include <string>
 
@@ -29,6 +30,9 @@ bind_toric_code_category(nb::module_& m)
     cls.attr("electric_charge") = ToricCodeCategory::electric_charge;
     cls.attr("magnetic_flux") = ToricCodeCategory::magnetic_flux;
     cls.attr("fermion") = ToricCodeCategory::fermion;
+
+    lasyten::pickle::def_reduce_ctor(
+      cls, [](ToricCodeCategory const& self) { return nb::make_tuple(self.descriptive_name); });
 }
 
 } // namespace lasyten

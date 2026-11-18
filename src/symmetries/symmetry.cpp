@@ -7,8 +7,6 @@
 #include <array>
 #include <cmath>
 #include <format>
-#include <hdf5_io/constants.h>
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <limits>
@@ -16,6 +14,8 @@
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <tenpy_hdf5/constants.h>
+#include <tenpy_hdf5/h5_ops.h>
 #include <utility>
 
 namespace lasyten {
@@ -819,7 +819,7 @@ Symmetry::save_hdf5(lasyten::hdf5::Saver& saver,
     HighFive::Group factors_g;
     std::string factors_sub;
     saver.save_sequence_begin(subpath + "factors",
-                              hdf5_io::REPR_LIST,
+                              tenpy_hdf5::REPR_LIST,
                               static_cast<std::int64_t>(factors.size()),
                               factors_g,
                               factors_sub);
@@ -842,7 +842,7 @@ Symmetry::save_hdf5(lasyten::hdf5::Saver& saver,
     hdf5_export::save_sector(saver, subpath + "trivial_sector", trivial_sector);
     saver.save_float64(subpath + "num_sectors", num_sectors);
     saver.save_int64(subpath + "sector_ind_len", static_cast<std::int64_t>(sector_ind_len));
-    hdf5_io::h5_set_attr(
+    tenpy_hdf5::h5_set_attr(
       h5gr.getId(), "has_complex_topological_data", has_complex_topological_data);
 }
 
@@ -852,8 +852,8 @@ Symmetry::from_hdf5(lasyten::hdf5::Loader& loader,
                     std::string const& subpath)
 {
     hid_t factors_id = loader.open(subpath + "factors");
-    auto const n = hdf5_io::h5_get_attr_int64(factors_id, hdf5_io::ATTR_LEN).value_or(0);
-    HighFive::Group factors_g = hdf5_io::group_from_hid(factors_id);
+    auto const n = tenpy_hdf5::h5_get_attr_int64(factors_id, tenpy_hdf5::ATTR_LEN).value_or(0);
+    HighFive::Group factors_g = tenpy_hdf5::group_from_hid(factors_id);
     lasyten::hdf5::Loader factors_loader(factors_g);
     std::vector<SymmetryFactor::Ptr> factors;
     factors.reserve(static_cast<std::size_t>(n));

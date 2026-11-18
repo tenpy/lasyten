@@ -50,7 +50,7 @@ struct ScopedId
 };
 
 void
-expect_buffer(hdf5_io::Hdf5Buffer const& buf,
+expect_buffer(tenpy_hdf5::Hdf5Buffer const& buf,
               char kind,
               int itemsize,
               std::vector<std::size_t> const& shape,
@@ -74,7 +74,7 @@ expect_buffer(hdf5_io::Hdf5Buffer const& buf,
 bool
 is_packed_layout(HighFive::File& file, std::string const& path)
 {
-    auto const layout = hdf5_io::h5_get_attr_string(file.getId(), "Layout");
+    auto const layout = tenpy_hdf5::h5_get_attr_string(file.getId(), "Layout");
     if (!layout) {
         return false;
     }
@@ -108,9 +108,9 @@ PackedIndex::load(std::shared_ptr<HighFive::File> file,
 
     auto root = file->getGroup("/");
     std::string const group_name = std::string(1, kind) + "_packed";
-    if (!hdf5_io::h5_contains(root, group_name)) {
+    if (!tenpy_hdf5::h5_contains(root, group_name)) {
         std::string present;
-        for (auto const& name : hdf5_io::h5_link_names(root.getId())) {
+        for (auto const& name : tenpy_hdf5::h5_link_names(root.getId())) {
             present += (present.empty() ? "" : ", ") + name;
         }
         throw std::invalid_argument(
@@ -120,10 +120,10 @@ PackedIndex::load(std::shared_ptr<HighFive::File> file,
                       group_name,
                       present));
     }
-    ScopedId group(hdf5_io::h5_open(root, group_name));
+    ScopedId group(tenpy_hdf5::h5_open(root, group_name));
     auto read_array = [&](char const* name) {
-        ScopedId dataset(hdf5_io::h5_open(group.id, name));
-        return hdf5_io::h5_read_buffer(dataset.id);
+        ScopedId dataset(tenpy_hdf5::h5_open(group.id, name));
+        return tenpy_hdf5::h5_read_buffer(dataset.id);
     };
 
     auto const k = static_cast<std::size_t>(idx->k_);
@@ -215,7 +215,7 @@ PackedIndex::load(std::shared_ptr<HighFive::File> file,
 
     // the block data
     {
-        ScopedId dataset(hdf5_io::h5_open(group.id, "data"));
+        ScopedId dataset(tenpy_hdf5::h5_open(group.id, "data"));
         ScopedId space(H5Dget_space(dataset.id));
         hsize_t dims[1] = { 0 };
         if (H5Sget_simple_extent_ndims(space.id) != 1 ||
@@ -227,7 +227,7 @@ PackedIndex::load(std::shared_ptr<HighFive::File> file,
         // the block data is held in RAM if it is small enough (config option su_n_packed_ram_mb)
         auto const ram_max_bytes = megabytes_to_bytes(get_config().su_n_packed_ram_mb);
         if (read_data && n_data * sizeof(complex128) <= ram_max_bytes) {
-            idx->data_buffer_ = hdf5_io::h5_read_buffer(dataset.id);
+            idx->data_buffer_ = tenpy_hdf5::h5_read_buffer(dataset.id);
             expect_buffer(idx->data_buffer_, 'c', 16, { n_data }, "data", path);
             idx->data_ptr_ = static_cast<complex128 const*>(idx->data_buffer_.data());
             idx->data_bytes_in_ram_ = n_data * sizeof(complex128);
@@ -331,14 +331,14 @@ PackedIndex::read(std::size_t i) const
         ScopedId space(H5Dget_space(data_dataset_));
         hsize_t start = first;
         hsize_t extent = count;
-        hdf5_io::check_hdf5(
+        tenpy_hdf5::check_hdf5(
           H5Sselect_hyperslab(space.id, H5S_SELECT_SET, &start, nullptr, &extent, nullptr),
           "H5Sselect_hyperslab");
         hid_t memory_space = H5Screate_simple(1, &extent, nullptr);
         herr_t const status =
           H5Dread(data_dataset_, data_type_, memory_space, space.id, H5P_DEFAULT, values.data());
         H5Sclose(memory_space);
-        hdf5_io::check_hdf5(status, "H5Dread packed block");
+        tenpy_hdf5::check_hdf5(status, "H5Dread packed block");
     }
     return FusionSymbol::from_complex128(
       static_cast<std::uint8_t>(rank), shape, std::move(values));

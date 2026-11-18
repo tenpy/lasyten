@@ -13,6 +13,7 @@ Active follow-up after the pybind11-era C++ conversion and MI cleanup (#254):
 | Doc | Topic |
 | --- | --- |
 | [convert_nanobind.md](convert_nanobind.md) | Master note: nanobind port, ownership, trampolines, no-Python goal, leftover todos |
+| [convert_io.md](convert_io.md) | I/O: HDF5 (`tenpy-hdf5`) vs. pickle support, shared logical state |
 | [convert_EigenBlockBackend.md](convert_EigenBlockBackend.md) | Native Eigen/LAPACK CPU BlockBackend + `nb::ndarray` I/O |
 | [convert_nanobind_tenpy.md](convert_nanobind_tenpy.md) | Required TeNPy `v2_main` downstream changes |
 | [convert_BlockBackend.md](convert_BlockBackend.md) | BlockBackend status + #255 follow-ups |

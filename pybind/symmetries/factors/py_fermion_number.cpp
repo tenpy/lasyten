@@ -7,6 +7,7 @@
 #include <lasyten/symmetries/factors/fermion_number.h>
 
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 #include <optional>
 #include <string>
 
@@ -15,7 +16,8 @@ namespace lasyten {
 void
 bind_fermion_number(nb::module_& m)
 {
-    nb::class_<FermionNumber, SymmetryFactor>(m, "FermionNumber", DOC(lasyten, FermionNumber))
+    nb::class_<FermionNumber, SymmetryFactor> cls(m, "FermionNumber", DOC(lasyten, FermionNumber));
+    cls
       .def(lasyten::ctor_for<FermionNumber, std::optional<std::string>, bool>(),
            nb::arg("descriptive_name").none() = nb::none(),
            nb::arg("trivial_shift") = true)
@@ -24,6 +26,10 @@ bind_fermion_number(nb::module_& m)
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
+
+    lasyten::pickle::def_reduce_ctor(cls, [](FermionNumber const& self) {
+        return nb::make_tuple(self.descriptive_name, self.trivial_shift);
+    });
 }
 
 } // namespace lasyten

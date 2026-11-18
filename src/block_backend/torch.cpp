@@ -2,7 +2,6 @@
 #include <lasyten/tools.h>
 #include <lasyten/tools/warn.h>
 
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <map>
@@ -12,6 +11,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <tenpy_hdf5/h5_ops.h>
 #include <torch/torch.h>
 #include <type_traits>
 #include <variant>
@@ -517,7 +517,7 @@ TorchBlockBackend::Block::from_hdf5(lasyten::hdf5::Loader& loader,
     H5Idec_ref(id);
     py::array arr = hdf5_export::numpy_from_buffer(buf);
     std::string saved_device;
-    if (hdf5_io::h5_contains(loader.root(), subpath + std::string("device"))) {
+    if (tenpy_hdf5::h5_contains(loader.root(), subpath + std::string("device"))) {
         hid_t did = loader.open(subpath + std::string("device"));
         saved_device = loader.load_string(did);
         H5Idec_ref(did);

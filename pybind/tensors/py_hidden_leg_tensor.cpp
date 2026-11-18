@@ -5,6 +5,7 @@
 
 #include "docstrings/tensors/hidden_leg_tensor.h"
 
+#include "tensor_pickle.h"
 #include "tools/hdf5_bind.h"
 #include <string>
 #include <variant>
@@ -113,6 +114,15 @@ bind_tensors_hidden_leg_tensor(nb::module_& m)
             nb::arg("h5gr"),
             nb::arg("subpath"),
             DOC(lasyten, HiddenLegTensor, save_hdf5));
+
+    // Pickle state: as for ``SymmetricTensor``; rebuilt like ``HiddenLegTensor::from_hdf5``.
+    lasyten::pickle::def_state_pickle(
+      cls,
+      [](HiddenLegTensor const& self) { return lasyten::pickle::symmetric_tensor_to_dict(self); },
+      [](nb::dict state) {
+          return std::make_shared<HiddenLegTensor>(
+            lasyten::pickle::symmetric_tensor_from_dict(state));
+      });
 }
 
 } // namespace lasyten

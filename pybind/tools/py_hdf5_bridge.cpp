@@ -1,8 +1,8 @@
 #include "py_hdf5_bridge.h"
 
 #include <hdf5.h>
-#include <hdf5_io/exceptions.h>
-#include <hdf5_io/h5_ops.h>
+#include <tenpy_hdf5/exceptions.h>
+#include <tenpy_hdf5/h5_ops.h>
 
 #include <complex>
 #include <cstdint>
@@ -18,7 +18,7 @@ void
 check_hdf5(herr_t status, char const* what)
 {
     if (status < 0)
-        throw ::hdf5_io::Hdf5ExportError(std::string("HDF5 error: ") + what);
+        throw ::tenpy_hdf5::Hdf5ExportError(std::string("HDF5 error: ") + what);
 }
 
 } // namespace
@@ -37,7 +37,7 @@ wrap_group(py::handle obj)
         hid_t fid = hid_from_h5py(obj);
         hid_t gid = H5Gopen2(fid, "/", H5P_DEFAULT);
         if (gid < 0)
-            throw ::hdf5_io::Hdf5ExportError("failed to open root group");
+            throw ::tenpy_hdf5::Hdf5ExportError("failed to open root group");
         return HighFive::detail::make_group(gid);
     }
     hid_t hid = hid_from_h5py(obj);
@@ -60,12 +60,12 @@ loader_from_python(py::object hdf5_loader)
     return Loader(wrap_group(hdf5_loader.attr("h5group")), ignore);
 }
 
-::hdf5_io::Hdf5Buffer
+::tenpy_hdf5::Hdf5Buffer
 buffer_from_numpy(py::array arr)
 {
     if (!py::to_bool(arr.attr("flags").attr("c_contiguous")))
         arr = py::reinterpret_steal<py::array>(arr.attr("copy")("C").release());
-    ::hdf5_io::Hdf5Buffer buf;
+    ::tenpy_hdf5::Hdf5Buffer buf;
     py::dtype dt = arr.dtype();
     buf.kind = dt.kind();
     buf.itemsize = static_cast<int>(dt.itemsize());
@@ -87,7 +87,7 @@ buffer_from_numpy(py::array arr)
 }
 
 py::array
-numpy_from_buffer(::hdf5_io::Hdf5Buffer const& buf)
+numpy_from_buffer(::tenpy_hdf5::Hdf5Buffer const& buf)
 {
     std::string descr;
     if (buf.kind == 'f' && buf.itemsize == 4)

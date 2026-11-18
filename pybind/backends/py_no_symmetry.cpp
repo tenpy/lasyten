@@ -4,6 +4,8 @@
 #include "docstrings/backends/no_symmetry.h"
 
 #include <lasyten/backends/no_symmetry.h>
+
+#include "tools/pickle_bind.h"
 #if LASYTEN_WITH_NUMPY_BACKEND
 #include <lasyten/block_backend/numpy.h>
 #endif
@@ -62,10 +64,17 @@ py_data(py::object obj)
 void
 bind_no_symmetry_backend(nb::module_& m)
 {
-    nb::class_<NoSymmetryBackend::BlockData, TensorBackend::Data>(m, "NoSymmetryBackendBlockData")
+    nb::class_<NoSymmetryBackend::BlockData, TensorBackend::Data> data_cls(
+      m, "NoSymmetryBackendBlockData");
+    data_cls
       .def(lasyten::ctor_for<NoSymmetryBackend::BlockData, BlockBackend::BlockPtr>(),
            nb::arg("block"))
       .def_rw("block", &NoSymmetryBackend::BlockData::block);
+    // Pickle: ``NoSymmetryBackendBlockData(block)``. (No HDF5 schema exists for this type, but
+    // tensors of the NoSymmetryBackend hold it as their ``data``.)
+    lasyten::pickle::def_reduce_ctor(data_cls, [](NoSymmetryBackend::BlockData const& self) {
+        return nb::make_tuple(self.block);
+    });
 
     nb::class_<NoSymmetryBackend, TensorBackend> cls(m, "NoSymmetryBackend");
     cls.doc() = DOC(lasyten, NoSymmetryBackend);
@@ -76,6 +85,11 @@ bind_no_symmetry_backend(nb::module_& m)
             nb::arg("block_backend"));
 
     // Static helpers (useful for tests / debugging; not in original Python API).
+    // Pickle: ``NoSymmetryBackend(block_backend)`` (what HDF5 ``from_hdf5`` does as well).
+    lasyten::pickle::def_reduce_ctor(cls, [](NoSymmetryBackend const& self) {
+        return nb::make_tuple(nb::cast(self.block_backend));
+    });
+
     cls.def_static("wrap", &NoSymmetryBackend::wrap, nb::arg("block"));
     cls.def_static("unwrap", &NoSymmetryBackend::unwrap, nb::arg("data"));
 

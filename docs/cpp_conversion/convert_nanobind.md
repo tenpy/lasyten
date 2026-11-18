@@ -219,7 +219,7 @@ block the OFF build.)
   - [x] `include/lasyten/detail/python_api.h` as the single Python (nanobind) entry point + OFF stubs
   - [x] Root CMake OFF: no Python Development.Embed / pybind11 / nanobind / Torch, Eigen + LAPACK + HDF5, clear STATUS of the blockers
   - [x] Python-free pieces: Eigen block HDF5 save/load, `apply_axis_permutations`, `block_from_fusion_symbol` / `fusion_symbol_from_block` for Eigen, native repr, `warn`, `OptionValue`
-  - [x] Python-free ctests (`test_eigen_block_backend_no_python`, `test_symmetric_blocks_no_python`, `hdf5_io_core_roundtrip`); Symmetry / Sector stack and their HDF5 I/O compile without Python
+  - [x] Python-free ctests (`test_eigen_block_backend_no_python`, `test_symmetric_blocks_no_python`, `tenpy_hdf5_core_roundtrip`); Symmetry / Sector stack and their HDF5 I/O compile without Python
   - [x] Abelian + FusionTree backends without `py::` in the OFF lib (models / Numpy / Torch still gated; leftover #1 remainder)
   - [ ] Full ctest suite without embedded Python
 

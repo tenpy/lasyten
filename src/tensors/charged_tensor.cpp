@@ -13,10 +13,10 @@
 #include <cassert>
 #include <cmath>
 #include <format>
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <lasyten/tools/hdf5_export.h>
 #include <stdexcept>
+#include <tenpy_hdf5/h5_ops.h>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -613,9 +613,9 @@ ChargedTensor::save_hdf5(lasyten::hdf5::Saver& saver,
                             invariant_part->save_hdf5(s, g, sub);
                         });
     hdf5_export::save_block(saver, subpath + "charged_state", charged_state);
-    hdf5_io::h5_set_attr(h5gr.getId(), "has_charged_state", true);
-    hdf5_io::h5_set_attr(h5gr.getId(), "dtype", dtype::repr(dtype));
-    hdf5_io::h5_set_attr(h5gr.getId(), "num_legs", static_cast<std::int64_t>(num_legs));
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "has_charged_state", true);
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "dtype", dtype::repr(dtype));
+    tenpy_hdf5::h5_set_attr(h5gr.getId(), "num_legs", static_cast<std::int64_t>(num_legs));
     hdf5_export::save_f64_vector(saver, subpath + "shape", shape);
     hdf5_export::save_leg_labels(saver, subpath + "labels", labels.as_list());
 }
@@ -630,7 +630,7 @@ ChargedTensor::from_hdf5(lasyten::hdf5::Loader& loader,
           return SymmetricTensor::from_hdf5(loader, g, sub);
       });
     inv->allow_charge_leg_label = true;
-    auto has_cs_attr = hdf5_io::h5_get_attr_int64(h5gr.getId(), "has_charged_state");
+    auto has_cs_attr = tenpy_hdf5::h5_get_attr_int64(h5gr.getId(), "has_charged_state");
     bool has_cs = !has_cs_attr.has_value() || *has_cs_attr != 0;
     if (!has_cs) {
         throw std::invalid_argument(

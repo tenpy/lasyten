@@ -7,13 +7,13 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <hdf5_io/h5_ops.h>
 #include <lasyten/tools/hdf5.h>
 #include <map>
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tenpy_hdf5/h5_ops.h>
 #include <vector>
 
 namespace lasyten {
@@ -704,7 +704,7 @@ LasytenConfig::from_hdf5(lasyten::hdf5::Loader& loader,
 {
     LasytenConfig obj;
     auto load_opt = [&](std::string const& key, auto&& apply) {
-        if (!hdf5_io::h5_contains(loader.root(), subpath + key))
+        if (!tenpy_hdf5::h5_contains(loader.root(), subpath + key))
             return;
         hid_t id = loader.open(subpath + key);
         apply(id);
