@@ -3,6 +3,7 @@
 #include "docstrings/symmetries/sector.h"
 #include "py_lasyten_nanobind.h"
 #include "tools/hdf5_bind.h"
+#include "tools/pickle_bind.h"
 
 #include <lasyten/symmetries/sector.h>
 #include <lasyten/symmetries/sector_numpy.h>
@@ -189,8 +190,8 @@ sector_array_repr(SectorArray const& a)
 void
 bind_sector(nb::module_& m)
 {
-    nb::class_<Sector>(m, "Sector", DOC(lasyten, Sector))
-      .def(nb::init<>())
+    nb::class_<Sector> sector_cls(m, "Sector", DOC(lasyten, Sector));
+    sector_cls.def(nb::init<>())
       .def(nb::new_([](py::object values) { return sector_from_numpy(values); }),
            nb::arg("values"),
            "Construct from a 1D integer sequence or ndarray.")
@@ -254,10 +255,16 @@ bind_sector(nb::module_& m)
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
 
+    // Pickle state: the 1D int64 NumPy array (``to_numpy`` / ``Sector(values)``).
+    lasyten::pickle::def_value_pickle(
+      sector_cls,
+      [](Sector const& self) { return sector_to_ndarray(self); },
+      [](nb::object state) { return sector_from_numpy(state); });
+
     nb::implicitly_convertible<py::array, Sector>();
 
-    nb::class_<SectorArray>(m, "SectorArray", DOC(lasyten, SectorArray))
-      .def(nb::init<>())
+    nb::class_<SectorArray> sector_array_cls(m, "SectorArray", DOC(lasyten, SectorArray));
+    sector_array_cls.def(nb::init<>())
       .def(nb::new_([](py::object values) { return sector_array_from_numpy(values); }),
            nb::arg("values"),
            "Construct from a 2D integer sequence or ndarray.")
@@ -463,6 +470,13 @@ bind_sector(nb::module_& m)
                   nb::arg("hdf5_loader"),
                   nb::arg("h5gr"),
                   nb::arg("subpath"));
+
+    // Pickle state: the 2D int64 NumPy array of shape (num_sectors, sector_ind_len); an empty
+    // array of shape (0, sector_ind_len) keeps ``sector_ind_len``.
+    lasyten::pickle::def_value_pickle(
+      sector_array_cls,
+      [](SectorArray const& self) { return sector_array_to_ndarray(self); },
+      [](nb::object state) { return sector_array_from_numpy(state); });
 
     nb::implicitly_convertible<py::array, SectorArray>();
 }
