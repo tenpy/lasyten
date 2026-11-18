@@ -363,6 +363,52 @@ Mask::from_DiagonalTensor(DiagonalTensorCPtr diag)
                                   diag->device);
 }
 
+namespace {
+
+Mask::Ptr
+mask_from_sectors(ElementarySpace::Ptr large_leg, SectorArray sectors, bool keep_selected)
+{
+    if (!large_leg) {
+        throw std::invalid_argument("large_leg must be non-null");
+    }
+    if (sectors.sector_ind_len() != large_leg->symmetry->sector_ind_len) {
+        throw std::invalid_argument("sectors must match the symmetry sector length");
+    }
+
+    auto backend = resolve_backend(nullptr, large_leg);
+    auto bb = backend->block_backend;
+    auto func = [sectors = std::move(sectors), keep_selected, bb](std::vector<int64> const& shape,
+                                                                  Sector const& sector) {
+        bool const contains = std::ranges::find(sectors, sector) != sectors.end();
+        bool const value = keep_selected ? contains : !contains;
+        auto block = bb->zeros(shape, Dtype::Bool);
+        if (value) {
+            auto true_s = bb->as_scalar(true);
+            for (int64 i = 0; i < shape[0]; ++i) {
+                block->set_item(i, true_s);
+            }
+        }
+        return block;
+    };
+    auto diag = DiagonalTensor::from_sector_block_func(
+      std::move(func), large_leg, backend, std::nullopt, Dtype::Bool);
+    return Mask::from_DiagonalTensor(diag);
+}
+
+} // namespace
+
+Mask::Ptr
+Mask::from_sectors_kept(ElementarySpace::Ptr large_leg, SectorArray keep)
+{
+    return mask_from_sectors(std::move(large_leg), std::move(keep), /*keep_selected=*/true);
+}
+
+Mask::Ptr
+Mask::from_sectors_discarded(ElementarySpace::Ptr large_leg, SectorArray discard)
+{
+    return mask_from_sectors(std::move(large_leg), std::move(discard), /*keep_selected=*/false);
+}
+
 #if LASYTEN_HAS_PYTHON
 Mask::Ptr
 Mask::from_indices(py::object indices,

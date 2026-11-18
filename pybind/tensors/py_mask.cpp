@@ -169,6 +169,32 @@ bind_tensors_mask(nb::module_& m)
       DOC(lasyten, Mask, from_DiagonalTensor));
 
     cls.def_static(
+      "from_sectors_kept",
+      [](py::object large_leg, SectorArray keep) {
+          auto leg = std::dynamic_pointer_cast<ElementarySpace>(py_as_space_leg(large_leg));
+          if (!leg) {
+              throw std::invalid_argument("large_leg must be an ElementarySpace");
+          }
+          return Mask::from_sectors_kept(std::move(leg), std::move(keep));
+      },
+      nb::arg("large_leg"),
+      nb::arg("keep"),
+      DOC(lasyten, Mask, from_sectors_kept));
+
+    cls.def_static(
+      "from_sectors_discarded",
+      [](py::object large_leg, SectorArray discard) {
+          auto leg = std::dynamic_pointer_cast<ElementarySpace>(py_as_space_leg(large_leg));
+          if (!leg) {
+              throw std::invalid_argument("large_leg must be an ElementarySpace");
+          }
+          return Mask::from_sectors_discarded(std::move(leg), std::move(discard));
+      },
+      nb::arg("large_leg"),
+      nb::arg("discard"),
+      DOC(lasyten, Mask, from_sectors_discarded));
+
+    cls.def_static(
       "from_indices",
       [](py::object indices,
          py::object large_leg,

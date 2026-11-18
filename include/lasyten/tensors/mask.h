@@ -166,6 +166,19 @@ class Mask : public Tensor
     /// that are kept appear in order.
     [[nodiscard]] static Ptr from_DiagonalTensor(DiagonalTensorCPtr diag);
 
+    /// Create a projection Mask that keeps the given sectors of the large leg.
+    ///
+    /// Selection is based only on sector values, so every basis state in a selected sector is
+    /// treated identically.
+    [[nodiscard]] static Ptr from_sectors_kept(ElementarySpace::Ptr large_leg, SectorArray keep);
+
+    /// Create a projection Mask that discards the given sectors of the large leg.
+    ///
+    /// Selection is based only on sector values, so every basis state in a selected sector is
+    /// treated identically.
+    [[nodiscard]] static Ptr from_sectors_discarded(ElementarySpace::Ptr large_leg,
+                                                    SectorArray discard);
+
     /// Create a projection Mask from the indices that are kept.
     ///
     /// To get the related inclusion Mask, use `dagger`.
