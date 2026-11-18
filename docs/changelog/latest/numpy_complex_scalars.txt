@@ -1,0 +1,4 @@
+- Fix numpy complex scalars (``np.complex128``, ``np.complex64``) losing their imaginary part under Python's default
+  warning filters in :func:`lasyten.tensors.scalar_multiply`, the arithmetic of tensors, ``Scalar`` and ``Block`` with a
+  number, and ``BlockBackend.as_scalar`` (a regression since the switch to nanobind, tenpy/lasyten#325). pytest turns
+  the ComplexWarning into an error, which hid the bug from the test suite. Addresses https://github.com/tenpy/lasyten/issues/330.
