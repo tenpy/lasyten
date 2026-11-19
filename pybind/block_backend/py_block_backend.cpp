@@ -459,6 +459,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Scalar& self, float64 other) { return self < other; },
         nb::arg("other"))
       .def(
+        "__lt__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self < real_number_or_complex_not_ordered(other);
+        },
+        nb::arg("other"))
+      .def(
         "__gt__",
         [](const BlockBackend::Scalar& self, const BlockBackend::Scalar& other) {
             return self > other;
@@ -467,6 +473,12 @@ bind_block_backend(nb::module_& m)
       .def(
         "__gt__",
         [](const BlockBackend::Scalar& self, float64 other) { return self > other; },
+        nb::arg("other"))
+      .def(
+        "__gt__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self > real_number_or_complex_not_ordered(other);
+        },
         nb::arg("other"))
       .def(
         "__le__",
@@ -479,6 +491,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Scalar& self, float64 other) { return self <= other; },
         nb::arg("other"))
       .def(
+        "__le__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self <= real_number_or_complex_not_ordered(other);
+        },
+        nb::arg("other"))
+      .def(
         "__ge__",
         [](const BlockBackend::Scalar& self, const BlockBackend::Scalar& other) {
             return self >= other;
@@ -487,6 +505,12 @@ bind_block_backend(nb::module_& m)
       .def(
         "__ge__",
         [](const BlockBackend::Scalar& self, float64 other) { return self >= other; },
+        nb::arg("other"))
+      .def(
+        "__ge__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self >= real_number_or_complex_not_ordered(other);
+        },
         nb::arg("other"))
       .def("inverse", &BlockBackend::Scalar::inverse, "The inverse of the scalar, 1./self")
       .def_prop_ro("_block", &BlockBackend::Scalar::_block, "Return the underlying block.")
@@ -656,6 +680,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Block& self, float64 other) { return self < other; },
         nb::arg("other"))
       .def(
+        "__lt__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self < real_number_or_complex_not_ordered(other);
+        },
+        nb::arg("other"))
+      .def(
         "__le__",
         [](const BlockBackend::Block& self, const BlockBackend::Block& other) {
             return self <= other;
@@ -671,6 +701,12 @@ bind_block_backend(nb::module_& m)
       .def(
         "__le__",
         [](const BlockBackend::Block& self, float64 other) { return self <= other; },
+        nb::arg("other"))
+      .def(
+        "__le__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self <= real_number_or_complex_not_ordered(other);
+        },
         nb::arg("other"))
       .def(
         "__gt__",
@@ -690,6 +726,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Block& self, float64 other) { return self > other; },
         nb::arg("other"))
       .def(
+        "__gt__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self > real_number_or_complex_not_ordered(other);
+        },
+        nb::arg("other"))
+      .def(
         "__ge__",
         [](const BlockBackend::Block& self, const BlockBackend::Block& other) {
             return self >= other;
@@ -705,6 +747,12 @@ bind_block_backend(nb::module_& m)
       .def(
         "__ge__",
         [](const BlockBackend::Block& self, float64 other) { return self >= other; },
+        nb::arg("other"))
+      .def(
+        "__ge__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self >= real_number_or_complex_not_ordered(other);
+        },
         nb::arg("other"))
       .def(
         "__eq__",

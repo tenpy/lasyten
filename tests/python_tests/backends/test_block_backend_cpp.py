@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import operator
+
 import numpy as np
 import pytest
 import torch
@@ -315,3 +317,59 @@ def test_block_backend_mul_numpy_number(number, block_backend):
     res = bb.mul(number, block)
     assert res.dtype == expect.dtype
     np.testing.assert_allclose(bb.to_numpy(res), bb.to_numpy(expect))
+
+
+# Ordering comparisons with a complex number used to compare the real part for numpy complex scalars (only a
+# ComplexWarning, hidden under pytest), see tenpy/lasyten#330. Complex numbers cannot be ordered: TypeError.
+ordering_comparisons = pytest.mark.parametrize(
+    'op',
+    [
+        pytest.param(operator.lt, id='lt'),
+        pytest.param(operator.le, id='le'),
+        pytest.param(operator.gt, id='gt'),
+        pytest.param(operator.ge, id='ge'),
+    ],
+)
+
+
+@pytest.mark.parametrize(
+    'number',
+    [
+        *numpy_and_torch_complex_numbers,
+        pytest.param(np.array(2.0 + 3.0j), id='np_0d_array'),
+        pytest.param(2.0 + 3.0j, id='python_complex'),
+    ],
+)
+@pytest.mark.parametrize(
+    'make_left',
+    [
+        pytest.param(lambda bb: bb.as_scalar(2.5), id='scalar'),
+        pytest.param(lambda bb: bb.as_block(np.array([1.0, 2.5, 4.0])), id='block'),
+    ],
+)
+@ordering_comparisons
+def test_comparison_complex_number(op, make_left, number, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    with pytest.raises(TypeError, match='complex numbers cannot be ordered'):
+        op(make_left(bb), number)
+
+
+@pytest.mark.parametrize('number', numpy_and_torch_real_numbers + numpy_and_torch_bool_numbers)
+@ordering_comparisons
+def test_scalar_comparison_real_number(op, number, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    s = bb.as_scalar(1.5)
+    expect = op(s, number.item())  # the same with a Python number
+    res = op(s, number)
+    assert res.dtype == expect.dtype
+    assert res.as_bool() == expect.as_bool()
+
+
+@pytest.mark.parametrize('number', numpy_and_torch_real_numbers + numpy_and_torch_bool_numbers)
+@ordering_comparisons
+def test_block_comparison_real_number(op, number, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    block = bb.as_block(np.array([-5.0, -4.0, 1.0, 1.5, 4.0]))
+    expect = op(block, number.item())  # the same with a Python number
+    res = op(block, number)
+    np.testing.assert_array_equal(bb.to_numpy(res), bb.to_numpy(expect))

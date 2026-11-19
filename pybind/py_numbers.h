@@ -148,4 +148,33 @@ py_number_as_builtin(const py::object& obj)
     return obj;
 }
 
+/// For the ordering comparisons ``< <= > >=`` of ``Scalar`` and ``Block``, for the last overload
+/// that gets what the overloads for ``float64`` (and ``Scalar`` / ``Block``) did not match.
+///
+/// A complex number (Python ``complex``, numpy scalar, 0-d numpy array or torch tensor) raises
+/// ``TypeError``, since complex numbers cannot be ordered. A real number that is not an exact
+/// ``float`` (``np.float64``, ``np.bool_``, 0-d torch tensor, ...) is returned as ``float64``, as
+/// nanobind's implicit conversion in the second pass would do, but without the cost of the
+/// exception. Everything else is passed on by ``nb::next_overload()``.
+inline float64
+real_number_or_complex_not_ordered(const py::handle& other)
+{
+    PyObject* o = other.ptr();
+    if (PyComplex_Check(o))
+        throw py::type_error("complex numbers cannot be ordered");
+    if (PyFloat_Check(o))
+        return PyFloat_AsDouble(o);
+    auto number = py_number_from_zero_dim(other);
+    if (!number)
+        throw nb::next_overload();
+    if (PyComplex_Check(number->ptr()))
+        throw py::type_error("complex numbers cannot be ordered");
+    double value = PyFloat_AsDouble(number->ptr()); // bool, int or float
+    if (value == -1.0 && PyErr_Occurred()) {        // int too large for double
+        PyErr_Clear();
+        throw nb::next_overload();
+    }
+    return value;
+}
+
 } // namespace lasyten
