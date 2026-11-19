@@ -7,6 +7,7 @@
 
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
+#include "../py_numbers.h"
 
 #include "docstrings/tensors/ops_algebra.h"
 
@@ -189,7 +190,9 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
               }
               return true;
           }
-          return py::isinstance(obj, py::module_::import("numbers").attr("Number"));
+          // arrays are not scalars, also 0-d numpy arrays and torch tensors (but those are
+          // accepted as numbers, e.g. by scalar_multiply)
+          return is_py_number(obj) && !is_py_array_or_tensor(obj);
       },
       nb::arg("obj"),
       doc_plus(DOC(lasyten, is_scalar),
@@ -203,7 +206,7 @@ Also accepts Python numbers and duck-typed tensors with ``domain`` / ``codomain`
       "linear_combination",
       [](py::object a, VectorLikeCPtr v, py::object b, VectorLikeCPtr w) {
           auto is_ok = [](py::object o) {
-              if (py::isinstance(o, py::module_::import("numbers").attr("Number"))) {
+              if (py::isinstance<BlockBackend::Scalar>(o) || is_py_number(o)) {
                   return true;
               }
               try {
@@ -328,7 +331,7 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
               throw py::type_error("scalar_multiply() v must be VectorLike");
           }
           auto vec = py::cast<VectorLikeCPtr>(v);
-          bool ok = py::isinstance(a, py::module_::import("numbers").attr("Number"));
+          bool ok = py::isinstance<BlockBackend::Scalar>(a) || is_py_number(a);
           if (!ok) {
               try {
                   (void)py::cast<BlockBackend::Scalar>(a);

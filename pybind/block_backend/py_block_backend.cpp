@@ -1,5 +1,6 @@
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
+#include "../py_numbers.h"
 #include "docstrings/block_backend/block_backend.h"
 #include "ndarray_dispatch.h"
 #if LASYTEN_WITH_NUMPY_BACKEND
@@ -93,6 +94,43 @@ complex_like_or_next_overload(const py::handle& obj)
     } catch (const py::cast_error&) {
         throw nb::next_overload();
     }
+}
+
+/// ``BlockBackend::as_scalar`` for numpy scalars and 0-d numpy arrays / torch tensors, with the
+/// dtype determined by the kind of the dtype (bool, integer, float, complex) via ``value.item()``.
+///
+/// Used as the *last* ``as_scalar`` overload. nanobind first tries all overloads without implicit
+/// conversions, where the casters accept only an exact ``bool`` / ``int`` / ``float`` /
+/// ``complex``, so none of these types matches. In the second pass (with conversions), the
+/// ``float64`` overload would take them through ``__float__``, which drops the imaginary part of
+/// a numpy complex scalar and only warns, and turns ``np.bool_`` into ``float64``. This overload
+/// is reached in the first pass instead. Everything else (non-numbers, ``int`` too large for
+/// ``int64``, ...) is passed on to the next overload by ``nb::next_overload()``, i.e. is handled
+/// exactly as without this overload.
+BlockBackend::Scalar
+as_scalar_from_zero_dim_number_or_next_overload(BlockBackend& backend, const py::object& value)
+{
+    auto number = py_number_from_zero_dim(value);
+    if (!number) {
+        // a subclass of complex, which is not a numpy scalar
+        if (PyComplex_Check(value.ptr()))
+            return backend.as_scalar(py::cast<complex128>(value));
+        throw nb::next_overload();
+    }
+    PyObject* n = number->ptr();
+    if (PyBool_Check(n))
+        return backend.as_scalar(n == Py_True);
+    if (PyLong_Check(n)) {
+        long long v = PyLong_AsLongLong(n);
+        if (v == -1 && PyErr_Occurred()) { // does not fit into int64
+            PyErr_Clear();
+            throw nb::next_overload();
+        }
+        return backend.as_scalar(static_cast<int64>(v));
+    }
+    if (PyFloat_Check(n))
+        return backend.as_scalar(static_cast<float64>(PyFloat_AsDouble(n)));
+    return backend.as_scalar(py::cast<complex128>(*number));
 }
 
 /// Parse ``key`` as an integer or tuple/list of integer scalars (not slices, strings, or arrays).
@@ -827,10 +865,12 @@ bind_block_backend(nb::module_& m)
       .def(
         "as_scalar",
         [](BlockBackend& self, py::object value) {
-            return self.as_scalar(complex_like_or_next_overload(value));
+            return as_scalar_from_zero_dim_number_or_next_overload(self, value);
         },
         nb::arg("value"),
-        "Convert a numpy complex scalar (or 0-d complex array) to a scalar block.")
+        "Convert a numpy scalar, or a 0-d numpy array or torch tensor, to a scalar block. "
+        "The dtype of the scalar block is determined by the dtype kind (bool, int, float, "
+        "complex), as for ``value.item()``.")
       .def("abs",
            &BlockBackend::abs,
            nb::arg("a"),

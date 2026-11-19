@@ -4,6 +4,7 @@
 
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
+#include "../py_numbers.h"
 
 #include "docstrings/tensors/ops_elementwise.h"
 
@@ -22,7 +23,7 @@ numpy()
 bool
 is_number_or_scalar(py::object x)
 {
-    return py::isinstance(x, py::module_::import("numbers").attr("Number")) ||
+    return is_py_number(x) ||
            py::isinstance(x, py::module_::import("lasyten.block_backends").attr("Scalar")) ||
            (py::isinstance<Tensor>(x) &&
             py::to_bool(py::module_::import("lasyten.tensors._tensors").attr("is_scalar")(x)));
@@ -39,6 +40,7 @@ template<typename TensorFn, typename ScalarPyFn>
 py::object
 dispatch_elementwise(py::object x, TensorFn tensor_fn, ScalarPyFn scalar_py_fn)
 {
+    x = py_number_as_builtin(x); // np.bool_, 0-d array / tensor: same as the Python number
     if (py::isinstance<DiagonalTensor>(x)) {
         return py::cast(tensor_fn(py::cast<DiagonalTensorCPtr>(x)));
     }

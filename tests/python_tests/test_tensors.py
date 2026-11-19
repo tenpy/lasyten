@@ -9,6 +9,7 @@ from contextlib import nullcontext
 import numpy as np
 import numpy.testing as npt
 import pytest
+import torch
 
 from lasyten import BraidChiralityUnspecifiedError, backends, tensors
 from lasyten.backends import conventional_leg_order, get_backend
@@ -3498,22 +3499,41 @@ def test_block_backend_as_scalar_passthrough(make_compatible_tensor):
     assert bb.as_scalar(True).as_bool() is True
 
 
-# numpy scalars as numbers, see tenpy/lasyten#330. ``np.complex128.__float__`` drops the imaginary part and only emits a
-# ComplexWarning. pytest turns that warning into an error, which makes nanobind skip the lossy float64 overload, so the
-# result is correct under pytest, but not for users with the default warning filters. So we ignore this particular
-# warning here, i.e. the tests check the behaviour under the default filters.
+# numpy scalars and 0-d torch tensors as numbers, see tenpy/lasyten#330. ``np.complex128.__float__`` drops the imaginary
+# part and only emits a ComplexWarning. pytest turns that warning into an error, which makes nanobind skip the lossy
+# float64 overload, so the result is correct under pytest, but not for users with the default warning filters. So we
+# ignore this particular warning here, i.e. the tests check the behaviour under the default filters.
+# All of them are treated like the Python number ``x.item()``; for ``np.bool_`` and torch bool that is a ``bool``.
 numpy_complex_cast_warning_is_ignored = pytest.mark.filterwarnings(
     'ignore:Casting complex values to real discards the imaginary part:numpy.exceptions.ComplexWarning'
 )
-numpy_numbers = pytest.mark.parametrize(
-    'number',
-    [np.complex128(2.0 + 3.0j), np.complex64(2.0 + 3.0j), np.float64(1.5), np.float32(1.5), np.int64(-4)],
-    ids=lambda x: type(x).__name__,
+numpy_and_torch_real_numbers = [
+    pytest.param(np.float64(1.5), id='np_float64'),
+    pytest.param(np.float32(1.5), id='np_float32'),
+    pytest.param(np.int64(-4), id='np_int64'),
+    pytest.param(np.longdouble(1.5), id='np_longdouble'),
+    pytest.param(torch.tensor(1.5, dtype=torch.float64), id='torch_float64'),
+    pytest.param(torch.tensor(1.5, dtype=torch.float32), id='torch_float32'),
+    pytest.param(torch.tensor(-4), id='torch_int64'),
+]
+numpy_and_torch_bool_numbers = [
+    pytest.param(np.True_, id='np_bool'),
+    pytest.param(torch.tensor(True), id='torch_bool'),
+]
+numpy_and_torch_complex_numbers = [
+    pytest.param(np.complex128(2.0 + 3.0j), id='np_complex128'),
+    pytest.param(np.complex64(2.0 + 3.0j), id='np_complex64'),
+    pytest.param(np.clongdouble(2.0 + 3.0j), id='np_clongdouble'),
+    pytest.param(torch.tensor(2.0 + 3.0j, dtype=torch.complex128), id='torch_complex128'),
+    pytest.param(torch.tensor(2.0 + 3.0j, dtype=torch.complex64), id='torch_complex64'),
+]
+numpy_and_torch_numbers = pytest.mark.parametrize(
+    'number', numpy_and_torch_complex_numbers + numpy_and_torch_real_numbers + numpy_and_torch_bool_numbers
 )
 
 
 @numpy_complex_cast_warning_is_ignored
-@numpy_numbers
+@numpy_and_torch_numbers
 def test_block_backend_as_scalar_numpy_number(number, block_backend):
     bb = get_backend('no_symmetry', block_backend).block_backend
     res = bb.as_scalar(number)
@@ -3523,7 +3543,7 @@ def test_block_backend_as_scalar_numpy_number(number, block_backend):
 
 
 @numpy_complex_cast_warning_is_ignored
-@numpy_numbers
+@numpy_and_torch_numbers
 @pytest.mark.parametrize(
     'op',
     [
@@ -3546,7 +3566,7 @@ def test_tensor_numpy_number(op, number, make_compatible_tensor):
 
 
 @numpy_complex_cast_warning_is_ignored
-@numpy_numbers
+@numpy_and_torch_numbers
 @pytest.mark.parametrize(
     'op',
     [
@@ -3554,7 +3574,6 @@ def test_tensor_numpy_number(op, number, make_compatible_tensor):
         pytest.param(lambda a, D: D * a, id='mul'),
         pytest.param(lambda a, D: D / a, id='truediv'),
         pytest.param(lambda a, D: D + a, id='add'),
-        pytest.param(lambda a, D: a - D, id='rsub'),
     ],
 )
 def test_diagonal_tensor_numpy_number(op, number, make_compatible_tensor):
@@ -3564,6 +3583,68 @@ def test_diagonal_tensor_numpy_number(op, number, make_compatible_tensor):
     res.test_sanity()
     assert res.dtype == expect.dtype
     assert tensors.almost_equal(res, expect)
+
+
+@numpy_complex_cast_warning_is_ignored
+@pytest.mark.parametrize('number', numpy_and_torch_complex_numbers + numpy_and_torch_real_numbers)
+def test_diagonal_tensor_rsub_numpy_number(number, make_compatible_tensor):
+    # not for bool: ``True - D`` is an error with the torch block backend, which does not subtract a bool tensor.
+    D = make_compatible_tensor(cls=DiagonalTensor)
+    expect = number.item() - D  # the same with a Python number
+    res = number - D
+    res.test_sanity()
+    assert res.dtype == expect.dtype
+    assert tensors.almost_equal(res, expect)
+
+
+@pytest.mark.parametrize(
+    'number, expect',
+    [
+        pytest.param(np.float64(1.5), True, id='np_float64'),
+        pytest.param(np.complex64(2.0 + 3.0j), True, id='np_complex64'),
+        pytest.param(np.int64(-4), True, id='np_int64'),
+        pytest.param(np.True_, True, id='np_bool'),
+        # arrays are not scalars, also 0-d ones, see test_is_scalar
+        pytest.param(np.array(1.5), False, id='np_0d_array'),
+        pytest.param(torch.tensor(1.5, dtype=torch.float64), False, id='torch_float64'),
+        pytest.param(torch.tensor(2.0 + 3.0j, dtype=torch.complex128), False, id='torch_complex128'),
+        pytest.param(torch.tensor(True), False, id='torch_bool'),
+    ],
+)
+def test_is_scalar_numpy_and_torch_number(number, expect):
+    assert tensors.is_scalar(number) is expect
+
+
+@numpy_and_torch_numbers
+@pytest.mark.parametrize(
+    'func',
+    [
+        pytest.param(tensors.real, id='real'),
+        pytest.param(tensors.imag, id='imag'),
+        pytest.param(tensors.complex_conj, id='complex_conj'),
+        pytest.param(tensors.angle, id='angle'),
+    ],
+)
+def test_elementwise_numpy_and_torch_number(func, number):
+    expect = func(number.item())  # the same with a Python number
+    assert func(number) == pytest.approx(expect)
+
+
+@pytest.mark.parametrize(
+    'number',
+    [
+        pytest.param(np.True_, id='np_True'),
+        pytest.param(np.False_, id='np_False'),
+        pytest.param(torch.tensor(True), id='torch_True'),
+        pytest.param(torch.tensor(False), id='torch_False'),
+    ],
+)
+@pytest.mark.parametrize('op', [operator.and_, operator.or_, operator.xor])
+def test_mask_binary_numpy_and_torch_bool(op, number, make_compatible_tensor):
+    M = make_compatible_tensor(cls=Mask)
+    expect = op(M, number.item())  # the same with a Python bool
+    res = op(M, number)
+    assert tensors.almost_equal(res.as_SymmetricTensor(), expect.as_SymmetricTensor())
 
 
 @pytest.mark.deselect_invalid_ChargedTensor_cases
