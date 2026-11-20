@@ -1,5 +1,4 @@
-- Passing ``None`` where a Tensor is required (Python ``None`` → null ``shared_ptr``) now raises
-  ``ValueError`` instead of segfaulting for the shared helpers ``get_same_device``,
-  ``get_same_backend`` and ``check_same_legs``, and for entry points that dereference before those
-  helpers (``almost_equal``, ``planar_almost_equal``, ``planar_contraction``, ``_compose_with_Mask``,
-  ``move_hidden_leg``). Addresses https://github.com/tenpy/lasyten/issues/313.
+- The C++ functions ``get_same_device``, ``get_same_backend``, ``check_same_legs``, ``almost_equal``,
+  ``planar_almost_equal``, ``planar_contraction``, ``_compose_with_Mask`` and ``move_hidden_leg`` throw ``ValueError``
+  for a null tensor pointer instead of segfaulting. From Python, ``None`` is rejected before these checks are reached,
+  with a ``TypeError``. Addresses https://github.com/tenpy/lasyten/issues/313.

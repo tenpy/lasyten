@@ -1,0 +1,10 @@
+- Passing ``None`` for a required argument of a bound class type (``Block``, ``Tensor``, ``Mask``, ``ElementarySpace``, a
+  backend, ...) raises ``TypeError`` (``incompatible function arguments``) instead of crashing the interpreter. This
+  affects the ``Block`` operators ``+``, ``-`` and ``/``, the ``BlockBackend`` methods ``dagger``, ``get_shape``,
+  ``get_dtype``, ``get_device``, ``is_real``, ``to_numpy``, ``eigvals``, ``inner`` and ``combine_legs``, the functions
+  :func:`lasyten.tensors.trace`, ``transpose``, ``item``, ``permute_legs``, ``move_leg``, ``bend_legs``, ``combine_legs``,
+  ``split_legs``, ``squeeze_legs``, ``slice_leg``, ``on_device``, ``add_trivial_leg``, ``combine_to_matrix``,
+  ``flatten_pipe_leg`` and the planar functions, ``to_backend`` of all tensor classes and the constructors of ``Site``
+  and ``AnyonDOF``. Arguments that are documented to accept ``None`` (for example an optional ``backend``) are unchanged.
+  The tensor functions of tenpy/lasyten#313 raise ``TypeError`` instead of ``ValueError`` when called from Python.
+  Addresses https://github.com/tenpy/lasyten/issues/334.
