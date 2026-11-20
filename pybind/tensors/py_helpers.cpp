@@ -63,10 +63,10 @@ py_check_compatible_legs(py::sequence legs1, py::sequence legs2, bool expect_equ
     std::vector<Leg::Ptr> a;
     std::vector<Leg::Ptr> b;
     for (auto item : legs1) {
-        a.push_back(py::cast<Leg::Ptr>(item));
+        a.push_back(py::cast_non_null<Leg::Ptr>(item, "elements of legs1"));
     }
     for (auto item : legs2) {
-        b.push_back(py::cast<Leg::Ptr>(item));
+        b.push_back(py::cast_non_null<Leg::Ptr>(item, "elements of legs2"));
     }
     _check_compatible_legs(a, b, expect_equal);
 }
@@ -112,8 +112,8 @@ C++ overload).
               r2 = py::cast<std::map<std::string, std::string>>(relabel2);
           }
           return py_from_compose_sym(
-            _compose_SymmetricTensors(py::cast<SymmetricTensorCPtr>(tensor1),
-                                      py::cast<SymmetricTensorCPtr>(tensor2),
+            _compose_SymmetricTensors(py::cast_non_null<SymmetricTensorCPtr>(tensor1, "tensor1"),
+                                      py::cast_non_null<SymmetricTensorCPtr>(tensor2, "tensor2"),
                                       r1,
                                       r2));
       },

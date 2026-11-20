@@ -240,7 +240,7 @@ legs_from_python(py::handle obj)
 {
     std::vector<Leg::Ptr> out;
     for (py::handle item : obj) {
-        out.push_back(py::cast<Leg::Ptr>(item));
+        out.push_back(py::cast_non_null<Leg::Ptr>(item, "elements of factors"));
     }
     return out;
 }
@@ -444,7 +444,7 @@ the sector multiplicities.)pydoc")
                  std::vector<Leg::Ptr> legs;
                  legs.reserve(static_cast<std::size_t>(legs_obj.size()));
                  for (py::handle item : legs_obj) {
-                     legs.push_back(py::cast<Leg::Ptr>(item));
+                     legs.push_back(py::cast_non_null<Leg::Ptr>(item, "elements of legs"));
                  }
                  return std::make_shared<LegPipe>(std::move(legs), is_dual, combine_cstyle);
              }),
@@ -577,7 +577,8 @@ bind_elementary_space(nb::module_& m)
           std::vector<ElementarySpace::Ptr> descriptions;
           descriptions.reserve(static_cast<std::size_t>(independent_descriptions.size()));
           for (py::handle item : independent_descriptions) {
-              descriptions.push_back(py::cast<ElementarySpace::Ptr>(item));
+              descriptions.push_back(py::cast_non_null<ElementarySpace::Ptr>(
+                item, "elements of independent_descriptions"));
           }
           return ElementarySpace::from_independent_symmetries(descriptions);
       },
@@ -592,7 +593,7 @@ bind_elementary_space(nb::module_& m)
           std::vector<Space::Ptr> spaces;
           spaces.reserve(static_cast<std::size_t>(spaces_obj.size()));
           for (py::handle item : spaces_obj) {
-              spaces.push_back(py::cast<Space::Ptr>(item));
+              spaces.push_back(py::cast_non_null<Space::Ptr>(item, "spaces"));
           }
           return ElementarySpace::from_largest_common_subspace(spaces, is_dual);
       },
@@ -735,7 +736,7 @@ bind_elementary_space(nb::module_& m)
             std::vector<ElementarySpace::Ptr> others;
             others.reserve(static_cast<std::size_t>(others_obj.size()));
             for (py::handle item : others_obj) {
-                others.push_back(py::cast<ElementarySpace::Ptr>(item));
+                others.push_back(py::cast_non_null<ElementarySpace::Ptr>(item, "others"));
             }
             return self.direct_sum(others, std::move(summand_labels));
         },
@@ -823,7 +824,8 @@ bind_direct_sum_space(nb::module_& m)
             std::vector<ElementarySpace::Ptr> spaces;
             spaces.reserve(static_cast<std::size_t>(spaces_obj.size()));
             for (py::handle item : spaces_obj) {
-                spaces.push_back(py::cast<ElementarySpace::Ptr>(item));
+                spaces.push_back(
+                  py::cast_non_null<ElementarySpace::Ptr>(item, "elements of spaces"));
             }
             return std::make_shared<DirectSumSpace>(
               std::move(spaces), is_dual, std::move(summand_labels));
@@ -843,7 +845,8 @@ bind_direct_sum_space(nb::module_& m)
             std::vector<ElementarySpace::Ptr> spaces;
             spaces.reserve(static_cast<std::size_t>(spaces_obj.size()));
             for (py::handle item : spaces_obj) {
-                spaces.push_back(py::cast<ElementarySpace::Ptr>(item));
+                spaces.push_back(
+                  py::cast_non_null<ElementarySpace::Ptr>(item, "elements of spaces"));
             }
             return DirectSumSpace::from_spaces(
               std::move(spaces), is_dual, std::move(summand_labels));
@@ -1094,7 +1097,7 @@ bind_tensor_product(nb::module_& m)
           std::vector<TensorProduct::Ptr> factors;
           factors.reserve(static_cast<std::size_t>(factors_obj.size()));
           for (py::handle item : factors_obj) {
-              factors.push_back(py::cast<TensorProduct::Ptr>(item));
+              factors.push_back(py::cast_non_null<TensorProduct::Ptr>(item, "factors"));
           }
           return TensorProduct::from_partial_products(factors);
       },
@@ -1317,7 +1320,8 @@ bind_abelian_leg_pipe(nb::module_& m)
                 std::vector<ElementarySpace::Ptr> legs;
                 legs.reserve(static_cast<std::size_t>(legs_obj.size()));
                 for (py::handle item : legs_obj) {
-                    legs.push_back(py::cast<ElementarySpace::Ptr>(item));
+                    legs.push_back(
+                      py::cast_non_null<ElementarySpace::Ptr>(item, "elements of legs"));
                 }
                 return std::make_shared<AbelianLegPipe>(std::move(legs), is_dual, combine_cstyle);
             }),
@@ -1357,7 +1361,8 @@ bind_abelian_leg_pipe(nb::module_& m)
           std::vector<AbelianLegPipe::Ptr> descriptions;
           descriptions.reserve(static_cast<std::size_t>(independent_descriptions.size()));
           for (py::handle item : independent_descriptions) {
-              descriptions.push_back(py::cast<AbelianLegPipe::Ptr>(item));
+              descriptions.push_back(py::cast_non_null<AbelianLegPipe::Ptr>(
+                item, "elements of independent_descriptions"));
           }
           return AbelianLegPipe::from_independent_symmetries(descriptions);
       },
@@ -1513,7 +1518,7 @@ bind_abelian_leg_pipe(nb::module_& m)
           std::vector<Leg::Ptr> legs;
           legs.reserve(static_cast<std::size_t>(legs_obj.size()));
           for (py::handle item : legs_obj) {
-              legs.push_back(py::cast<Leg::Ptr>(item));
+              legs.push_back(py::cast_non_null<Leg::Ptr>(item, "elements of legs"));
           }
           return flat_leg_permutation(legs);
       },

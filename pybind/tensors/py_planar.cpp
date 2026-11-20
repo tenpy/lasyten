@@ -372,7 +372,8 @@ evaluate_diagram(PlanarDiagram const& self, py::object tensors_obj)
     }
     std::map<std::string, TensorPtr> map;
     for (auto item : tensors) {
-        map.emplace(py::cast<std::string>(item.first), py::cast<TensorPtr>(item.second));
+        map.emplace(py::cast<std::string>(item.first),
+                    py::cast_non_null<TensorPtr>(item.second, "values of tensors"));
     }
     return eval_result_to_py(self.evaluate(std::move(map)));
 }
@@ -740,12 +741,13 @@ bind_tensors_planar(nb::module_& m)
                                                  std::move(l1),
                                                  std::move(l2)));
           }
-          return eval_result_to_py(planar_contraction(py::cast<TensorCPtr>(tensor1),
-                                                      py::cast<TensorCPtr>(tensor2),
-                                                      std::move(l1),
-                                                      std::move(l2),
-                                                      py_relabel_map(relabel1),
-                                                      py_relabel_map(relabel2)));
+          return eval_result_to_py(
+            planar_contraction(py::cast_non_null<TensorCPtr>(tensor1, "tensor1"),
+                               py::cast_non_null<TensorCPtr>(tensor2, "tensor2"),
+                               std::move(l1),
+                               std::move(l2),
+                               py_relabel_map(relabel1),
+                               py_relabel_map(relabel2)));
       },
       nb::arg("tensor1"),
       nb::arg("tensor2"),
@@ -792,7 +794,7 @@ bind_tensors_planar(nb::module_& m)
                 planar_partial_trace(py::cast<TensorPlaceholder>(tensor), std::move(ps)));
           }
           return eval_result_to_py(
-            planar_partial_trace(py::cast<TensorCPtr>(tensor), std::move(ps)));
+            planar_partial_trace(py::cast_non_null<TensorCPtr>(tensor, "tensor"), std::move(ps)));
       },
       nb::arg("tensor"),
       nb::arg("pairs"),

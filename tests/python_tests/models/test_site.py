@@ -125,6 +125,13 @@ def test_site_rejects_out_of_range_state_label(block_backend):
         degrees_of_freedom.Site(leg, backend=backend, state_labels={'bad': 5})
 
 
+@pytest.mark.parametrize('cls', [degrees_of_freedom.Site, degrees_of_freedom.AnyonDOF])
+def test_site_and_dof_reject_none_leg(cls):
+    # intended: ``None`` for the required leg is a TypeError of the call dispatcher (it used to segfault, tenpy/lasyten#334)
+    with pytest.raises(TypeError, match='incompatible function arguments'):
+        cls(None)
+
+
 @pytest.mark.parametrize('spin', [0.5, 1, 1.5, 2, 5])
 def test_spin_site(any_backend, spin):
     if isinstance(any_backend, backends.NoSymmetryBackend):

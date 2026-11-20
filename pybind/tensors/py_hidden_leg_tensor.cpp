@@ -21,7 +21,7 @@ bind_tensors_hidden_leg_tensor(nb::module_& m)
 
     cls.def(
       nb::new_([](py::object tensor, py::object which_legs) {
-          auto tens = py::cast<Tensor::Ptr>(tensor);
+          auto tens = py::cast_non_null<Tensor::Ptr>(tensor, "tensor");
           std::vector<std::variant<int64, std::string>> legs;
           for (auto item : which_legs) {
               if (py::isinstance<py::str>(item)) {
@@ -39,7 +39,7 @@ bind_tensors_hidden_leg_tensor(nb::module_& m)
     cls.def_static(
       "from_tensor",
       [](py::object tensor, py::object which_legs) {
-          auto tens = py::cast<Tensor::Ptr>(tensor);
+          auto tens = py::cast_non_null<Tensor::Ptr>(tensor, "tensor");
           std::vector<std::variant<int64, std::string>> legs;
           for (auto item : which_legs) {
               if (py::isinstance<py::str>(item)) {

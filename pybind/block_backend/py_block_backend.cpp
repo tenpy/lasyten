@@ -930,7 +930,7 @@ bind_block_backend(nb::module_& m)
             std::vector<BlockBackend::LegCPtr> legs;
             for (py::handle item : legs_obj) {
                 // Legs may be ElementarySpace / LegPipe / AbelianLegPipe; all register as Leg.
-                legs.push_back(py::cast<Leg::Ptr>(item));
+                legs.push_back(py::cast_non_null<Leg::Ptr>(item, "elements of legs"));
             }
             return self.apply_basis_perm(block, legs, inv);
         },

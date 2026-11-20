@@ -139,7 +139,8 @@ bind_fusion_tree_mapping(nb::module_& m)
            std::vector<int64> codomain_idcs,
            std::vector<int64> domain_idcs,
            py::object block_backend) {
-            auto backend = py::cast<std::shared_ptr<BlockBackend>>(block_backend);
+            auto backend =
+              py::cast_non_null<std::shared_ptr<BlockBackend>>(block_backend, "block_backend");
             return self.transform_tensor(data,
                                          codomain,
                                          domain,
@@ -214,7 +215,8 @@ bind_fusion_tree_mapping(nb::module_& m)
            std::vector<int64> codomain_idcs,
            std::vector<int64> domain_idcs,
            py::object block_backend) {
-            auto backend = py::cast<std::shared_ptr<BlockBackend>>(block_backend);
+            auto backend =
+              py::cast_non_null<std::shared_ptr<BlockBackend>>(block_backend, "block_backend");
             return self.transform_tensor(data,
                                          codomain,
                                          domain,

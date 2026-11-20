@@ -32,6 +32,7 @@ from lasyten.symmetries import (
     is_leg_pipe,
 )
 from lasyten.tensors import ChargedTensor, DiagonalTensor, HiddenLegTensor, LegLabels, Mask, SymmetricTensor, Tensor
+from lasyten.tensors.planar import planar_almost_equal, planar_combine_legs, planar_partial_trace
 from lasyten.testing import assert_equivalent_legs, assert_tensors_almost_equal, random_tensor, swap_gate_numpy
 from lasyten.tools import hdf5_io
 from lasyten.tools.misc import duplicate_entries, inverse_permutation, iter_common_noncommon_sorted_arrays, to_valid_idx
@@ -1528,24 +1529,54 @@ def test_almost_equal(cls, make_compatible_tensor):
         pytest.xfail(str(e))
 
 
-def test_almost_equal_rejects_none(make_compatible_tensor):
+# ``None`` for a required tensor argument is intended to be rejected by the call dispatcher of the bindings
+# (``TypeError``), or by ``cast_non_null`` for the few bindings that cast a ``py::object`` themselves.
+# It used to reach C++ as an empty pointer (segfault or ``ValueError ... non-null``), see tenpy/lasyten#334.
+NONE_REJECTED = r'incompatible function arguments|must not be None'
+
+
+@pytest.mark.parametrize('none_position', [0, 1])
+@pytest.mark.parametrize('fn', [tensors.almost_equal, tensors.compose, tensors.check_same_legs, planar_almost_equal])
+def test_two_tensor_functions_reject_none(fn, none_position, make_compatible_tensor):
     T = make_compatible_tensor()
-    with pytest.raises(ValueError, match='non-null'):
-        tensors.almost_equal(T, None)
-    with pytest.raises(ValueError, match='non-null'):
-        tensors.almost_equal(None, T)
+    args = [T, T]
+    args[none_position] = None
+    with pytest.raises(TypeError, match=NONE_REJECTED):
+        fn(*args)
 
 
-def test_null_tensor_guards_reject_none(make_compatible_tensor):
-    """None must raise ValueError via shared helpers or entry guards, not segfault."""
-    from lasyten.tensors.planar import planar_almost_equal
+@pytest.mark.parametrize(
+    'call',
+    [
+        pytest.param(lambda: tensors.trace(None), id='trace'),
+        pytest.param(lambda: tensors.transpose(None), id='transpose'),
+        pytest.param(lambda: tensors.item(None), id='item'),
+        pytest.param(lambda: tensors.permute_legs(None, codomain=[0], domain=[1]), id='permute_legs'),
+        pytest.param(lambda: tensors.move_leg(None, 0, codomain_pos=0), id='move_leg'),
+        pytest.param(lambda: tensors.bend_legs(None, num_codomain_legs=1), id='bend_legs'),
+        pytest.param(lambda: tensors.combine_legs(None, [0, 1]), id='combine_legs'),
+        pytest.param(lambda: tensors.split_legs(None, 0), id='split_legs'),
+        pytest.param(lambda: tensors.squeeze_legs(None), id='squeeze_legs'),
+        pytest.param(lambda: tensors.slice_leg(None, 0, 0), id='slice_leg'),
+        pytest.param(lambda: tensors.on_device(None, 'cpu'), id='on_device'),
+        pytest.param(lambda: tensors.add_trivial_leg(None, codomain_pos=0), id='add_trivial_leg'),
+        pytest.param(lambda: tensors.combine_to_matrix(None, codomain=[0]), id='combine_to_matrix'),
+        pytest.param(lambda: tensors.flatten_pipe_leg(None, 0), id='flatten_pipe_leg'),
+        pytest.param(lambda: planar_combine_legs(None, [0, 1]), id='planar_combine_legs'),
+        pytest.param(lambda: planar_partial_trace(None, [0, 1]), id='planar_partial_trace'),
+    ],
+)
+def test_tensor_functions_reject_none(call):
+    with pytest.raises(TypeError, match=NONE_REJECTED):
+        call()
 
-    T = make_compatible_tensor()
-    for fn in (tensors.compose, tensors.check_same_legs, planar_almost_equal):
-        with pytest.raises(ValueError, match='non-null'):
-            fn(T, None)
-        with pytest.raises(ValueError, match='non-null'):
-            fn(None, T)
+
+@pytest.mark.deselect_invalid_ChargedTensor_cases
+@pytest.mark.parametrize('cls', [SymmetricTensor, DiagonalTensor, Mask, ChargedTensor])
+def test_to_backend_rejects_none(cls, make_compatible_tensor):
+    T = make_compatible_tensor(cls=cls)
+    with pytest.raises(TypeError, match=NONE_REJECTED):
+        T.to_backend(None)
 
 
 @pytest.mark.deselect_invalid_ChargedTensor_cases
@@ -5270,7 +5301,7 @@ def test_flip_bond_duality_errors(make_compatible_tensor):
     A, B = _flip_bond_duality_pair(make_compatible_tensor)
     with pytest.raises(ValueError, match='contractible'):
         tensors.flip_bond_duality(A, B, 'wL', 'wL')
-    with pytest.raises(ValueError, match='requires non-null Tensor arguments'):
+    with pytest.raises(TypeError, match=NONE_REJECTED):  # intended, see test_two_tensor_functions_reject_none
         tensors.flip_bond_duality(A, None, 'wR', 'wL')
 
 
@@ -5460,7 +5491,7 @@ def test_flip_leg_duality_nontrivial_sector(symmetry_backend, block_backend, fli
 
 def test_flip_leg_duality_errors(make_compatible_tensor):
     A, _ = _flip_bond_duality_pair(make_compatible_tensor)
-    with pytest.raises(ValueError, match='requires a non-null Tensor'):
+    with pytest.raises(TypeError, match=NONE_REJECTED):  # intended, see test_two_tensor_functions_reject_none
         tensors.flip_leg_duality(None, 'wL')
     hidden = HiddenLegTensor(A, ['wR'])
     with pytest.raises(NotImplementedError, match='flip_leg_duality for tensors with hidden legs'):
