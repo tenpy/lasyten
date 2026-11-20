@@ -544,14 +544,35 @@ save_leg(lasyten::hdf5::Saver& saver, std::string const& path, Leg::CPtr const& 
         save_elementary_space(saver, path, es);
         return;
     }
-    // Plain LegPipe has no native HDF5 schema yet; refuse rather than silently drop structure.
-    throw std::runtime_error(std::string("hdf5_export: cannot save plain LegPipe as Leg (class ") +
-                             leg_class_name(leg) + ")");
+    if (auto pipe = leg.as_leg_pipe()) {
+        saver.save_instance(path,
+                            kModule,
+                            "LegPipe",
+                            pipe.get(),
+                            [&](lasyten::hdf5::Saver& s,
+                                HighFive::Group& g,
+                                std::string const& sub) { pipe->save_hdf5(s, g, sub); });
+        return;
+    }
+    throw std::runtime_error(std::string("hdf5_export: unknown Leg class ") + leg_class_name(leg));
 }
 
 Leg::Ptr
 load_leg(lasyten::hdf5::Loader& loader, std::string const& path)
 {
+    hid_t id = loader.open(path);
+    if (loader.type_of(id) == tenpy_hdf5::REPR_NONE) {
+        H5Idec_ref(id);
+        return {};
+    }
+    HighFive::Group group = tenpy_hdf5::group_from_hid(id);
+    auto const cls = class_attr(group);
+    if (cls == "LegPipe") {
+        return Leg{ load_instance<LegPipe>(
+          loader, path, [&](HighFive::Group& g, std::string const& sub) -> LegPipe::Ptr {
+              return LegPipe::from_hdf5(loader, g, sub);
+          }) };
+    }
     return Leg{ load_elementary_space(loader, path) };
 }
 

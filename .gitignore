@@ -5,6 +5,9 @@
 *.dat
 *.hdf5
 *.h5
+# Committed HDF5 import fixtures for tools IO tests.
+!tests/python_tests/tools/data/
+!tests/python_tests/tools/data/*.hdf5
 .DS_Store
 ._*
 .eggs

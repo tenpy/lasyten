@@ -277,6 +277,14 @@ class LegPipe : public std::enable_shared_from_this<LegPipe>
 
     [[nodiscard]] Ptr shared_pipe();
 
+    void save_hdf5(lasyten::hdf5::Saver& saver,
+                   HighFive::Group& h5gr,
+                   std::string const& subpath) const;
+
+    static Ptr from_hdf5(lasyten::hdf5::Loader& loader,
+                         HighFive::Group& h5gr,
+                         std::string const& subpath);
+
   protected:
     std::optional<std::vector<int64>> _basis_perm;
     std::optional<std::vector<int64>> _inverse_basis_perm;

@@ -64,8 +64,8 @@ Pure-Python types are not touched; they pickle through the default mechanism.
 
 - Blocks go through numpy (`block_from_numpy`), so Torch autograd state is dropped; Array-API blocks
   only pickle if their array namespace does.
-- Types without `save_hdf5` schemas (`NoSymmetryBackendBlockData`, `LegPipe`) get pickle hooks
-  anyway, with state derived from their constructors.
+- Types without `save_hdf5` schemas (`NoSymmetryBackendBlockData`) get pickle hooks anyway, with
+  state derived from their constructors.
 - `Hdf5Exportable`-style Python objects and other types outside `pybind/**` are not covered here.
 
 ## Tests
