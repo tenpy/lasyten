@@ -515,6 +515,25 @@ def test_AbelianLegPipe(abelian_group_symmetry, combine_cstyle, pipe_dual, np_ra
     npt.assert_array_equal(pipe.basis_perm, np.array(expect_perm))
 
 
+@pytest.mark.parametrize(
+    'make, element_description',
+    [
+        pytest.param(lambda V: spaces.TensorProduct([V, None]), 'elements of factors', id='TensorProduct'),
+        pytest.param(lambda V: spaces.LegPipe([V, None]), 'elements of legs', id='LegPipe'),
+        pytest.param(lambda V: spaces.DirectSumSpace([V, None]), 'elements of spaces', id='DirectSumSpace'),
+        pytest.param(
+            lambda V: spaces.ElementarySpace.from_largest_common_subspace(V, None), 'spaces', id='common_subspace'
+        ),
+        pytest.param(lambda V: V.direct_sum(None), 'others', id='direct_sum'),
+    ],
+)
+def test_list_of_legs_rejects_none_element(make, element_description, make_any_space):
+    # intended: a None element is a TypeError that names the argument (it used to become an empty pointer, tenpy/lasyten#334)
+    V = make_any_space()
+    with pytest.raises(TypeError, match=f'{element_description} must not be None'):
+        make(V)
+
+
 @pytest.mark.parametrize('is_dual', [True, False])
 def test_direct_sum(is_dual, make_any_space, max_mult=5, max_sectors=5):
     a = make_any_space(max_mult=max_mult, max_sectors=max_sectors, is_dual=is_dual)

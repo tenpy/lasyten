@@ -373,3 +373,50 @@ def test_block_comparison_real_number(op, number, block_backend):
     expect = op(block, number.item())  # the same with a Python number
     res = op(block, number)
     np.testing.assert_array_equal(bb.to_numpy(res), bb.to_numpy(expect))
+
+
+# ``None`` for a Block argument is intended to be rejected with a TypeError, either by the call dispatcher or by Python
+# for the reflected operators. It used to reach C++ as an empty pointer and crash the interpreter, see tenpy/lasyten#334.
+none_rejected = r'incompatible function arguments|unsupported operand'
+
+
+@pytest.mark.parametrize(
+    'op',
+    [
+        pytest.param(lambda b: b + None, id='add'),
+        pytest.param(lambda b: b - None, id='sub'),
+        pytest.param(lambda b: b * None, id='mul'),
+        pytest.param(lambda b: b / None, id='truediv'),
+        pytest.param(lambda b: None + b, id='radd'),
+        pytest.param(lambda b: None - b, id='rsub'),
+        pytest.param(lambda b: None * b, id='rmul'),
+        pytest.param(lambda b: None / b, id='rtruediv'),
+    ],
+)
+def test_block_operator_rejects_none(op, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    block = bb.as_block(np.array([[1.0, 2.0], [3.0, 4.0]]))
+    with pytest.raises(TypeError, match=none_rejected):
+        op(block)
+
+
+@pytest.mark.parametrize(
+    'call',
+    [
+        pytest.param(lambda bb, block: bb.dagger(None), id='dagger'),
+        pytest.param(lambda bb, block: bb.get_shape(None), id='get_shape'),
+        pytest.param(lambda bb, block: bb.get_dtype(None), id='get_dtype'),
+        pytest.param(lambda bb, block: bb.get_device(None), id='get_device'),
+        pytest.param(lambda bb, block: bb.is_real(None), id='is_real'),
+        pytest.param(lambda bb, block: bb.to_numpy(None), id='to_numpy'),
+        pytest.param(lambda bb, block: bb.eigvals(None), id='eigvals'),
+        pytest.param(lambda bb, block: bb.inner(None, block), id='inner-first'),
+        pytest.param(lambda bb, block: bb.inner(block, None), id='inner-second'),
+        pytest.param(lambda bb, block: bb.combine_legs(None, [[0, 1]], [True]), id='combine_legs'),
+    ],
+)
+def test_block_backend_method_rejects_none(call, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    block = bb.as_block(np.array([[1.0, 2.0], [3.0, 4.0]]))
+    with pytest.raises(TypeError, match='incompatible function arguments'):
+        call(bb, block)
