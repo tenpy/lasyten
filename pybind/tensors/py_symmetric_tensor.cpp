@@ -87,9 +87,10 @@ bind_tensors_symmetric_tensor(nb::module_& m)
       },
       [](SymmetricTensor& self, py::object obj) {
           if (std::dynamic_pointer_cast<NoSymmetryBackend>(self.backend)) {
-              self.data = NoSymmetryBackend::wrap(py::cast<BlockBackend::BlockPtr>(obj));
+              self.data =
+                NoSymmetryBackend::wrap(py::cast_non_null<BlockBackend::BlockPtr>(obj, "data"));
           } else {
-              self.data = py::cast<TensorBackend::DataPtr>(obj);
+              self.data = py::cast_non_null<TensorBackend::DataPtr>(obj, "data");
           }
       });
 

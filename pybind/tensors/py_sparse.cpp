@@ -64,14 +64,14 @@ class PyLinearOperatorAdapter : public LinearOperator
     VectorLike::Ptr matvec(VectorLike::CPtr vec) override
     {
         auto res = original.attr("matvec")(py::cast(vec));
-        return py::cast<VectorLike::Ptr>(res);
+        return py::cast_non_null<VectorLike::Ptr>(res, "the return value of matvec");
     }
 
     TensorPtr to_tensor(TensorBackend::Ptr backend = nullptr) override
     {
         py::object arg = backend ? py::cast(backend) : py::none();
         auto res = original.attr("to_tensor")(arg);
-        return py::cast<TensorPtr>(res);
+        return py::cast_non_null<TensorPtr>(res, "the return value of to_tensor");
     }
 
     LinearOperator::Ptr adjoint() override;
@@ -81,7 +81,7 @@ LinearOperator::Ptr
 wrap_linear_operator(py::object op)
 {
     try {
-        return py::cast<LinearOperator::Ptr>(op);
+        return py::cast_non_null<LinearOperator::Ptr>(op, "operator");
     } catch (py::cast_error const&) {
         return std::make_shared<PyLinearOperatorAdapter>(std::move(op));
     }
@@ -200,7 +200,7 @@ bind_tensors_sparse(nb::module_& m)
                std::vector<LinearOperator::Ptr> more;
                more.reserve(more_ops.size());
                for (auto item : more_ops) {
-                   more.push_back(py::cast<LinearOperator::Ptr>(item));
+                   more.push_back(py::cast_non_null<LinearOperator::Ptr>(item, "more_operators"));
                }
                return std::make_shared<SumLinearOperator>(std::move(original_operator),
                                                           std::move(more));

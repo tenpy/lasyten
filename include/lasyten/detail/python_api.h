@@ -81,14 +81,12 @@ namespace lasyten {
 namespace nb = ::nanobind;
 } // namespace lasyten
 
-// ``None`` is accepted for ``std::shared_ptr<T>`` parameters (a null pointer), as the pybind11
-// bindings did; nanobind only does that for ``std::optional``-like types by default.
+// Parameters of class type (``std::shared_ptr<T>``, ``const T&``) reject ``None``, unless the
+// binding says ``nb::arg("x") = nb::none()`` or ``nb::arg("x").none()``. Plain ``object`` /
+// ``handle`` parameters accept ``None`` (the binding inspects the object itself, see also
+// ``py::cast_non_null``).
 NAMESPACE_BEGIN(NB_NAMESPACE)
 NAMESPACE_BEGIN(detail)
-template<typename T>
-struct has_arg_defaults<std::shared_ptr<T>> : std::true_type
-{};
-// Likewise for plain ``object`` / ``handle`` parameters (pybind11 let any argument be None).
 template<>
 struct has_arg_defaults<::nanobind::object> : std::true_type
 {};
@@ -151,6 +149,18 @@ template<typename T>
 reinterpret_steal(::nanobind::handle h)
 {
     return ::nanobind::steal<T>(h);
+}
+
+/// ``py::cast<T>(h)`` for a ``std::shared_ptr`` that a Python argument must provide: ``None``
+/// raises ``TypeError`` instead of becoming an empty pointer. ``what`` names the argument.
+template<typename T>
+[[nodiscard]] inline T
+cast_non_null(::nanobind::handle h, char const* what = "argument")
+{
+    if (h.is_none()) {
+        throw ::nanobind::type_error((std::string(what) + " must not be None").c_str());
+    }
+    return ::nanobind::cast<T>(h);
 }
 
 /// ``py::module_::import("numpy")`` (nanobind spells it ``import_``).

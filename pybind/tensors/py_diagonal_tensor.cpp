@@ -200,9 +200,10 @@ bind_tensors_diagonal_tensor(nb::module_& m)
       },
       [](DiagonalTensor& self, py::object obj) {
           if (std::dynamic_pointer_cast<NoSymmetryBackend>(self.backend)) {
-              self.data = NoSymmetryBackend::wrap(py::cast<BlockBackend::BlockPtr>(obj));
+              self.data =
+                NoSymmetryBackend::wrap(py::cast_non_null<BlockBackend::BlockPtr>(obj, "data"));
           } else {
-              self.data = py::cast<TensorBackend::DataPtr>(obj);
+              self.data = py::cast_non_null<TensorBackend::DataPtr>(obj, "data");
           }
       });
 
@@ -389,7 +390,8 @@ bind_tensors_diagonal_tensor(nb::module_& m)
     cls.def_static(
       "from_tensor",
       [](py::object tens, std::optional<float64> tol) {
-          return DiagonalTensor::from_tensor(py::cast<SymmetricTensorCPtr>(tens), tol);
+          return DiagonalTensor::from_tensor(py::cast_non_null<SymmetricTensorCPtr>(tens, "tens"),
+                                             tol);
       },
       nb::arg("tens"),
       nb::arg("tol") = 1e-12,

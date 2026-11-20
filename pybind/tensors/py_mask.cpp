@@ -114,9 +114,10 @@ bind_tensors_mask(nb::module_& m)
       },
       [](Mask& self, py::object obj) {
           if (std::dynamic_pointer_cast<NoSymmetryBackend>(self.backend)) {
-              self.data = NoSymmetryBackend::wrap(py::cast<BlockBackend::BlockPtr>(obj));
+              self.data =
+                NoSymmetryBackend::wrap(py::cast_non_null<BlockBackend::BlockPtr>(obj, "data"));
           } else {
-              self.data = py::cast<TensorBackend::DataPtr>(obj);
+              self.data = py::cast_non_null<TensorBackend::DataPtr>(obj, "data");
           }
       });
 
@@ -165,7 +166,7 @@ bind_tensors_mask(nb::module_& m)
     cls.def_static(
       "from_DiagonalTensor",
       [](py::object diag) {
-          return Mask::from_DiagonalTensor(py::cast<DiagonalTensorCPtr>(diag));
+          return Mask::from_DiagonalTensor(py::cast_non_null<DiagonalTensorCPtr>(diag, "diag"));
       },
       nb::arg("diag"),
       DOC(lasyten, Mask, from_DiagonalTensor));

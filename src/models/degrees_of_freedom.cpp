@@ -80,7 +80,7 @@ as_symmetric_tensor(py::object op)
     if (py::isinstance<SymmetricTensor>(op)) {
         return py::cast<SymmetricTensorPtr>(op);
     }
-    return py::cast<SymmetricTensorPtr>(op);
+    return py::cast_non_null<SymmetricTensorPtr>(op, "elements of operators");
 }
 
 TensorProduct::Ptr
