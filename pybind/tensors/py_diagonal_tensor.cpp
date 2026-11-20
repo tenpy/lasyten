@@ -8,6 +8,7 @@
 
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
+#include "../py_numbers.h"
 
 #include "docstrings/tensors/diagonal_tensor.h"
 
@@ -63,8 +64,7 @@ is_py_diagonal(py::object obj)
 bool
 is_py_number_or_scalar(py::object obj, std::shared_ptr<BlockBackend> const& bb)
 {
-    return py::isinstance(obj, py::module_::import("numbers").attr("Number")) ||
-           py::isinstance<BlockBackend::Scalar>(obj) ||
+    return is_py_number(obj) || py::isinstance<BlockBackend::Scalar>(obj) ||
            py::isinstance(obj, py::type::of(py::cast(bb)).attr("Scalar"));
 }
 

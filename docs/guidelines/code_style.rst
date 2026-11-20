@@ -34,6 +34,18 @@ Python guidelines
 - Long running tests are marked with ``@pytest.mark.slow``. You can exclude them by running only
   ``pytest -m "not slow"``. If your new tests are slow (``> 10s`` total), mark them accordingly.
 
+- Warnings are errors in the tests (``filterwarnings = ["error", ...]`` in ``pyproject.toml``).
+  This can change which overload of a nanobind binding is selected: nanobind tries all overloads twice,
+  first without and then with implicit conversions. If a conversion in the second pass emits a warning
+  (e.g. numpy's ``ComplexWarning`` in ``np.complex128.__float__``), the warning is raised inside the
+  caster and that overload fails. So the tests can choose a different overload than user code with
+  Python's default warning filters, and a bug can stay invisible (see tenpy/lasyten#330).
+  Bindings that take numbers or numpy scalars therefore need dedicated tests that lower the specific
+  warning with ``@pytest.mark.filterwarnings('ignore:Casting complex values to real discards the imaginary part:numpy.exceptions.ComplexWarning')``,
+  see ``test_block_backend_as_scalar_numpy_number`` in ``tests/python_tests/test_tensors.py``.
+  A CI job (``pytest_no_warning_errors.yml``) runs the whole test suite without the ``error`` filter
+  once a month, and opens an issue if it fails. You can do the same locally with ``pytest -o filterwarnings=``.
+
 - Prefer GitHub issues over todo comments in the code.
   Do not leave todo comments unless you take responsibility to take care of the todo later.
   Even if you do, GitHub issues are a better place to keep track of open todos.

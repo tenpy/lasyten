@@ -7,6 +7,7 @@
 
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
+#include "../py_numbers.h"
 
 #include "docstrings/tensors/mask.h"
 
@@ -386,6 +387,8 @@ bind_tensors_mask(nb::module_& m)
          py::function func,
          std::string operand,
          bool return_NotImplemented) -> py::object {
+          other =
+            py_number_as_builtin(other); // np.bool_, 0-d array / tensor: as the Python number
           auto adapted = adapt_block_bool_binary(func, self.backend->block_backend);
           if (py::isinstance<py::bool_>(other)) {
               return py::cast(self._binary_operand(py::to_bool(other), adapted, operand));
@@ -399,7 +402,7 @@ bind_tensors_mask(nb::module_& m)
               !(py::isinstance<Tensor>(other) ||
                 py::isinstance(other,
                                py::module_::import("lasyten.tensors._tensors").attr("Tensor")) ||
-                py::isinstance(other, py::module_::import("numbers").attr("Number")))) {
+                is_py_number(other))) {
               return py::reinterpret_borrow<py::object>(Py_NotImplemented);
           }
           throw std::invalid_argument(std::format("Invalid types for operand \"{}\": Mask and {}",
@@ -432,6 +435,8 @@ bind_tensors_mask(nb::module_& m)
         cls.def(
           name,
           [op_name, operand](Mask& self, py::object other) -> py::object {
+              other =
+                py_number_as_builtin(other); // np.bool_, 0-d array / tensor: as the Python number
               auto func = adapt_block_bool_binary(py::module_::import("operator").attr(op_name),
                                                   self.backend->block_backend);
               if (py::isinstance<py::bool_>(other)) {
@@ -445,7 +450,7 @@ bind_tensors_mask(nb::module_& m)
               if (!(py::isinstance<Tensor>(other) ||
                     py::isinstance(
                       other, py::module_::import("lasyten.tensors._tensors").attr("Tensor")) ||
-                    py::isinstance(other, py::module_::import("numbers").attr("Number")))) {
+                    is_py_number(other))) {
                   return py::reinterpret_borrow<py::object>(Py_NotImplemented);
               }
               throw std::invalid_argument(

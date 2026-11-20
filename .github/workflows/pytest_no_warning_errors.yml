@@ -1,0 +1,88 @@
+name: Run Pytest (warnings are not errors)
+# Run the test suite without the `error` entry of `filterwarnings` from pyproject.toml.
+# With it, a warning raised by an implicit conversion in a nanobind caster makes that overload fail, so the tests can
+# select a different overload than user code with Python's default warning filters (see tenpy/lasyten#330).
+# This job runs once a month, manually, and for changes of this file; on failure it opens an issue.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # monthly, on the 1st at 04:00 UTC
+    - cron: '0 4 1 * *'
+  # run once for the PR that adds or changes this workflow
+  pull_request:
+    paths:
+      - .github/workflows/pytest_no_warning_errors.yml
+
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        block-backend: [numpy, eigen, torch]
+    env:
+      # make pytest output in color
+      PY_COLORS: 1
+    defaults:
+      run:
+        # needed so micromamba activation from setup-micromamba takes effect
+        shell: bash -el {0}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+      with:
+        # external/hdf5_io: CMake (LASYTEN_WITH_HDF5) and the Python tenpy_hdf5 (tenpy-hdf5) package
+        # external/SUN_symbols: required symbols for tests
+        submodules: true
+
+    - name: Set up micromamba
+      uses: mamba-org/setup-micromamba@v3
+      with:
+        environment-file: environment.yml
+        cache-environment: true
+
+    - name: Build and install
+      # build deps (scikit-build-core, cmake, pytorch, ...) come from environment.yml
+      # --no-build-isolation avoids pip pulling a CUDA torch wheel that needs the CUDA toolkit
+      # Install tenpy-hdf5 from the git submodule so lasyten[io]/test] can resolve it
+      run: |
+        pip install --no-build-isolation -e ./external/hdf5_io
+        pip install --no-build-isolation -e ".[test]"
+
+    - name: Run pytest without warnings-as-errors
+      # `-o filterwarnings=` replaces the `filterwarnings` list of pyproject.toml by an empty one, i.e. warnings are
+      # reported in the summary, but not raised. Note: This runs in the repo root directory, which contains the
+      # lasyten source folder. To use the version we just installed, it is important to run `pytest` instead of
+      # `python -m pytest`.
+      run: pytest --block-backends "${{ matrix.block-backend }}" -o filterwarnings= -vv
+
+  report:
+    # open an issue if the scheduled or manually triggered run fails (not for pull requests)
+    needs: test
+    if: ${{ failure() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_TITLE: Test suite fails without warnings-as-errors
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+    - name: Open an issue unless one is open already
+      run: |
+        open=$(gh issue list --state open --search "$ISSUE_TITLE in:title" --json title --jq "[.[] | select(.title == \"$ISSUE_TITLE\")] | length")
+        if [ "$open" != "0" ]; then
+          echo "An open issue with this title exists, not opening another one."
+          exit 0
+        fi
+        body="The test suite fails if warnings are not turned into errors ('pytest -o filterwarnings=').
+        Failed run: $RUN_URL
+
+        With warnings as errors (the default configuration), a warning raised inside a nanobind caster makes an overload fail and another one is selected, which can hide bugs in the bindings. See tenpy/lasyten#330."
+        gh issue create --title "$ISSUE_TITLE" --body "$body" --label bug

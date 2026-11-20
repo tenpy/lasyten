@@ -1,5 +1,6 @@
 #include "../doc_plus.h"
 #include "../py_lasyten_nanobind.h"
+#include "../py_numbers.h"
 #include "docstrings/block_backend/block_backend.h"
 #include "ndarray_dispatch.h"
 #if LASYTEN_WITH_NUMPY_BACKEND
@@ -59,6 +60,77 @@ is_py_integer_scalar(const py::handle& obj)
     } catch (const py::cast_error&) {
         return false;
     }
+}
+
+/// A numpy complex scalar (``np.complex128``, ``np.complex64``, ...) or 0-d complex array, as
+/// complex128.
+///
+/// Used as the *last* overload of every function that has a ``float64`` and a ``complex128``
+/// overload. nanobind first tries all overloads without implicit conversions, where the casters
+/// accept only an exact ``float`` / ``complex``, so numpy complex scalars match nothing. In the
+/// second pass (with conversions), the ``float64`` overload then takes them through ``__float__``,
+/// which drops the imaginary part and only warns. An overload using this helper is reached in the
+/// first pass, and converts losslessly via ``__complex__``. Everything else (real numpy scalars,
+/// ``np.bool_``, non-numbers, ...) is passed on to the next overload by ``nb::next_overload()``,
+/// i.e. is handled exactly as without that overload.
+complex128
+complex_like_or_next_overload(const py::handle& obj)
+{
+    try {
+        if (!PyComplex_Check(obj.ptr())) {
+            // dtype.kind == 'c' and ndim == 0, e.g. np.complex64 or a 0-d complex array
+            py::object dtype = py::getattr(obj, "dtype", py::none());
+            py::object kind =
+              dtype.is_none() ? py::none() : py::getattr(dtype, "kind", py::none());
+            if (!py::isinstance<py::str>(kind) || py::cast<std::string>(kind) != "c")
+                throw nb::next_overload();
+            py::object ndim = py::getattr(obj, "ndim", py::none());
+            if (!py::isinstance<py::int_>(ndim) || py::cast<int64>(ndim) != 0)
+                throw nb::next_overload();
+        }
+        return py::cast<complex128>(obj);
+    } catch (const py::python_error&) {
+        throw nb::next_overload();
+    } catch (const py::cast_error&) {
+        throw nb::next_overload();
+    }
+}
+
+/// ``BlockBackend::as_scalar`` for numpy scalars and 0-d numpy arrays / torch tensors, with the
+/// dtype determined by the kind of the dtype (bool, integer, float, complex) via ``value.item()``.
+///
+/// Used as the *last* ``as_scalar`` overload. nanobind first tries all overloads without implicit
+/// conversions, where the casters accept only an exact ``bool`` / ``int`` / ``float`` /
+/// ``complex``, so none of these types matches. In the second pass (with conversions), the
+/// ``float64`` overload would take them through ``__float__``, which drops the imaginary part of
+/// a numpy complex scalar and only warns, and turns ``np.bool_`` into ``float64``. This overload
+/// is reached in the first pass instead. Everything else (non-numbers, ``int`` too large for
+/// ``int64``, ...) is passed on to the next overload by ``nb::next_overload()``, i.e. is handled
+/// exactly as without this overload.
+BlockBackend::Scalar
+as_scalar_from_zero_dim_number_or_next_overload(BlockBackend& backend, const py::object& value)
+{
+    auto number = py_number_from_zero_dim(value);
+    if (!number) {
+        // a subclass of complex, which is not a numpy scalar
+        if (PyComplex_Check(value.ptr()))
+            return backend.as_scalar(py::cast<complex128>(value));
+        throw nb::next_overload();
+    }
+    PyObject* n = number->ptr();
+    if (PyBool_Check(n))
+        return backend.as_scalar(n == Py_True);
+    if (PyLong_Check(n)) {
+        long long v = PyLong_AsLongLong(n);
+        if (v == -1 && PyErr_Occurred()) { // does not fit into int64
+            PyErr_Clear();
+            throw nb::next_overload();
+        }
+        return backend.as_scalar(static_cast<int64>(v));
+    }
+    if (PyFloat_Check(n))
+        return backend.as_scalar(static_cast<float64>(PyFloat_AsDouble(n)));
+    return backend.as_scalar(py::cast<complex128>(*number));
 }
 
 /// Parse ``key`` as an integer or tuple/list of integer scalars (not slices, strings, or arrays).
@@ -218,6 +290,13 @@ bind_block_backend(nb::module_& m)
         },
         nb::arg("exponent"))
       .def(
+        "__pow__",
+        [](const BlockBackend::Scalar& self, py::object exponent) {
+            return self.pow(
+              self._block()->get_backend()->as_scalar(complex_like_or_next_overload(exponent)));
+        },
+        nb::arg("exponent"))
+      .def(
         "__add__",
         [](const BlockBackend::Scalar& self, const BlockBackend::Scalar& other) {
             return self + other;
@@ -233,12 +312,24 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Scalar& self, complex128 other) { return self + other; },
         nb::arg("other"))
       .def(
+        "__add__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self + complex_like_or_next_overload(other);
+        },
+        nb::arg("other"))
+      .def(
         "__radd__",
         [](const BlockBackend::Scalar& self, float64 other) { return other + self; },
         nb::arg("other"))
       .def(
         "__radd__",
         [](const BlockBackend::Scalar& self, complex128 other) { return other + self; },
+        nb::arg("other"))
+      .def(
+        "__radd__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return complex_like_or_next_overload(other) + self;
+        },
         nb::arg("other"))
       .def(
         "__sub__",
@@ -256,6 +347,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Scalar& self, complex128 other) { return self - other; },
         nb::arg("other"))
       .def(
+        "__sub__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self - complex_like_or_next_overload(other);
+        },
+        nb::arg("other"))
+      .def(
         "__rsub__",
         [](const BlockBackend::Scalar& self, float64 other) { return other - self; }, // reversed!
         nb::arg("other"))
@@ -264,6 +361,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Scalar& self, complex128 other) {
             return other - self;
         }, // reversed!
+        nb::arg("other"))
+      .def(
+        "__rsub__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return complex_like_or_next_overload(other) - self;
+        },
         nb::arg("other"))
       .def(
         "__mul__",
@@ -302,6 +405,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Scalar& self, complex128 other) { return other * self; },
         nb::arg("other"))
       .def(
+        "__rmul__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return complex_like_or_next_overload(other) * self;
+        },
+        nb::arg("other"))
+      .def(
         "__truediv__",
         [](const BlockBackend::Scalar& self, const BlockBackend::Scalar& other) {
             return self / other;
@@ -316,6 +425,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Scalar& self, complex128 other) { return self / other; },
         nb::arg("other"))
       .def(
+        "__truediv__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self / complex_like_or_next_overload(other);
+        },
+        nb::arg("other"))
+      .def(
         "__rtruediv__",
         [](const BlockBackend::Scalar& self, float64 other) {
             return other / self; // reversed!
@@ -325,6 +440,12 @@ bind_block_backend(nb::module_& m)
         "__rtruediv__",
         [](const BlockBackend::Scalar& self, complex128 other) {
             return other / self; // reversed!
+        },
+        nb::arg("other"))
+      .def(
+        "__rtruediv__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return complex_like_or_next_overload(other) / self;
         },
         nb::arg("other"))
       .def(
@@ -338,6 +459,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Scalar& self, float64 other) { return self < other; },
         nb::arg("other"))
       .def(
+        "__lt__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self < real_number_or_complex_not_ordered(other);
+        },
+        nb::arg("other"))
+      .def(
         "__gt__",
         [](const BlockBackend::Scalar& self, const BlockBackend::Scalar& other) {
             return self > other;
@@ -346,6 +473,12 @@ bind_block_backend(nb::module_& m)
       .def(
         "__gt__",
         [](const BlockBackend::Scalar& self, float64 other) { return self > other; },
+        nb::arg("other"))
+      .def(
+        "__gt__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self > real_number_or_complex_not_ordered(other);
+        },
         nb::arg("other"))
       .def(
         "__le__",
@@ -358,6 +491,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Scalar& self, float64 other) { return self <= other; },
         nb::arg("other"))
       .def(
+        "__le__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self <= real_number_or_complex_not_ordered(other);
+        },
+        nb::arg("other"))
+      .def(
         "__ge__",
         [](const BlockBackend::Scalar& self, const BlockBackend::Scalar& other) {
             return self >= other;
@@ -366,6 +505,12 @@ bind_block_backend(nb::module_& m)
       .def(
         "__ge__",
         [](const BlockBackend::Scalar& self, float64 other) { return self >= other; },
+        nb::arg("other"))
+      .def(
+        "__ge__",
+        [](const BlockBackend::Scalar& self, py::object other) {
+            return self >= real_number_or_complex_not_ordered(other);
+        },
         nb::arg("other"))
       .def("inverse", &BlockBackend::Scalar::inverse, "The inverse of the scalar, 1./self")
       .def_prop_ro("_block", &BlockBackend::Scalar::_block, "Return the underlying block.")
@@ -437,10 +582,22 @@ bind_block_backend(nb::module_& m)
         },
         nb::arg("other"))
       .def(
+        "__rmul__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self.get_backend()->as_scalar(complex_like_or_next_overload(other)) * self;
+        },
+        nb::arg("other"))
+      .def(
         "__mul__",
         [](const BlockBackend::Block& self, const BlockBackend::Block& s) { return self * s; },
         nb::arg("other"),
         "Elementwise multiplication with another block.")
+      .def(
+        "__mul__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self * self.get_backend()->as_scalar(complex_like_or_next_overload(other));
+        },
+        nb::arg("other"))
       .def(
         "__truediv__",
         [](const BlockBackend::Block& self, const BlockCPtr& other) {
@@ -463,6 +620,12 @@ bind_block_backend(nb::module_& m)
         "__truediv__",
         [](const BlockBackend::Block& self, complex128 s) {
             return self / self.get_backend()->as_scalar(s);
+        },
+        nb::arg("other"))
+      .def(
+        "__truediv__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self / self.get_backend()->as_scalar(complex_like_or_next_overload(other));
         },
         nb::arg("other"))
       .def("__abs__", &BlockBackend::Block::abs, "Elementwise absolute value.")
@@ -493,6 +656,13 @@ bind_block_backend(nb::module_& m)
         nb::arg("exponent"),
         "Elementwise power with block exponent.")
       .def(
+        "__pow__",
+        [](const BlockBackend::Block& self, py::object exponent) {
+            return self.pow(
+              self.get_backend()->as_scalar(complex_like_or_next_overload(exponent)));
+        },
+        nb::arg("exponent"))
+      .def(
         "__lt__",
         [](const BlockBackend::Block& self, const BlockBackend::Block& other) {
             return self < other;
@@ -508,6 +678,12 @@ bind_block_backend(nb::module_& m)
       .def(
         "__lt__",
         [](const BlockBackend::Block& self, float64 other) { return self < other; },
+        nb::arg("other"))
+      .def(
+        "__lt__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self < real_number_or_complex_not_ordered(other);
+        },
         nb::arg("other"))
       .def(
         "__le__",
@@ -527,6 +703,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Block& self, float64 other) { return self <= other; },
         nb::arg("other"))
       .def(
+        "__le__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self <= real_number_or_complex_not_ordered(other);
+        },
+        nb::arg("other"))
+      .def(
         "__gt__",
         [](const BlockBackend::Block& self, const BlockBackend::Block& other) {
             return self > other;
@@ -544,6 +726,12 @@ bind_block_backend(nb::module_& m)
         [](const BlockBackend::Block& self, float64 other) { return self > other; },
         nb::arg("other"))
       .def(
+        "__gt__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self > real_number_or_complex_not_ordered(other);
+        },
+        nb::arg("other"))
+      .def(
         "__ge__",
         [](const BlockBackend::Block& self, const BlockBackend::Block& other) {
             return self >= other;
@@ -559,6 +747,12 @@ bind_block_backend(nb::module_& m)
       .def(
         "__ge__",
         [](const BlockBackend::Block& self, float64 other) { return self >= other; },
+        nb::arg("other"))
+      .def(
+        "__ge__",
+        [](const BlockBackend::Block& self, py::object other) {
+            return self >= real_number_or_complex_not_ordered(other);
+        },
         nb::arg("other"))
       .def(
         "__eq__",
@@ -716,6 +910,15 @@ bind_block_backend(nb::module_& m)
            nb::overload_cast<const BlockBackend::Scalar&>(&BlockBackend::as_scalar),
            nb::arg("value"),
            "Return a Scalar unchanged.")
+      .def(
+        "as_scalar",
+        [](BlockBackend& self, py::object value) {
+            return as_scalar_from_zero_dim_number_or_next_overload(self, value);
+        },
+        nb::arg("value"),
+        "Convert a numpy scalar, or a 0-d numpy array or torch tensor, to a scalar block. "
+        "The dtype of the scalar block is determined by the dtype kind (bool, int, float, "
+        "complex), as for ``value.item()``.")
       .def("abs",
            &BlockBackend::abs,
            nb::arg("a"),
@@ -941,6 +1144,13 @@ bind_block_backend(nb::module_& m)
            nb::overload_cast<complex128, const BlockCPtr&>(&BlockBackend::mul),
            nb::arg("a"),
            nb::arg("b"))
+      .def(
+        "mul",
+        [](BlockBackend& self, py::object a, const BlockCPtr& b) {
+            return self.mul(complex_like_or_next_overload(a), b);
+        },
+        nb::arg("a"),
+        nb::arg("b"))
       .def("norm",
            &BlockBackend::norm,
            nb::arg("a"),

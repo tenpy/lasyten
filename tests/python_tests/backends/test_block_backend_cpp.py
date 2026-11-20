@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import operator
+
 import numpy as np
 import pytest
+import torch
 
 from lasyten._core import Dtype, NumpyBlockBackend
+from lasyten.backends import get_backend
 from lasyten.config import get_option, temporary_options
 
 
@@ -226,3 +230,146 @@ def test_numpy_block_backend_argmin():
     arr = np.array([[3.0, 1.0, 4.0], [1.0, -2.0, 0.0]])
     block = be.as_block(arr)
     assert tuple(be.argmin(block)) == tuple(np.unravel_index(np.argmin(arr), arr.shape))
+
+
+# numpy scalars and 0-d torch tensors as numbers, see tenpy/lasyten#330. ``np.complex128.__float__`` drops the imaginary
+# part and only emits a ComplexWarning. pytest turns that warning into an error, which makes nanobind skip the lossy
+# float64 overload, so the result is correct under pytest, but not for users with the default warning filters. So we
+# ignore this particular warning here, i.e. the tests check the behaviour under the default filters.
+# All of them are treated like the Python number ``x.item()``; for ``np.bool_`` and torch bool that is a ``bool``.
+numpy_complex_cast_warning_is_ignored = pytest.mark.filterwarnings(
+    'ignore:Casting complex values to real discards the imaginary part:numpy.exceptions.ComplexWarning'
+)
+numpy_and_torch_real_numbers = [
+    pytest.param(np.float64(1.5), id='np_float64'),
+    pytest.param(np.float32(1.5), id='np_float32'),
+    pytest.param(np.int64(-4), id='np_int64'),
+    pytest.param(np.longdouble(1.5), id='np_longdouble'),
+    pytest.param(torch.tensor(1.5, dtype=torch.float64), id='torch_float64'),
+    pytest.param(torch.tensor(1.5, dtype=torch.float32), id='torch_float32'),
+    pytest.param(torch.tensor(-4), id='torch_int64'),
+]
+numpy_and_torch_bool_numbers = [
+    pytest.param(np.True_, id='np_bool'),
+    pytest.param(torch.tensor(True), id='torch_bool'),
+]
+numpy_and_torch_complex_numbers = [
+    pytest.param(np.complex128(2.0 + 3.0j), id='np_complex128'),
+    pytest.param(np.complex64(2.0 + 3.0j), id='np_complex64'),
+    pytest.param(np.clongdouble(2.0 + 3.0j), id='np_clongdouble'),
+    pytest.param(torch.tensor(2.0 + 3.0j, dtype=torch.complex128), id='torch_complex128'),
+    pytest.param(torch.tensor(2.0 + 3.0j, dtype=torch.complex64), id='torch_complex64'),
+]
+numpy_and_torch_numbers = pytest.mark.parametrize(
+    'number', numpy_and_torch_complex_numbers + numpy_and_torch_real_numbers + numpy_and_torch_bool_numbers
+)
+
+
+@numpy_complex_cast_warning_is_ignored
+@numpy_and_torch_numbers
+@pytest.mark.parametrize('value', [2.5, 1.25 + 0.5j], ids=['real', 'complex'])
+@pytest.mark.parametrize(
+    'op',
+    [
+        pytest.param(lambda a, s: s + a, id='add'),
+        pytest.param(lambda a, s: s - a, id='sub'),
+        pytest.param(lambda a, s: s / a, id='truediv'),
+        pytest.param(lambda a, s: s**a, id='pow'),
+    ],
+)
+def test_scalar_arithmetic_numpy_number(op, number, value, block_backend):
+    # numpy scalar as the right operand. ``s * a`` is not tested: ``Scalar.__mul__`` returns NotImplemented for it, and
+    # numpy then tries to convert the Scalar itself (which raises while implicit_scalar_conversion is disabled).
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    s = bb.as_scalar(value)
+    expect = op(number.item(), s)  # the same with a Python number
+    res = op(number, s)
+    assert res.dtype == expect.dtype
+    assert complex(res.to_numpy()) == pytest.approx(complex(expect.to_numpy()))
+
+
+@numpy_complex_cast_warning_is_ignored
+@numpy_and_torch_numbers
+@pytest.mark.parametrize(
+    'op',
+    [
+        pytest.param(lambda a, b: b * a, id='mul'),
+        pytest.param(lambda a, b: a * b, id='rmul'),
+        pytest.param(lambda a, b: b / a, id='truediv'),
+        pytest.param(lambda a, b: b**a, id='pow'),
+    ],
+)
+def test_block_arithmetic_numpy_number(op, number, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    block = bb.as_block(np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]))
+    expect = op(number.item(), block)  # the same with a Python number
+    res = op(number, block)
+    assert res.dtype == expect.dtype
+    np.testing.assert_allclose(bb.to_numpy(res), bb.to_numpy(expect))
+
+
+@numpy_complex_cast_warning_is_ignored
+@numpy_and_torch_numbers
+def test_block_backend_mul_numpy_number(number, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    block = bb.as_block(np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]))
+    expect = bb.mul(number.item(), block)  # the same with a Python number
+    res = bb.mul(number, block)
+    assert res.dtype == expect.dtype
+    np.testing.assert_allclose(bb.to_numpy(res), bb.to_numpy(expect))
+
+
+# Ordering comparisons with a complex number used to compare the real part for numpy complex scalars (only a
+# ComplexWarning, hidden under pytest), see tenpy/lasyten#330. Complex numbers cannot be ordered: TypeError.
+ordering_comparisons = pytest.mark.parametrize(
+    'op',
+    [
+        pytest.param(operator.lt, id='lt'),
+        pytest.param(operator.le, id='le'),
+        pytest.param(operator.gt, id='gt'),
+        pytest.param(operator.ge, id='ge'),
+    ],
+)
+
+
+@pytest.mark.parametrize(
+    'number',
+    [
+        *numpy_and_torch_complex_numbers,
+        pytest.param(np.array(2.0 + 3.0j), id='np_0d_array'),
+        pytest.param(2.0 + 3.0j, id='python_complex'),
+    ],
+)
+@pytest.mark.parametrize(
+    'make_left',
+    [
+        pytest.param(lambda bb: bb.as_scalar(2.5), id='scalar'),
+        pytest.param(lambda bb: bb.as_block(np.array([1.0, 2.5, 4.0])), id='block'),
+    ],
+)
+@ordering_comparisons
+def test_comparison_complex_number(op, make_left, number, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    with pytest.raises(TypeError, match='complex numbers cannot be ordered'):
+        op(make_left(bb), number)
+
+
+@pytest.mark.parametrize('number', numpy_and_torch_real_numbers + numpy_and_torch_bool_numbers)
+@ordering_comparisons
+def test_scalar_comparison_real_number(op, number, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    s = bb.as_scalar(1.5)
+    expect = op(s, number.item())  # the same with a Python number
+    res = op(s, number)
+    assert res.dtype == expect.dtype
+    assert res.as_bool() == expect.as_bool()
+
+
+@pytest.mark.parametrize('number', numpy_and_torch_real_numbers + numpy_and_torch_bool_numbers)
+@ordering_comparisons
+def test_block_comparison_real_number(op, number, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    block = bb.as_block(np.array([-5.0, -4.0, 1.0, 1.5, 4.0]))
+    expect = op(block, number.item())  # the same with a Python number
+    res = op(block, number)
+    np.testing.assert_array_equal(bb.to_numpy(res), bb.to_numpy(expect))

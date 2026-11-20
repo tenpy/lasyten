@@ -1,0 +1,13 @@
+- Fix numpy complex scalars (``np.complex128``, ``np.complex64``) losing their imaginary part under Python's default
+  warning filters in :func:`lasyten.tensors.scalar_multiply`, the arithmetic of tensors, ``Scalar`` and ``Block`` with a
+  number, and ``BlockBackend.as_scalar`` (a regression since the switch to nanobind, tenpy/lasyten#325). pytest turns
+  the ComplexWarning into an error, which hid the bug from the test suite. Addresses https://github.com/tenpy/lasyten/issues/330.
+- ``BlockBackend.as_scalar`` determines the dtype of a numpy scalar, of a 0-d numpy array or of a 0-d torch tensor by the
+  kind of its dtype, i.e. as for ``x.item()``. In particular, ``np.bool_`` and a torch bool tensor now give a ``bool``
+  scalar (before: ``float64`` or ``int64``). These numbers are now accepted wherever a Python number is: in
+  :func:`lasyten.tensors.scalar_multiply`, :func:`lasyten.tensors.linear_combination`, ``T * x``, ``T / x``, the
+  arithmetic of ``DiagonalTensor`` and ``Mask``, and the elementwise functions such as :func:`lasyten.tensors.real`
+  (before: ``TypeError`` for ``np.bool_``, 0-d torch tensors and 0-d numpy arrays). Addresses tenpy/lasyten#330.
+- The ordering comparisons ``<``, ``<=``, ``>`` and ``>=`` of ``Scalar`` and ``Block`` with a complex number (Python
+  ``complex``, numpy or torch) raise a ``TypeError``, since complex numbers cannot be ordered. Numpy complex scalars used
+  to compare the real part and only warn. Addresses tenpy/lasyten#330.
