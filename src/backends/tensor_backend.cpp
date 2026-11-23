@@ -415,7 +415,8 @@ conventional_leg_order(py::object tensor_or_codomain, py::object domain)
         codomain_ptr = py::cast<TensorProduct::Ptr>(tensor_or_codomain.attr("codomain"));
         domain_ptr = py::cast<TensorProduct::Ptr>(tensor_or_codomain.attr("domain"));
     } else {
-        codomain_ptr = py::cast<TensorProduct::Ptr>(tensor_or_codomain);
+        codomain_ptr =
+          py::cast_non_null<TensorProduct::Ptr>(tensor_or_codomain, "tensor_or_codomain");
         domain_ptr = py::cast<TensorProduct::Ptr>(domain);
     }
     return conventional_leg_order(codomain_ptr, domain_ptr);

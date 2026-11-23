@@ -28,7 +28,7 @@ flatten_factors_from_python(py::sequence seq)
             auto const& sym = py::cast<Symmetry const&>(item);
             out.insert(out.end(), sym.factors.begin(), sym.factors.end());
         } else {
-            out.push_back(py::cast<SymmetryFactor::Ptr>(item));
+            out.push_back(py::cast_non_null<SymmetryFactor::Ptr>(item, "elements of factors"));
         }
     }
     return out;

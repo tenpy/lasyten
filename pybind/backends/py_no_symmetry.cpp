@@ -56,7 +56,7 @@ py_data(py::object obj)
 {
     if (py::isinstance<TensorBackend::Data>(obj))
         return py::cast<TensorBackend::DataPtr>(obj);
-    return NoSymmetryBackend::wrap(py::cast<BlockBackend::BlockPtr>(obj));
+    return NoSymmetryBackend::wrap(py::cast_non_null<BlockBackend::BlockPtr>(obj, "block"));
 }
 
 } // namespace

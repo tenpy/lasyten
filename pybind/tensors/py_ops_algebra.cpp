@@ -147,7 +147,7 @@ In Python, ``relabel1`` / ``relabel2`` are ``dict | None`` (``None`` = no relabe
           std::vector<TensorCPtr> vec;
           vec.reserve(static_cast<std::size_t>(tensors.size()));
           for (auto item : tensors) {
-              vec.push_back(py::cast<TensorCPtr>(item));
+              vec.push_back(py::cast_non_null<TensorCPtr>(item, "tensors"));
           }
           return get_same_device(vec, std::move(error_msg));
       },

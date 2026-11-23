@@ -69,7 +69,7 @@ set_dofs_from_dict(Site& self, py::dict const& mapping)
     self.dofs.clear();
     for (auto item : mapping) {
         auto name = py::cast<std::string>(item.first);
-        self.set_dof(name, py::cast<DegreeOfFreedom::Ptr>(item.second));
+        self.set_dof(name, py::cast_non_null<DegreeOfFreedom::Ptr>(item.second, "values of dofs"));
     }
 }
 
@@ -568,7 +568,7 @@ bind_models_degrees_of_freedom(nb::module_& m)
           std::vector<Site::Ptr> sites;
           sites.reserve(static_cast<std::size_t>(py::len(sites_obj)));
           for (py::handle item : sites_obj) {
-              sites.push_back(py::cast<Site::Ptr>(item));
+              sites.push_back(py::cast_non_null<Site::Ptr>(item, "elements of sites"));
           }
           Symmetry::Ptr new_symmetry;
           if (!new_symmetry_obj.is_none()) {

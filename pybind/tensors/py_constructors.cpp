@@ -131,7 +131,7 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
           if (!label.is_none()) {
               label_opt = py::cast<std::string>(label);
           }
-          return add_trivial_leg(py::cast<TensorCPtr>(tens),
+          return add_trivial_leg(py::cast_non_null<TensorCPtr>(tens, "tens"),
                                  legs_pos_opt,
                                  codomain_pos_opt,
                                  domain_pos_opt,
@@ -149,7 +149,7 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
 
     m.def(
       "zero_like",
-      [](py::object tensor) { return zero_like(py::cast<TensorCPtr>(tensor)); },
+      [](py::object tensor) { return zero_like(py::cast_non_null<TensorCPtr>(tensor, "tensor")); },
       nb::arg("tensor"),
       DOC(lasyten, zero_like));
 
@@ -231,7 +231,7 @@ In Python, ``grid`` is ``list[list[SymmetricTensor | None]]`` (``None`` = zero c
                   col_ref = py::cast<int64>(col_leg);
               }
           }
-          return tensor_grid_cell(py::cast<TensorCPtr>(tensor),
+          return tensor_grid_cell(py::cast_non_null<TensorCPtr>(tensor, "tensor"),
                                   as_summand_ref(row),
                                   as_summand_ref(col),
                                   row_ref,
@@ -275,7 +275,7 @@ In Python, ``row`` / ``col`` accept ``int | str`` (a summand label, resolved via
               }
               return py::cast<int64>(obj);
           };
-          return tensor_subgrid(py::cast<TensorCPtr>(tensor),
+          return tensor_subgrid(py::cast_non_null<TensorCPtr>(tensor, "tensor"),
                                 as_summand_refs(rows),
                                 as_summand_refs(cols),
                                 as_leg_ref(row_leg, 0),
@@ -316,8 +316,10 @@ In Python, ``rows`` / ``cols`` are sequences of ``int | str`` (summand labels).
           for (auto item : py::reinterpret_borrow<py::iterable>(cells)) {
               cell_refs.push_back(as_summand_ref(item));
           }
-          return grid_project(
-            py::cast<TensorCPtr>(tensor), std::move(leg_refs), std::move(cell_refs), squeeze);
+          return grid_project(py::cast_non_null<TensorCPtr>(tensor, "tensor"),
+                              std::move(leg_refs),
+                              std::move(cell_refs),
+                              squeeze);
       },
       nb::arg("tensor"),
       nb::arg("legs"),

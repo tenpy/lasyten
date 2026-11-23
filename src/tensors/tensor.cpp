@@ -326,7 +326,7 @@ tensor_product_from_python(py::object obj, Symmetry::Ptr symmetry)
     }
     std::vector<Leg::Ptr> factors;
     for (auto item : obj) {
-        factors.push_back(py::cast<Leg::Ptr>(item));
+        factors.push_back(py::cast_non_null<Leg::Ptr>(item, "elements of codomain or domain"));
     }
     return std::make_shared<TensorProduct>(std::move(factors), std::move(symmetry));
 }

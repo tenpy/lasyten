@@ -10,6 +10,7 @@ import torch
 
 from lasyten._core import Dtype, NumpyBlockBackend
 from lasyten.backends import get_backend
+from lasyten.block_backends import Scalar
 from lasyten.config import get_option, temporary_options
 
 
@@ -288,6 +289,97 @@ def test_scalar_arithmetic_numpy_number(op, number, value, block_backend):
     assert complex(res.to_numpy()) == pytest.approx(complex(expect.to_numpy()))
 
 
+# Binary operators between a numpy scalar and a Scalar, see tenpy/lasyten#334. These tests pin the current behaviour;
+# whether it is the intended one is discussed in tenpy/lasyten#337.
+# * ``x op S`` (numpy scalar on the left): numpy handles the operator first and converts the Scalar to a number (this is
+#   what ``implicit_scalar_conversion`` is for), so the result is a numpy scalar; with the option off, that is a TypeError.
+# * ``S op x``: ``Scalar.__add__``, ``__sub__`` and ``__truediv__`` accept the numpy scalar and return a Scalar, while
+#   ``Scalar.__mul__`` returns ``NotImplemented``, such that numpy computes the result again. ``==`` and ``!=`` are also
+#   computed by numpy; ``<`` returns a Scalar with dtype bool, and complex numbers can not be ordered.
+numpy_scalars_for_scalar_operators = [
+    p
+    for p in numpy_and_torch_real_numbers + numpy_and_torch_bool_numbers + numpy_and_torch_complex_numbers
+    if p.id in ['np_float64', 'np_float32', 'np_int64', 'np_bool', 'np_complex128', 'np_complex64']
+]
+implicit_conversion_disabled = 'Implicit conversion of Scalar to numpy is disabled'
+
+
+@numpy_complex_cast_warning_is_ignored
+@pytest.mark.parametrize('implicit', [True, False], ids=['implicit_on', 'implicit_off'])
+@pytest.mark.parametrize('order', ['x op S', 'S op x'])
+@pytest.mark.parametrize(
+    'op_name, op',
+    [
+        pytest.param('add', operator.add, id='add'),
+        pytest.param('sub', operator.sub, id='sub'),
+        pytest.param('mul', operator.mul, id='mul'),
+        pytest.param('truediv', operator.truediv, id='truediv'),
+        pytest.param('eq', operator.eq, id='eq'),
+        pytest.param('ne', operator.ne, id='ne'),
+        pytest.param('lt', operator.lt, id='lt'),
+    ],
+)
+@pytest.mark.parametrize('value', [2.5, 1.25 + 0.5j], ids=['real', 'complex'])
+@pytest.mark.parametrize('number', numpy_scalars_for_scalar_operators)
+def test_scalar_operator_numpy_scalar(number, value, op_name, op, order, implicit, block_backend, request):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    s = bb.as_scalar(value)
+    is_complex = isinstance(value, complex) or np.iscomplexobj(number)
+    numpy_number_type = np.complex128 if is_complex else np.float64
+
+    # (expected result type, expected error message) of the current behaviour
+    error = None
+    if order == 'x op S':
+        if not implicit:
+            error = implicit_conversion_disabled
+        expect_type = np.bool_ if op_name in ['eq', 'ne', 'lt'] else numpy_number_type
+    elif op_name in ['add', 'sub', 'truediv']:
+        expect_type = Scalar
+    elif op_name in ['mul', 'eq', 'ne']:
+        if not implicit:
+            error = implicit_conversion_disabled
+        expect_type = np.bool_ if op_name in ['eq', 'ne'] else numpy_number_type
+    else:  # S < x
+        expect_type = Scalar
+        if np.iscomplexobj(number):
+            error = 'complex numbers cannot be ordered'
+        elif isinstance(value, complex) and block_backend == 'torch':
+            request.applymarker(
+                pytest.mark.xfail(
+                    strict=True,
+                    raises=RuntimeError,
+                    reason='Ordering a complex Scalar with a real number raises on torch only, '
+                    'while numpy and eigen compare the real part. See tenpy/lasyten#337.',
+                )
+            )
+
+    with temporary_options(implicit_scalar_conversion=implicit):
+        if error is not None:
+            with pytest.raises(TypeError, match=error):
+                op(number, s) if order == 'x op S' else op(s, number)
+            return
+        res = op(number, s) if order == 'x op S' else op(s, number)
+
+    py_number = number.item()
+    if op_name == 'lt':
+        # numpy orders complex numbers lexicographically, but ``S < x`` compares the real part of a complex Scalar
+        expect = op(number, np.complex128(value)) if order == 'x op S' else op(value.real, py_number)
+    else:
+        expect = op(py_number, value) if order == 'x op S' else op(value, py_number)
+    assert isinstance(res, expect_type)
+    if expect_type is Scalar:
+        if op_name == 'lt':
+            assert res.dtype == Dtype.bool
+            assert res.as_bool() == expect
+        else:
+            assert res.dtype == (Dtype.complex128 if is_complex else Dtype.float64)
+            assert complex(res.to_numpy()) == pytest.approx(expect)
+    elif expect_type is np.bool_:
+        assert bool(res) == expect
+    else:
+        assert res == pytest.approx(expect)
+
+
 @numpy_complex_cast_warning_is_ignored
 @numpy_and_torch_numbers
 @pytest.mark.parametrize(
@@ -373,3 +465,50 @@ def test_block_comparison_real_number(op, number, block_backend):
     expect = op(block, number.item())  # the same with a Python number
     res = op(block, number)
     np.testing.assert_array_equal(bb.to_numpy(res), bb.to_numpy(expect))
+
+
+# ``None`` for a Block argument is intended to be rejected with a TypeError, either by the call dispatcher or by Python
+# for the reflected operators. It used to reach C++ as an empty pointer and crash the interpreter, see tenpy/lasyten#334.
+none_rejected = r'incompatible function arguments|unsupported operand'
+
+
+@pytest.mark.parametrize(
+    'op',
+    [
+        pytest.param(lambda b: b + None, id='add'),
+        pytest.param(lambda b: b - None, id='sub'),
+        pytest.param(lambda b: b * None, id='mul'),
+        pytest.param(lambda b: b / None, id='truediv'),
+        pytest.param(lambda b: None + b, id='radd'),
+        pytest.param(lambda b: None - b, id='rsub'),
+        pytest.param(lambda b: None * b, id='rmul'),
+        pytest.param(lambda b: None / b, id='rtruediv'),
+    ],
+)
+def test_block_operator_rejects_none(op, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    block = bb.as_block(np.array([[1.0, 2.0], [3.0, 4.0]]))
+    with pytest.raises(TypeError, match=none_rejected):
+        op(block)
+
+
+@pytest.mark.parametrize(
+    'call',
+    [
+        pytest.param(lambda bb, block: bb.dagger(None), id='dagger'),
+        pytest.param(lambda bb, block: bb.get_shape(None), id='get_shape'),
+        pytest.param(lambda bb, block: bb.get_dtype(None), id='get_dtype'),
+        pytest.param(lambda bb, block: bb.get_device(None), id='get_device'),
+        pytest.param(lambda bb, block: bb.is_real(None), id='is_real'),
+        pytest.param(lambda bb, block: bb.to_numpy(None), id='to_numpy'),
+        pytest.param(lambda bb, block: bb.eigvals(None), id='eigvals'),
+        pytest.param(lambda bb, block: bb.inner(None, block), id='inner-first'),
+        pytest.param(lambda bb, block: bb.inner(block, None), id='inner-second'),
+        pytest.param(lambda bb, block: bb.combine_legs(None, [[0, 1]], [True]), id='combine_legs'),
+    ],
+)
+def test_block_backend_method_rejects_none(call, block_backend):
+    bb = get_backend('no_symmetry', block_backend).block_backend
+    block = bb.as_block(np.array([[1.0, 2.0], [3.0, 4.0]]))
+    with pytest.raises(TypeError, match='incompatible function arguments'):
+        call(bb, block)

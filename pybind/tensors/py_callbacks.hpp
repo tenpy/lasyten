@@ -95,7 +95,8 @@ inline SectorBlockFactoryFn
 sector_block_factory_from_python(py::function func)
 {
     return [func](std::vector<int64> const& shape, Sector const& coupled) {
-        return py::cast<BlockBackend::BlockPtr>(func(shape_as_tuple(shape), py::cast(coupled)));
+        return py::cast_non_null<BlockBackend::BlockPtr>(
+          func(shape_as_tuple(shape), py::cast(coupled)), "the return value of func");
     };
 }
 
@@ -104,7 +105,8 @@ block_unary_from_python(py::function func, py::object func_kwargs = py::none())
 {
     py::dict kwargs = copy_kwargs(func_kwargs);
     return [func, kwargs](BlockBackend::BlockPtr const& block) {
-        return py::cast<BlockBackend::BlockPtr>(func(py::cast(block), **kwargs));
+        return py::cast_non_null<BlockBackend::BlockPtr>(func(py::cast(block), **kwargs),
+                                                         "the return value of func");
     };
 }
 
@@ -113,7 +115,8 @@ block_binary_from_python(py::function func, py::object func_kwargs = py::none())
 {
     py::dict kwargs = copy_kwargs(func_kwargs);
     return [func, kwargs](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
-        return py::cast<BlockBackend::BlockPtr>(func(py::cast(a), py::cast(b), **kwargs));
+        return py::cast_non_null<BlockBackend::BlockPtr>(func(py::cast(a), py::cast(b), **kwargs),
+                                                         "the return value of func");
     };
 }
 
