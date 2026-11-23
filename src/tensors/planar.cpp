@@ -1753,7 +1753,9 @@ PlanarLinearOperator::to_tensor(TensorBackend::Ptr)
     if (std::holds_alternative<BlockBackend::Scalar>(res)) {
         throw std::runtime_error("PlanarLinearOperator.to_tensor unexpectedly returned a scalar");
     }
-    return std::get<TensorPtr>(std::move(res));
+    auto tensor = std::get<TensorPtr>(std::move(res));
+    auto const& vec_labels = matvec_diagram.tensors.at(vec_name).string_labels();
+    return planar_permute_legs(tensor, as_leg_refs(vec_labels));
 }
 
 std::tuple<TensorPtr, TensorPtr>

@@ -1505,8 +1505,6 @@ def test_PlanarLinearOperator(symmetry, np_random):
 
     op = H.to_tensor()
     op.test_sanity()
-    # get to the correct cyclic permutation
-    op = lasy.planar.planar_permute_legs(op, codomain=['vL', 'p0', 'p1', 'vR'])
     assert op.codomain_labels == ['vL', 'p0', 'p1', 'vR']
     assert op.domain_labels == ['vL*', 'p0*', 'p1*', 'vR*']
 
@@ -1536,7 +1534,7 @@ def test_PlanarLinearOperator(symmetry, np_random):
     op_1 = lasy.planar.planar_permute_legs(op_1, codomain=['vL', 'p0', 'p1', 'vR'])
     assert lasy.almost_equal(op_1, op)
 
-    H_theta_1 = lasy.compose(op_1, theta)
+    H_theta_1 = lasy.compose(op, theta)
     assert lasy.almost_equal(H_theta_1, H_theta)
 
     # ===========================================

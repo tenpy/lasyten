@@ -1,0 +1,3 @@
+* Make ``PlanarLinearOperator.to_tensor()`` order its codomain legs to match the vector input
+  legs used by ``matvec``, allowing the materialized operator to be composed directly with that
+  vector.
