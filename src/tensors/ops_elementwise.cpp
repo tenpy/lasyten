@@ -165,6 +165,82 @@ stable_log(BlockBackend::Scalar const& x, float64 cutoff)
     return scalar_backend(x)->as_scalar(0.0);
 }
 
+DiagonalTensorPtr
+minimum(DiagonalTensorCPtr x, DiagonalTensorCPtr y)
+{
+    auto bb = x->backend->block_backend;
+    auto mut = std::const_pointer_cast<DiagonalTensor>(x);
+    return mut->_elementwise_binary(
+      y, [bb](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
+          return bb->minimum_blocks(a, b);
+      });
+}
+
+DiagonalTensorPtr
+minimum(DiagonalTensorCPtr x, BlockBackend::Scalar const& y)
+{
+    auto bb = x->backend->block_backend;
+    auto mut = std::const_pointer_cast<DiagonalTensor>(x);
+    return mut->_binary_operand(
+      y,
+      [bb](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
+          return bb->minimum_blocks(a, b);
+      },
+      "minimum");
+}
+
+DiagonalTensorPtr
+minimum(BlockBackend::Scalar const& x, DiagonalTensorCPtr y)
+{
+    auto bb = y->backend->block_backend;
+    auto mut = std::const_pointer_cast<DiagonalTensor>(y);
+    return mut->_binary_operand(
+      x,
+      [bb](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
+          return bb->minimum_blocks(a, b);
+      },
+      "minimum",
+      true);
+}
+
+DiagonalTensorPtr
+maximum(DiagonalTensorCPtr x, DiagonalTensorCPtr y)
+{
+    auto bb = x->backend->block_backend;
+    auto mut = std::const_pointer_cast<DiagonalTensor>(x);
+    return mut->_elementwise_binary(
+      y, [bb](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
+          return bb->maximum_blocks(a, b);
+      });
+}
+
+DiagonalTensorPtr
+maximum(DiagonalTensorCPtr x, BlockBackend::Scalar const& y)
+{
+    auto bb = x->backend->block_backend;
+    auto mut = std::const_pointer_cast<DiagonalTensor>(x);
+    return mut->_binary_operand(
+      y,
+      [bb](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
+          return bb->maximum_blocks(a, b);
+      },
+      "maximum");
+}
+
+DiagonalTensorPtr
+maximum(BlockBackend::Scalar const& x, DiagonalTensorCPtr y)
+{
+    auto bb = y->backend->block_backend;
+    auto mut = std::const_pointer_cast<DiagonalTensor>(y);
+    return mut->_binary_operand(
+      x,
+      [bb](BlockBackend::BlockPtr const& a, BlockBackend::BlockPtr const& b) {
+          return bb->maximum_blocks(a, b);
+      },
+      "maximum",
+      true);
+}
+
 TensorPtr
 exp(TensorCPtr obj)
 {

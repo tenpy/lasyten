@@ -263,6 +263,8 @@ class EigenBlockBackend : public BlockBackend
     BlockPtr sum(const BlockCPtr& a, int64 ax) override;
     Scalar sum_all(const BlockCPtr& a) override;
     BlockPtr multiply_blocks(const BlockCPtr& a, const BlockCPtr& b) override;
+    BlockPtr minimum_blocks(const BlockCPtr& a, const BlockCPtr& b) override;
+    BlockPtr maximum_blocks(const BlockCPtr& a, const BlockCPtr& b) override;
     BlockPtr tdot(const BlockCPtr& a,
                   const BlockCPtr& b,
                   const std::vector<int64>& idcs_a,

@@ -579,6 +579,45 @@ arith(const Blk& a, const Blk& b, BinOp op)
     return res;
 }
 
+template<class T>
+bool
+has_nan(const T& value)
+{
+    if constexpr (is_cplx_v<T>)
+        return std::isnan(value.real()) || std::isnan(value.imag());
+    else if constexpr (std::is_floating_point_v<T>)
+        return std::isnan(value);
+    else
+        return false;
+}
+
+enum class MinMaxOp
+{
+    Minimum,
+    Maximum
+};
+
+BPtr
+minmax(const Blk& a, const Blk& b, MinMaxOp op)
+{
+    Dtype P = dtype::common({ a.dtype(), b.dtype() });
+    CBPtr ca = as_dtype(a, P);
+    CBPtr cb = as_dtype(b, P);
+    BPtr res;
+    visit_dtype(P, [&](auto tag) {
+        using T = decltype(tag);
+        res = map_binary<T, T>(*ca, *cb, P, [op](T x, T y) {
+            if (has_nan(x))
+                return x;
+            if (has_nan(y))
+                return y;
+            bool const take_left = op == MinMaxOp::Minimum ? less_than(x, y) : less_than(y, x);
+            return take_left ? x : y;
+        });
+    });
+    return res;
+}
+
 enum class CmpOp
 {
     Lt,
@@ -2666,6 +2705,18 @@ BlockPtr
 EigenBlockBackend::multiply_blocks(const BlockCPtr& a, const BlockCPtr& b)
 {
     return arith(eb_ref(a), eb_ref(b), BinOp::Mul);
+}
+
+BlockPtr
+EigenBlockBackend::minimum_blocks(const BlockCPtr& a, const BlockCPtr& b)
+{
+    return minmax(eb_ref(a), eb_ref(b), MinMaxOp::Minimum);
+}
+
+BlockPtr
+EigenBlockBackend::maximum_blocks(const BlockCPtr& a, const BlockCPtr& b)
+{
+    return minmax(eb_ref(a), eb_ref(b), MinMaxOp::Maximum);
 }
 
 BlockPtr

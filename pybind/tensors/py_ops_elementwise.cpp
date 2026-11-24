@@ -50,6 +50,47 @@ dispatch_elementwise(py::object x, TensorFn tensor_fn, ScalarPyFn scalar_py_fn)
     throw_elementwise_type_error(x);
 }
 
+template<typename TensorTensorFn, typename TensorScalarFn, typename ScalarTensorFn>
+py::object
+dispatch_pairwise(py::object x,
+                  py::object y,
+                  char const* numpy_func,
+                  TensorTensorFn tensor_tensor_fn,
+                  TensorScalarFn tensor_scalar_fn,
+                  ScalarTensorFn scalar_tensor_fn)
+{
+    x = py_number_as_builtin(x);
+    y = py_number_as_builtin(y);
+    bool const x_is_tensor = py::isinstance<DiagonalTensor>(x);
+    bool const y_is_tensor = py::isinstance<DiagonalTensor>(y);
+    if (x_is_tensor && y_is_tensor) {
+        return py::cast(
+          tensor_tensor_fn(py::cast<DiagonalTensorCPtr>(x), py::cast<DiagonalTensorCPtr>(y)));
+    }
+    if (x_is_tensor && is_number_or_scalar(y)) {
+        auto tensor = py::cast<DiagonalTensorCPtr>(x);
+        auto bb = tensor->backend->block_backend;
+        BlockBackend::Scalar scalar =
+          py::isinstance<BlockBackend::Scalar>(y)
+            ? bb->as_scalar(py::cast<BlockBackend::Scalar>(y))
+            : BlockBackend::Scalar(bb->as_block(y, std::nullopt, std::nullopt));
+        return py::cast(tensor_scalar_fn(tensor, scalar));
+    }
+    if (y_is_tensor && is_number_or_scalar(x)) {
+        auto tensor = py::cast<DiagonalTensorCPtr>(y);
+        auto bb = tensor->backend->block_backend;
+        BlockBackend::Scalar scalar =
+          py::isinstance<BlockBackend::Scalar>(x)
+            ? bb->as_scalar(py::cast<BlockBackend::Scalar>(x))
+            : BlockBackend::Scalar(bb->as_block(x, std::nullopt, std::nullopt));
+        return py::cast(scalar_tensor_fn(scalar, tensor));
+    }
+    if (x_is_tensor || y_is_tensor) {
+        throw_elementwise_type_error(x_is_tensor ? y : x);
+    }
+    return numpy().attr(numpy_func)(x, y);
+}
+
 } // namespace
 
 void
@@ -185,6 +226,42 @@ In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
       doc_plus(DOC(lasyten, stable_log),
                R"pydoc(
 In Python, ``x`` may also be a number / :class:`~lasyten.block_backends.Scalar`.
+)pydoc"));
+
+    m.def(
+      "minimum",
+      [](py::object x, py::object y) {
+          return dispatch_pairwise(
+            x,
+            y,
+            "minimum",
+            [](DiagonalTensorCPtr a, DiagonalTensorCPtr b) { return minimum(a, b); },
+            [](DiagonalTensorCPtr a, BlockBackend::Scalar const& b) { return minimum(a, b); },
+            [](BlockBackend::Scalar const& a, DiagonalTensorCPtr b) { return minimum(a, b); });
+      },
+      nb::arg("x"),
+      nb::arg("y"),
+      doc_plus(DOC(lasyten, minimum),
+               R"pydoc(
+In Python, scalar and array inputs are forwarded to ``numpy.minimum``.
+)pydoc"));
+
+    m.def(
+      "maximum",
+      [](py::object x, py::object y) {
+          return dispatch_pairwise(
+            x,
+            y,
+            "maximum",
+            [](DiagonalTensorCPtr a, DiagonalTensorCPtr b) { return maximum(a, b); },
+            [](DiagonalTensorCPtr a, BlockBackend::Scalar const& b) { return maximum(a, b); },
+            [](BlockBackend::Scalar const& a, DiagonalTensorCPtr b) { return maximum(a, b); });
+      },
+      nb::arg("x"),
+      nb::arg("y"),
+      doc_plus(DOC(lasyten, maximum),
+               R"pydoc(
+In Python, scalar and array inputs are forwarded to ``numpy.maximum``.
 )pydoc"));
 
     m.def(

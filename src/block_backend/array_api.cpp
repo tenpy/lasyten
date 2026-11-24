@@ -1063,6 +1063,18 @@ ArrayApiBlockBackend::multiply_blocks(const BlockCPtr& a, const BlockCPtr& b)
 }
 
 BlockPtr
+ArrayApiBlockBackend::minimum_blocks(const BlockCPtr& a, const BlockCPtr& b)
+{
+    return wrap(api_.attr("minimum")(obj(a), obj(b)));
+}
+
+BlockPtr
+ArrayApiBlockBackend::maximum_blocks(const BlockCPtr& a, const BlockCPtr& b)
+{
+    return wrap(api_.attr("maximum")(obj(a), obj(b)));
+}
+
+BlockPtr
 ArrayApiBlockBackend::tdot(const BlockCPtr& a,
                            const BlockCPtr& b,
                            const std::vector<int64>& idcs_a,

@@ -1292,6 +1292,18 @@ TorchBlockBackend::multiply_blocks(const BlockCPtr& a, const BlockCPtr& b)
 }
 
 BlockPtr
+TorchBlockBackend::minimum_blocks(const BlockCPtr& a, const BlockCPtr& b)
+{
+    return wrap(torch::minimum(tens(a), tens(b)));
+}
+
+BlockPtr
+TorchBlockBackend::maximum_blocks(const BlockCPtr& a, const BlockCPtr& b)
+{
+    return wrap(torch::maximum(tens(a), tens(b)));
+}
+
+BlockPtr
 TorchBlockBackend::tdot(const BlockCPtr& a,
                         const BlockCPtr& b,
                         const std::vector<int64>& idcs_a,
