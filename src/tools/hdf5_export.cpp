@@ -695,27 +695,13 @@ save_tensor_backend_data(lasyten::hdf5::Saver& saver,
         return;
     }
     auto const* cls = tensor_backend_data_class_name(*data);
-    saver.save_instance(
-      path,
-      kModule,
-      cls,
-      data.get(),
-      [&](lasyten::hdf5::Saver& s, HighFive::Group& g, std::string const& sub) {
-#if LASYTEN_HAS_PYTHON
-          if (auto abd = std::dynamic_pointer_cast<AbelianBackendData const>(data)) {
-              abd->save_hdf5(s, g, sub);
-              return;
-          }
-          if (auto ftd = std::dynamic_pointer_cast<FusionTreeData const>(data)) {
-              ftd->save_hdf5(s, g, sub);
-              return;
-          }
-#endif
-          (void)s;
-          (void)g;
-          (void)sub;
-          throw std::runtime_error("hdf5_export: TensorBackend::Data without save_hdf5");
-      });
+    saver.save_instance(path,
+                        kModule,
+                        cls,
+                        data.get(),
+                        [&](lasyten::hdf5::Saver& s, HighFive::Group& g, std::string const& sub) {
+                            data->save_hdf5(s, g, sub);
+                        });
 }
 
 TensorBackend::DataPtr
@@ -730,6 +716,8 @@ load_tensor_backend_data(lasyten::hdf5::Loader& loader, std::string const& path)
           if (cls == "FusionTreeData")
               return FusionTreeData::from_hdf5(loader, g, sub);
 #endif
+          if (cls == "NoSymmetryBackend.BlockData")
+              return NoSymmetryBackend::BlockData::from_hdf5(loader, g, sub);
           (void)sub;
           throw std::runtime_error("hdf5_export: unknown TensorBackend::Data class " + cls);
       });

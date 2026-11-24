@@ -107,7 +107,7 @@ class HiddenLegTensor : public SymmetricTensor
     /// Export to hdf5
     void save_hdf5(lasyten::hdf5::Saver& saver,
                    HighFive::Group& h5gr,
-                   std::string const& subpath) const;
+                   std::string const& subpath) const override;
 
     /// Wrap `tensor` as `HiddenLegTensor` if it has hidden labels; otherwise return `tensor`.
     [[nodiscard]] static TensorPtr maybe_wrap(SymmetricTensor::Ptr tensor);
