@@ -1433,4 +1433,16 @@ NumpyBlockBackend::multiply_blocks(const BlockCPtr& a, const BlockCPtr& b)
     return wrap(obj(a) * obj(b));
 }
 
+BlockPtr
+NumpyBlockBackend::minimum_blocks(const BlockCPtr& a, const BlockCPtr& b)
+{
+    return wrap(np_attr("minimum")(obj(a), obj(b)));
+}
+
+BlockPtr
+NumpyBlockBackend::maximum_blocks(const BlockCPtr& a, const BlockCPtr& b)
+{
+    return wrap(np_attr("maximum")(obj(a), obj(b)));
+}
+
 } // namespace lasyten

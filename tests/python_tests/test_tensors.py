@@ -2268,6 +2268,34 @@ def test_DiagonalTensor_elementwise_binary(cls, op, dtype, make_compatible_tenso
 
 
 @pytest.mark.parametrize(
+    'lasyten_func, numpy_func',
+    [
+        pytest.param(tensors.minimum, np.minimum, id='minimum'),
+        pytest.param(tensors.maximum, np.maximum, id='maximum'),
+    ],
+)
+def test_DiagonalTensor_elementwise_minimum_maximum(lasyten_func, numpy_func, make_compatible_tensor):
+    t1: DiagonalTensor = make_compatible_tensor(cls=DiagonalTensor, dtype=Dtype.float64)
+    t2: DiagonalTensor = make_compatible_tensor(domain=t1.domain, cls=DiagonalTensor, dtype=Dtype.float64)
+    if not t1.symmetry.can_be_dropped:
+        return
+
+    x = t1.diagonal_as_numpy()
+    y = t2.diagonal_as_numpy()
+    scalar = 0.25
+    for left, right, expected in [
+        (t1, t2, numpy_func(x, y)),
+        (t1, scalar, numpy_func(x, scalar)),
+        (scalar, t1, numpy_func(scalar, x)),
+    ]:
+        result = lasyten_func(left, right)
+        result.test_sanity()
+        npt.assert_allclose(result.diagonal_as_numpy(), expected)
+
+    npt.assert_equal(lasyten_func(1, 2), numpy_func(1, 2))
+
+
+@pytest.mark.parametrize(
     'cls, dom, new_leg_dual',
     [
         pytest.param(SymmetricTensor, 1, False, id='Sym-1-False'),

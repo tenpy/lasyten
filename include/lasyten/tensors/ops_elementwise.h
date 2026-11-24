@@ -79,6 +79,16 @@ namespace lasyten {
 [[nodiscard]] BlockBackend::Scalar stable_log(BlockBackend::Scalar const& x,
                                               float64 cutoff = 1e-30);
 
+/// Elementwise minimum of two diagonal tensors or a diagonal tensor and scalar.
+[[nodiscard]] DiagonalTensorPtr minimum(DiagonalTensorCPtr x, DiagonalTensorCPtr y);
+[[nodiscard]] DiagonalTensorPtr minimum(DiagonalTensorCPtr x, BlockBackend::Scalar const& y);
+[[nodiscard]] DiagonalTensorPtr minimum(BlockBackend::Scalar const& x, DiagonalTensorCPtr y);
+
+/// Elementwise maximum of two diagonal tensors or a diagonal tensor and scalar.
+[[nodiscard]] DiagonalTensorPtr maximum(DiagonalTensorCPtr x, DiagonalTensorCPtr y);
+[[nodiscard]] DiagonalTensorPtr maximum(DiagonalTensorCPtr x, BlockBackend::Scalar const& y);
+[[nodiscard]] DiagonalTensorPtr maximum(BlockBackend::Scalar const& x, DiagonalTensorCPtr y);
+
 /// The exponential function.
 ///
 /// For a tensor, viewed as a linear map from its domain to its codomain, the exponential

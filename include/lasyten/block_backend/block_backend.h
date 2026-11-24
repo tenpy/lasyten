@@ -624,6 +624,9 @@ class BlockBackend
     /// If the block contains boolean values, this should return the number of ``True`` entries.
     virtual Scalar sum_all(const BlockCPtr& a) = 0;
     virtual BlockPtr multiply_blocks(const BlockCPtr& a, const BlockCPtr& b) = 0; // elementwise
+    /// Elementwise minimum/maximum with broadcasting.
+    virtual BlockPtr minimum_blocks(const BlockCPtr& a, const BlockCPtr& b) = 0;
+    virtual BlockPtr maximum_blocks(const BlockCPtr& a, const BlockCPtr& b) = 0;
     virtual BlockPtr tdot(const BlockCPtr& a,
                           const BlockCPtr& b,
                           const std::vector<int64>& idcs_a,

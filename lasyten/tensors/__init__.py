@@ -52,7 +52,6 @@ Consider now a matrix ``A`` with signature ``[V] -> [W]``, i.e. with legs ``[W, 
 The dagger ``dagger(A)`` has legs signature ``[W] -> [V]`` and legs ``[V, W.dual]``, i.e.
 it can be directly contracted with ``A``.
 
-
 .. _decompositions:
 
 Tensor Decompositions
@@ -106,6 +105,8 @@ from ._tensors import (
     item,
     linear_combination,
     lq,
+    maximum,
+    minimum,
     move_hidden_leg,
     move_leg,
     norm,
@@ -239,6 +240,8 @@ __all__ = [
     'lanczos_arpack',
     'linear_combination',
     'lq',
+    'maximum',
+    'minimum',
     'move_hidden_leg',
     'move_leg',
     'norm',
