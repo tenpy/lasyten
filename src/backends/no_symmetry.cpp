@@ -2,6 +2,7 @@
 #include <lasyten/tensors/diagonal_tensor.h>
 #include <lasyten/tensors/mask.h>
 #include <lasyten/tensors/symmetric_tensor.h>
+#include <lasyten/tools/hdf5_export.h>
 
 #include <lasyten/symmetries/factors/no_symmetry.h>
 #include <lasyten/tools.h>
@@ -144,6 +145,25 @@ NoSymmetryBackend::BlockData::BlockData(BlockBackend::BlockPtr b)
 {
     if (!block)
         throw std::invalid_argument("NoSymmetryBackend::BlockData: null block");
+}
+
+void
+NoSymmetryBackend::BlockData::save_hdf5(lasyten::hdf5::Saver& saver,
+                                        HighFive::Group& /*h5gr*/,
+                                        std::string const& subpath) const
+{
+    hdf5_export::save_block(saver, subpath + "block", block);
+}
+
+NoSymmetryBackend::BlockData::Ptr
+NoSymmetryBackend::BlockData::from_hdf5(lasyten::hdf5::Loader& loader,
+                                        HighFive::Group& h5gr,
+                                        std::string const& subpath)
+{
+    auto blk = hdf5_export::load_block(loader, subpath + "block");
+    auto obj = std::make_shared<BlockData>(std::move(blk));
+    loader.memorize_load(h5gr.getId(), std::static_pointer_cast<void>(obj));
+    return obj;
 }
 
 TensorBackend::DataPtr

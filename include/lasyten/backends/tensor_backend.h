@@ -58,6 +58,11 @@ class TensorBackend : public std::enable_shared_from_this<TensorBackend>
         using CPtr = std::shared_ptr<const Data>;
 
         virtual ~Data() = default;
+
+        /// Virtual so nested saves via ``DataCPtr`` reach the concrete backend data type.
+        virtual void save_hdf5(lasyten::hdf5::Saver& saver,
+                               HighFive::Group& h5gr,
+                               std::string const& subpath) const = 0;
     };
 
     using DataPtr = Data::Ptr;

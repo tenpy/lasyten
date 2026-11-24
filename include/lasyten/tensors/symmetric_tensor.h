@@ -267,10 +267,12 @@ class SymmetricTensor : public Tensor
                                        HighFive::Group& h5gr,
                                        std::string const& subpath);
 
-    /// Export SymmetricTensor to hdf5 such that it can be re-imported with from_hdf5
-    void save_hdf5(lasyten::hdf5::Saver& saver,
-                   HighFive::Group& h5gr,
-                   std::string const& subpath) const;
+    /// Export SymmetricTensor to hdf5 such that it can be re-imported with from_hdf5.
+    /// Virtual so saves via ``SymmetricTensor`` pointers reach ``DiagonalTensor`` /
+    /// ``HiddenLegTensor`` overrides.
+    virtual void save_hdf5(lasyten::hdf5::Saver& saver,
+                           HighFive::Group& h5gr,
+                           std::string const& subpath) const;
 
     // --- Tensor overrides ---
 

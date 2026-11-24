@@ -446,9 +446,11 @@ class ElementarySpace : public Space
     [[nodiscard]] virtual bool is_pipe() const { return false; }
     [[nodiscard]] virtual bool is_abelian_leg_pipe() const { return false; }
 
-    void save_hdf5(lasyten::hdf5::Saver& saver,
-                   HighFive::Group& h5gr,
-                   std::string const& subpath) const;
+    /// Virtual so nested saves via ``ElementarySpace::CPtr`` (e.g. TensorProduct factors)
+    /// reach ``DirectSumSpace`` / ``AbelianLegPipe`` overrides.
+    virtual void save_hdf5(lasyten::hdf5::Saver& saver,
+                           HighFive::Group& h5gr,
+                           std::string const& subpath) const;
 
     static Ptr from_hdf5(lasyten::hdf5::Loader& loader,
                          HighFive::Group& h5gr,
@@ -641,7 +643,7 @@ class DirectSumSpace : public ElementarySpace
 
     void save_hdf5(lasyten::hdf5::Saver& saver,
                    HighFive::Group& h5gr,
-                   std::string const& subpath) const;
+                   std::string const& subpath) const override;
 
     static Ptr from_hdf5(lasyten::hdf5::Loader& loader,
                          HighFive::Group& h5gr,
@@ -993,7 +995,7 @@ class AbelianLegPipe : public ElementarySpace
 
     void save_hdf5(lasyten::hdf5::Saver& saver,
                    HighFive::Group& h5gr,
-                   std::string const& subpath) const;
+                   std::string const& subpath) const override;
 
     /// Special case of a pipe for abelian group symmetries.
     ///

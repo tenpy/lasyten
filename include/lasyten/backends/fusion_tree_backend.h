@@ -74,7 +74,9 @@ class FusionTreeData : public TensorBackend::Data
     /// Discard blocks whose norm is below the threshold `eps`.
     void discard_zero_blocks(std::shared_ptr<BlockBackend> backend, float64 eps);
 
-    void save_hdf5(lasyten::hdf5::Saver& saver, HighFive::Group& h5gr, std::string subpath) const;
+    void save_hdf5(lasyten::hdf5::Saver& saver,
+                   HighFive::Group& h5gr,
+                   std::string const& subpath) const override;
 
     static Ptr from_hdf5(lasyten::hdf5::Loader& loader,
                          HighFive::Group& h5gr,

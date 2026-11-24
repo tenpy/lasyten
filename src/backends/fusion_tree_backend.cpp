@@ -127,7 +127,7 @@ FusionTreeData::discard_zero_blocks(std::shared_ptr<BlockBackend> backend, float
 void
 FusionTreeData::save_hdf5(lasyten::hdf5::Saver& saver,
                           HighFive::Group& /*h5gr*/,
-                          std::string subpath) const
+                          std::string const& subpath) const
 {
     hdf5_export::save_block_inds(saver, subpath + "block_inds", block_inds);
     HighFive::Group blocks_g;

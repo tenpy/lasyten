@@ -246,7 +246,7 @@ class DiagonalTensor : public SymmetricTensor
     /// Export DiagonalTensor to hdf5 such that it can be re-imported with from_hdf5
     void save_hdf5(lasyten::hdf5::Saver& saver,
                    HighFive::Group& h5gr,
-                   std::string const& subpath) const;
+                   std::string const& subpath) const override;
 
     // --- Tensor / SymmetricTensor overrides ---
 

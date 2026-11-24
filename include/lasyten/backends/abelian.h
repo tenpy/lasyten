@@ -91,7 +91,7 @@ class AbelianBackendData : public TensorBackend::Data
 
     void save_hdf5(lasyten::hdf5::Saver& saver,
                    HighFive::Group& h5gr,
-                   std::string const& subpath) const;
+                   std::string const& subpath) const override;
 
     static Ptr from_hdf5(lasyten::hdf5::Loader& loader,
                          HighFive::Group& h5gr,
