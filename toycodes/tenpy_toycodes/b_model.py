@@ -76,7 +76,7 @@ class TFIModel:
             [None, None, XX.factorization[1]],
             [None, None, I.factorization[0]],
         ]
-        W = lasy.tensors.tensor_from_grid(grid, labels=['wL', 'p', 'wR', 'p*'])
+        W = lasy.tensors.tensor_from_grid(grid, stack_legs=['wL', 'wR'])
         self.H_mpo = [W] * self.L
 
 
@@ -127,7 +127,7 @@ class HeisenbergModel:
             [None, None, SdotS.factorization[1]],
             [None, None, I.factorization[0]],
         ]
-        W = lasy.tensors.tensor_from_grid(grid, labels=['wL', 'p', 'wR', 'p*'])
+        W = lasy.tensors.tensor_from_grid(grid, stack_legs=['wL', 'wR'])
         self.H_mpo = [W] * self.L
 
 
@@ -169,7 +169,7 @@ class GoldenChainModel:
             [None, None, P1.factorization[1]],
             [None, None, I.factorization[0]],
         ]
-        W = lasy.tensors.tensor_from_grid(grid, labels=['wL', 'p', 'wR', 'p*'])
+        W = lasy.tensors.tensor_from_grid(grid, stack_legs=['wL', 'wR'])
         self.H_mpo = [W] * self.L
 
 

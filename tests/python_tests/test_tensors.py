@@ -4256,7 +4256,7 @@ def test_tensor_from_grid(cod, dom, row, col, make_compatible_tensor, make_compa
     perm_dom = perm[idx:][::-1]
     levels = np_random.permutation(T.num_legs)
 
-    res1 = tensors.tensor_from_grid(grid)
+    res1 = tensors.tensor_from_grid(grid, stack_legs=[0, cod])
     assert isinstance(res1, SymmetricTensor)
     assert not isinstance(res1, HiddenLegTensor)
     if row > 1:
@@ -4280,7 +4280,7 @@ def test_tensor_from_grid(cod, dom, row, col, make_compatible_tensor, make_compa
     res2 = [
         [tensors.permute_legs(op, perm_codom, perm_dom, levels, bend_right=bend_right) for op in row] for row in grid
     ]
-    res2 = tensors.tensor_from_grid(res2)
+    res2 = tensors.tensor_from_grid(res2, stack_legs=[0, res2[0][0].num_codomain_legs])
 
     assert res1.codomain == res2.codomain
     assert res1.domain == res2.domain
@@ -4295,22 +4295,132 @@ def test_tensor_from_grid_empty_rows_and_columns(make_compatible_tensor, make_co
     col_summands = [T.domain[-1], make_compatible_space(is_dual=T.domain[-1].is_dual)]
     grid = [[T, None], [None, None]]
 
-    with pytest.raises(ValueError, match='row_summands'):
-        tensors.tensor_from_grid(grid, col_summands=col_summands)
-    with pytest.raises(ValueError, match='col_summands'):
-        tensors.tensor_from_grid(grid, row_summands=row_summands)
+    with pytest.raises(ValueError, match='stack_summands'):
+        tensors.tensor_from_grid(grid, stack_legs=[0, -1], stack_summands=[None, col_summands])
+    with pytest.raises(ValueError, match='stack_summands'):
+        tensors.tensor_from_grid(grid, stack_legs=[0, -1], stack_summands=[row_summands, None])
 
     result = tensors.tensor_from_grid(
         grid,
-        row_labels=['row0', 'row1'],
-        col_labels=['col0', 'col1'],
-        row_summands=row_summands,
-        col_summands=col_summands,
+        stack_legs=[0, -1],
+        stack_labels=[['row0', 'row1'], ['col0', 'col1']],
+        stack_summands=[row_summands, col_summands],
     )
     assert result.codomain[0].spaces == row_summands
     assert result.domain[-1].spaces == col_summands
     assert result.codomain[0].summand_labels == ['row0', 'row1']
     assert result.domain[-1].summand_labels == ['col0', 'col1']
+
+
+def test_tensor_from_grid_one_dimensional_infers_labels(make_compatible_tensor, make_compatible_space):
+    fixed = make_compatible_space()
+    stacked = make_compatible_space()
+    domain = make_compatible_space()
+    first = make_compatible_tensor([fixed, stacked], [domain], cls=SymmetricTensor)
+    second = make_compatible_tensor(
+        [fixed, make_compatible_space(is_dual=stacked.is_dual)],
+        [domain],
+        cls=SymmetricTensor,
+    )
+    first.labels.set(['fixed', 'stack', 'domain'])
+    second.labels.set(['different', 'stack', 'domain'])
+
+    result = tensors.tensor_from_grid([first, second], stack_legs=['stack'])
+
+    assert isinstance(result.codomain[1], DirectSumSpace)
+    assert result.codomain[1].spaces == [stacked, second.codomain[1]]
+    assert result.codomain[0] == fixed
+    assert result.domain[0] == domain
+    assert result.labels == ['', 'stack', 'domain']
+
+
+@pytest.mark.parametrize(
+    'row_pos, col_pos',
+    [
+        pytest.param(0, 0, id='first-codomain-first-domain'),
+        pytest.param(0, 1, id='first-codomain-last-domain'),
+        pytest.param(1, 0, id='last-codomain-first-domain'),
+        pytest.param(1, 1, id='last-codomain-last-domain'),
+    ],
+)
+def test_tensor_from_grid_arbitrary_stacking_legs(row_pos, col_pos, make_compatible_tensor, make_compatible_space):
+    template = make_compatible_tensor([None, None], [None, None], cls=SymmetricTensor, use_pipes=False)
+    fixed_cod = template.codomain[1 - row_pos]
+    fixed_dom = template.domain[1 - col_pos]
+    row_spaces = [
+        template.codomain[row_pos],
+        make_compatible_space(is_dual=template.codomain[row_pos].is_dual),
+    ]
+    col_spaces = [
+        template.domain[col_pos],
+        make_compatible_space(is_dual=template.domain[col_pos].is_dual),
+    ]
+    grid = [
+        [
+            make_compatible_tensor(
+                [row_spaces[i] if leg_pos == row_pos else fixed_cod for leg_pos in range(2)],
+                [col_spaces[j] if leg_pos == col_pos else fixed_dom for leg_pos in range(2)],
+                cls=SymmetricTensor,
+                use_pipes=False,
+            )
+            for j in range(2)
+        ]
+        for i in range(2)
+    ]
+    for row in grid:
+        for tensor in row:
+            cod_labels = ['fixed_cod', 'fixed_cod']
+            cod_labels[row_pos] = 'row'
+            domain_labels = ['fixed_dom', 'fixed_dom']
+            domain_labels[col_pos] = 'column'
+            tensor.labels.set(cod_labels + domain_labels[::-1])
+
+    result = tensors.tensor_from_grid(
+        grid,
+        stack_legs=['row', 'column'],
+        stack_labels=[['r0', 'r1'], ['c0', 'c1']],
+    )
+
+    assert result.codomain[row_pos].spaces == row_spaces
+    assert result.domain[col_pos].spaces == col_spaces
+    assert result.codomain[1 - row_pos] == fixed_cod
+    assert result.domain[1 - col_pos] == fixed_dom
+    assert result.labels == cod_labels + domain_labels[::-1]
+    for i, row in enumerate(grid):
+        for j, original in enumerate(row):
+            recovered = tensors.tensor_grid_cell(result, i, j, row_leg='row', col_leg='column')
+            assert tensors.almost_equal(recovered, original)
+
+
+def test_tensor_from_grid_bends_selected_stacking_leg(make_compatible_tensor, make_compatible_space):
+    template = make_compatible_tensor([None, None], [], cls=SymmetricTensor, use_pipes=False)
+    row_spaces = [
+        template.codomain[0],
+        make_compatible_space(is_dual=template.codomain[0].is_dual),
+    ]
+    col_spaces = [
+        template.codomain[1],
+        make_compatible_space(is_dual=template.codomain[1].is_dual),
+    ]
+    grid = [
+        [
+            make_compatible_tensor([row_spaces[i], col_spaces[j]], [], cls=SymmetricTensor, use_pipes=False)
+            for j in range(2)
+        ]
+        for i in range(2)
+    ]
+    for row in grid:
+        for tensor in row:
+            tensor.labels.set(['row', 'column'])
+
+    result = tensors.tensor_from_grid(grid, stack_legs=['row', 'column'])
+
+    assert result.codomain[0].spaces == row_spaces
+    assert result.codomain[1].spaces == col_spaces
+    for i, row in enumerate(grid):
+        for j, original in enumerate(row):
+            recovered = tensors.tensor_grid_cell(result, i, j, row_leg='row', col_leg='column')
+            assert tensors.almost_equal(recovered, original)
 
 
 def test_tensor_grid_cell_roundtrip(make_compatible_tensor, make_compatible_space):
@@ -4327,8 +4437,16 @@ def test_tensor_grid_cell_roundtrip(make_compatible_tensor, make_compatible_spac
     ]
     # zero cell
     grid[1][0] = None
+    for row in grid:
+        for tensor in row:
+            if tensor is not None:
+                tensor.labels.set(['wL', 'wR'])
 
-    res = tensors.tensor_from_grid(grid, labels=['wL', 'wR'], row_labels=['IdL', 'IdR'], col_labels=['IdL', 'IdR'])
+    res = tensors.tensor_from_grid(
+        grid,
+        stack_legs=['wL', 'wR'],
+        stack_labels=[['IdL', 'IdR'], ['IdL', 'IdR']],
+    )
     assert isinstance(res.codomain[0], DirectSumSpace)
     assert isinstance(res.domain[-1], DirectSumSpace)
     assert res.codomain[0].summand_labels == ['IdL', 'IdR']
@@ -4350,7 +4468,7 @@ def test_tensor_grid_cell_roundtrip(make_compatible_tensor, make_compatible_spac
         recovered.append(row)
 
     # Restacking recovered cells rebuilds the original stacked tensor.
-    res2 = tensors.tensor_from_grid(recovered, labels=['wL', 'wR'])
+    res2 = tensors.tensor_from_grid(recovered, stack_legs=['wL', 'wR'])
     assert tensors.almost_equal(res, res2)
 
     # The operation only depends on the current legs, not tensor_from_grid provenance.
@@ -4382,8 +4500,11 @@ def test_tensor_subgrid(make_compatible_tensor, make_compatible_space):
         [make_compatible_tensor([row_spaces[i]], [col_spaces[j]], cls=SymmetricTensor) for j in range(3)]
         for i in range(3)
     ]
+    for row in grid:
+        for tensor in row:
+            tensor.labels.set(['wL', 'wR'])
     labels = ['A', 'B', 'C']
-    res = tensors.tensor_from_grid(grid, labels=['wL', 'wR'], row_labels=labels, col_labels=labels)
+    res = tensors.tensor_from_grid(grid, stack_legs=['wL', 'wR'], stack_labels=[labels, labels])
 
     rows = ['C', 0]
     cols = [1, 'A']
@@ -4407,12 +4528,12 @@ def test_tensor_subgrid(make_compatible_tensor, make_compatible_space):
     with pytest.raises(ValueError):
         tensors.tensor_subgrid(res, [], [0], row_leg='wL', col_leg='wR')
 
-    # Subgrids are recombined by tensor_from_grid (without row/col labels): nested summand
+    # Subgrids are recombined by tensor_from_grid (without explicit summand labels): nested summand
     # labels are flattened, so the original labels are recovered.
     row_blocks = [['A', 'B'], ['C']]
     col_blocks = [['A'], ['B', 'C']]
     subs = [[tensors.tensor_subgrid(res, rb, cb, row_leg='wL', col_leg='wR') for cb in col_blocks] for rb in row_blocks]
-    recombined = tensors.tensor_from_grid(subs, labels=['wL', 'wR'])
+    recombined = tensors.tensor_from_grid(subs, stack_legs=['wL', 'wR'])
     assert recombined.codomain[0].summand_labels == labels
     assert recombined.domain[-1].summand_labels == labels
     assert tensors.almost_equal(recombined, res)
@@ -4455,7 +4576,7 @@ def test_mpo_partition_and_make_U_I_pattern(compatible_symmetry, compatible_back
         [dense_cell(other, Id_d), dense_cell(other, other_d), dense_cell(other, Id_d)],
         [None, dense_cell(Id, other_d), dense_cell(Id, Id_d)],
     ]
-    W = tensors.tensor_from_grid(grid, labels=['wL', 'p', 'wR', 'p*'])
+    W = tensors.tensor_from_grid(grid, stack_legs=['wL', 'wR'])
     Wflat = W.to_numpy(leg_order=['wL', 'wR', 'p', 'p*'], understood_braiding=True)
 
     projected_IdL = tensors.grid_project(W, ['wL'], [0], squeeze=True)
@@ -4532,8 +4653,9 @@ def test_mpo_partition_and_make_U_I_pattern(compatible_symmetry, compatible_back
 def test_tensor_from_grid_hidden_labels(make_compatible_tensor, np_random):
     T = make_compatible_tensor([None], [None], cls=SymmetricTensor, use_pipes=False)
     labels = np_random.choice([['row', '!column'], ['!row', 'column'], ['!row', '!column']])
+    T.labels.set(labels)
 
-    result = tensors.tensor_from_grid([[T]], labels=labels)
+    result = tensors.tensor_from_grid([T], stack_legs=[0])
 
     assert isinstance(result, HiddenLegTensor)
     assert result.labels == labels

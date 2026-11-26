@@ -156,50 +156,104 @@ matches C++ null / ``nullopt``. ``understood_braiding`` applies only to the bloc
     m.def(
       "tensor_from_grid",
       [](py::object grid,
-         py::object labels,
+         py::object stack_legs,
          py::object dtype,
-         std::optional<LegLabelList> row_labels,
-         std::optional<LegLabelList> col_labels,
-         std::optional<std::vector<ElementarySpace::Ptr>> row_summands,
-         std::optional<std::vector<ElementarySpace::Ptr>> col_summands) {
+         py::object stack_labels,
+         py::object stack_summands) {
           std::optional<Dtype> dtype_opt;
           if (!dtype.is_none()) {
               dtype_opt = py::cast<Dtype>(dtype);
           }
+          auto as_leg_ref = [](py::handle item) -> LegRef {
+              py::object obj = py::reinterpret_borrow<py::object>(item);
+              if (py::isinstance<py::str>(obj)) {
+                  return py::cast<std::string>(obj);
+              }
+              return py::cast<int64>(obj);
+          };
+          std::vector<LegRef> leg_refs;
+          if (py::isinstance<py::str>(stack_legs)) {
+              leg_refs.push_back(as_leg_ref(stack_legs));
+          } else {
+              for (auto item : py::reinterpret_borrow<py::iterable>(stack_legs)) {
+                  leg_refs.push_back(as_leg_ref(item));
+              }
+          }
+
           std::vector<std::vector<TensorPtr>> g;
-          for (auto row_h : py::reinterpret_borrow<py::iterable>(grid)) {
+          std::vector<py::object> grid_items;
+          bool is_one_dimensional = true;
+          for (auto item : py::reinterpret_borrow<py::iterable>(grid)) {
+              py::object obj = py::reinterpret_borrow<py::object>(item);
+              if (!obj.is_none() && !py::hasattr(obj, "num_legs")) {
+                  is_one_dimensional = false;
+              }
+              grid_items.push_back(std::move(obj));
+          }
+          if (is_one_dimensional) {
               std::vector<TensorPtr> row;
-              for (auto item : py::reinterpret_borrow<py::iterable>(row_h)) {
-                  py::object obj = py::reinterpret_borrow<py::object>(item);
+              row.reserve(grid_items.size());
+              for (auto const& obj : grid_items) {
                   row.push_back(obj.is_none() ? nullptr : py::cast<TensorPtr>(obj));
               }
               g.push_back(std::move(row));
+          } else {
+              for (auto const& row_obj : grid_items) {
+                  std::vector<TensorPtr> row;
+                  for (auto item : py::reinterpret_borrow<py::iterable>(row_obj)) {
+                      py::object obj = py::reinterpret_borrow<py::object>(item);
+                      row.push_back(obj.is_none() ? nullptr : py::cast<TensorPtr>(obj));
+                  }
+                  g.push_back(std::move(row));
+              }
           }
-          auto res = tensor_from_grid(std::move(g),
-                                      std::nullopt,
-                                      dtype_opt,
-                                      std::move(row_labels),
-                                      std::move(col_labels),
-                                      std::move(row_summands),
-                                      std::move(col_summands));
-          if (!labels.is_none()) {
-              res->labels.set(parse_tensor_init_labels(labels, res->codomain, res->domain));
+
+          std::vector<std::optional<LegLabelList>> labels;
+          if (!stack_labels.is_none()) {
+              for (auto dim_labels : py::reinterpret_borrow<py::iterable>(stack_labels)) {
+                  if (dim_labels.is_none()) {
+                      labels.emplace_back(std::nullopt);
+                      continue;
+                  }
+                  LegLabelList axis_labels;
+                  for (auto label : py::reinterpret_borrow<py::iterable>(dim_labels)) {
+                      axis_labels.push_back(py::cast<std::string>(label));
+                  }
+                  labels.emplace_back(std::move(axis_labels));
+              }
           }
+
+          std::vector<std::optional<std::vector<ElementarySpace::Ptr>>> summands;
+          if (!stack_summands.is_none()) {
+              for (auto dim_summands : py::reinterpret_borrow<py::iterable>(stack_summands)) {
+                  if (dim_summands.is_none()) {
+                      summands.emplace_back(std::nullopt);
+                      continue;
+                  }
+                  std::vector<ElementarySpace::Ptr> axis_summands;
+                  for (auto space : py::reinterpret_borrow<py::iterable>(dim_summands)) {
+                      axis_summands.push_back(
+                        py::cast_non_null<ElementarySpace::Ptr>(space, "stack_summands"));
+                  }
+                  summands.emplace_back(std::move(axis_summands));
+              }
+          }
+          auto res = tensor_from_grid(
+            std::move(g), std::move(leg_refs), dtype_opt, std::move(labels), std::move(summands));
           return HiddenLegTensor::maybe_wrap(std::dynamic_pointer_cast<SymmetricTensor>(res));
       },
       nb::arg("grid"),
-      nb::arg("labels").none() = nb::none(),
+      nb::arg("stack_legs"),
       nb::arg("dtype").none() = nb::none(),
       nb::kw_only(),
-      nb::arg("row_labels").none() = nb::none(),
-      nb::arg("col_labels").none() = nb::none(),
-      nb::arg("row_summands").none() = nb::none(),
-      nb::arg("col_summands").none() = nb::none(),
+      nb::arg("stack_labels").none() = nb::none(),
+      nb::arg("stack_summands").none() = nb::none(),
       doc_plus(DOC(lasyten, tensor_from_grid),
                R"pydoc(
-In Python, ``grid`` is ``list[list[SymmetricTensor | None]]`` (``None`` = zero cell);
-``labels`` / ``dtype`` / ``row_labels`` / ``col_labels`` / ``row_summands`` /
-``col_summands`` use ``None`` for C++ ``nullopt``.
+In Python, ``grid`` is a flat list for one stacking leg, or a list of rows for two;
+``None`` denotes a zero cell. ``stack_legs`` contains leg labels or indices.
+``stack_labels`` and ``stack_summands`` contain one entry per stacking dimension;
+use ``None`` for an unspecified dimension.
 )pydoc"));
 
     m.def(
