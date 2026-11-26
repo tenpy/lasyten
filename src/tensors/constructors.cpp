@@ -305,20 +305,22 @@ zero_like(TensorCPtr tensor)
 
 TensorPtr
 tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
-                 std::optional<LegLabelList> labels,
+                 std::vector<LegRef> stack_legs,
                  std::optional<Dtype> dtype_opt,
-                 std::optional<LegLabelList> row_labels,
-                 std::optional<LegLabelList> col_labels,
-                 std::optional<std::vector<ElementarySpace::Ptr>> row_summands,
-                 std::optional<std::vector<ElementarySpace::Ptr>> col_summands)
+                 std::vector<std::optional<LegLabelList>> stack_labels,
+                 std::vector<std::optional<std::vector<ElementarySpace::Ptr>>> stack_summands)
 {
-    // --- hints from Python tensor_from_grid ---
-    // check input
-    // only ElementarySpaces have direct_sum
-    // find op from same column
-    // find op from same row
-    // for each sector in the direct sum, find which multiplicities come from which space
-    // ---
+    if (stack_legs.empty() || stack_legs.size() > 2) {
+        throw std::invalid_argument("stack_legs must contain one or two leg references");
+    }
+    auto const n_dimensions = static_cast<int64>(stack_legs.size());
+    if (!stack_labels.empty() && static_cast<int64>(stack_labels.size()) != n_dimensions) {
+        throw std::invalid_argument("stack_labels must have one entry per stacking dimension");
+    }
+    if (!stack_summands.empty() && static_cast<int64>(stack_summands.size()) != n_dimensions) {
+        throw std::invalid_argument("stack_summands must have one entry per stacking dimension");
+    }
+
     auto n_rows = static_cast<int64>(grid.size());
     int64 n_cols = n_rows > 0 ? static_cast<int64>(grid[0].size()) : 0;
     for (auto const& row : grid) {
@@ -326,17 +328,11 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
             throw std::invalid_argument("grid rows must have equal length");
         }
     }
-    if (row_labels.has_value() && static_cast<int64>(row_labels->size()) != n_rows) {
-        throw std::invalid_argument("row_labels must have one entry per grid row");
+    if (stack_legs.size() == 2 && n_rows == 0) {
+        throw std::invalid_argument("a two-dimensional grid must have at least one row");
     }
-    if (col_labels.has_value() && static_cast<int64>(col_labels->size()) != n_cols) {
-        throw std::invalid_argument("col_labels must have one entry per grid column");
-    }
-    if (row_summands.has_value() && static_cast<int64>(row_summands->size()) != n_rows) {
-        throw std::invalid_argument("row_summands must have one entry per grid row");
-    }
-    if (col_summands.has_value() && static_cast<int64>(col_summands->size()) != n_cols) {
-        throw std::invalid_argument("col_summands must have one entry per grid column");
+    if (stack_legs.size() == 1 && n_rows != 1) {
+        throw std::invalid_argument("a one-dimensional grid must be passed as a single row");
     }
 
     std::vector<TensorCPtr> ops;
@@ -374,83 +370,257 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
     auto const& ref = ops[0];
     int64 n_cod = ref->num_codomain_legs();
     int64 n_dom = ref->num_domain_legs();
-    auto ref_cod_tail =
-      factors_slice(ref->codomain, 1, static_cast<int64>(ref->codomain->factors.size()));
-    auto ref_dom_head = factors_slice(ref->domain, 0, -1);
-
     for (auto const& op : ops) {
         if (op->num_codomain_legs() != n_cod || op->num_domain_legs() != n_dom) {
             throw std::runtime_error("inconsistent number of legs in grid");
         }
-        if (!factor_slices_equal(
-              factors_slice(op->codomain, 1, static_cast<int64>(op->codomain->factors.size())),
-              ref_cod_tail) ||
-            !factor_slices_equal(factors_slice(op->domain, 0, -1), ref_dom_head)) {
-            throw std::runtime_error("inconsistent legs in grid");
+    }
+
+    auto stack_indices = ref->labels.indices(stack_legs);
+    if (stack_indices.size() != stack_legs.size()) {
+        throw std::runtime_error("tensor_from_grid: failed to resolve stacking leg references");
+    }
+    if (stack_indices.size() == 2 && stack_indices[0] == stack_indices[1]) {
+        throw std::invalid_argument("stack_legs must refer to distinct legs");
+    }
+    auto n_legs = ref->num_legs;
+    auto is_codomain_leg = [n_cod](int64 i) { return i >= 0 && i < n_cod; };
+
+    std::vector<int64> non_stacked;
+    for (int64 i = 0; i < n_legs; ++i) {
+        if (std::find(stack_indices.begin(), stack_indices.end(), i) == stack_indices.end()) {
+            non_stacked.push_back(i);
         }
-        if (!(*op->codomain)[0].as_elementary_space() ||
-            !(*op->domain)[-1].as_elementary_space()) {
-            throw std::runtime_error("stacking legs must be ElementarySpace");
+    }
+    std::vector<Leg::Ptr> ref_non_stacked;
+    for (auto i : non_stacked) {
+        ref_non_stacked.push_back(ref->get_leg(i));
+    }
+    for (auto const& op : ops) {
+        std::vector<Leg::Ptr> op_non_stacked;
+        for (auto i : non_stacked) {
+            op_non_stacked.push_back(op->get_leg(i));
+        }
+        if (!factor_slices_equal(ref_non_stacked, op_non_stacked)) {
+            throw std::runtime_error("inconsistent non-stacking legs in grid");
+        }
+        for (auto idx : stack_indices) {
+            if (!op->get_leg(idx).as_elementary_space()) {
+                throw std::runtime_error("stacking legs must be ElementarySpace");
+            }
         }
     }
 
-    std::vector<ElementarySpace::Ptr> left_spaces =
-      row_summands.value_or(std::vector<ElementarySpace::Ptr>(static_cast<std::size_t>(n_rows)));
-    for (int64 i = 0; i < n_rows; ++i) {
-        auto& row_space = left_spaces[static_cast<std::size_t>(i)];
-        if (row_summands.has_value() && !row_space) {
-            throw std::invalid_argument("row_summands must not contain null spaces");
-        }
-        for (auto const& op : grid[static_cast<std::size_t>(i)]) {
-            if (!op) {
-                continue;
-            }
-            auto cell_space = (*op->codomain)[0].as_elementary_space();
-            if (!row_space) {
-                row_space = cell_space;
-            } else if (!row_space->equals_es(*cell_space)) {
-                throw std::invalid_argument("row_summands must agree with the first codomain leg "
-                                            "of every tensor in its row");
+    std::vector<int64> normalized_cod;
+    std::vector<int64> normalized_dom;
+    if (stack_indices.size() == 1) {
+        auto selected = stack_indices[0];
+        for (int64 i = 0; i < n_cod; ++i) {
+            if (i != selected) {
+                normalized_cod.push_back(i);
             }
         }
-        if (!row_space) {
-            throw std::invalid_argument(
-              "Must specify row_summands for each entirely empty grid row.");
+        std::vector<int64> original_domain;
+        for (int64 i = n_legs - 1; i >= n_cod; --i) {
+            original_domain.push_back(i);
+        }
+        if (is_codomain_leg(selected)) {
+            normalized_cod.insert(normalized_cod.begin(), selected);
+            normalized_dom = original_domain;
+        } else {
+            normalized_dom = original_domain;
+            normalized_dom.erase(
+              std::find(normalized_dom.begin(), normalized_dom.end(), selected));
+            normalized_dom.push_back(selected);
+        }
+    } else {
+        auto row_leg = stack_indices[0];
+        auto col_leg = stack_indices[1];
+        normalized_cod.push_back(row_leg);
+        for (int64 i = 0; i < n_cod; ++i) {
+            if (i != row_leg && i != col_leg) {
+                normalized_cod.push_back(i);
+            }
+        }
+        for (int64 i = n_legs - 1; i >= n_cod; --i) {
+            if (i != row_leg && i != col_leg) {
+                normalized_dom.push_back(i);
+            }
+        }
+        normalized_dom.push_back(col_leg);
+    }
+
+    auto permute_for_grid = [&](TensorCPtr tensor,
+                                std::vector<int64> const& cod,
+                                std::vector<int64> const& dom) -> TensorPtr {
+        std::vector<LegRef> cod_refs;
+        std::vector<LegRef> dom_refs;
+        cod_refs.reserve(cod.size());
+        dom_refs.reserve(dom.size());
+        for (auto i : cod) {
+            cod_refs.emplace_back(i);
+        }
+        for (auto i : dom) {
+            dom_refs.emplace_back(i);
+        }
+        LevelsSpec levels;
+        levels.reserve(static_cast<std::size_t>(tensor->num_legs));
+        for (int64 i = 0; i < tensor->num_legs; ++i) {
+            levels.emplace_back(i);
+        }
+        return permute_legs(std::move(tensor),
+                            std::move(cod_refs),
+                            std::move(dom_refs),
+                            std::move(levels),
+                            BendRight{ true });
+    };
+
+    std::vector<std::vector<TensorPtr>> normalized_grid = grid;
+    for (auto& row : normalized_grid) {
+        for (auto& op : row) {
+            if (op) {
+                op = permute_for_grid(op, normalized_cod, normalized_dom);
+            }
         }
     }
 
-    std::vector<ElementarySpace::Ptr> right_spaces =
-      col_summands.value_or(std::vector<ElementarySpace::Ptr>(static_cast<std::size_t>(n_cols)));
-    for (int64 j = 0; j < n_cols; ++j) {
-        auto& col_space = right_spaces[static_cast<std::size_t>(j)];
-        if (col_summands.has_value() && !col_space) {
-            throw std::invalid_argument("col_summands must not contain null spaces");
+    int64 row_leg_idx = 0;
+    int64 col_leg_idx = static_cast<int64>(normalized_cod.size());
+    auto row_space_for = [&](int64 i, int64 j) -> ElementarySpace::Ptr {
+        auto const& op = normalized_grid[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)];
+        return op ? op->get_leg_co_domain(row_leg_idx).as_elementary_space() : nullptr;
+    };
+    auto col_space_for = [&](int64 i, int64 j) -> ElementarySpace::Ptr {
+        auto const& op = normalized_grid[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)];
+        return op ? op->get_leg_co_domain(col_leg_idx).as_elementary_space() : nullptr;
+    };
+
+    bool const is_one_dimensional = stack_indices.size() == 1;
+    bool const selected_is_codomain = is_codomain_leg(stack_indices[0]);
+    std::string dummy_label;
+    if (is_one_dimensional) {
+        auto contains_label = [&](std::string const& label) {
+            return std::any_of(
+              ops.begin(), ops.end(), [&](TensorCPtr const& op) { return op->labels.has(label); });
+        };
+        dummy_label = "__tensor_from_grid_dummy__";
+        for (int64 suffix = 0; contains_label(dummy_label); ++suffix) {
+            dummy_label = std::format("__tensor_from_grid_dummy_{}__", suffix);
         }
-        for (int64 i = 0; i < n_rows; ++i) {
-            auto const& op = grid[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)];
-            if (!op) {
-                continue;
-            }
-            auto cell_space = (*op->domain)[-1].as_elementary_space();
-            if (!col_space) {
-                col_space = cell_space;
-            } else if (!col_space->equals_es(*cell_space)) {
-                throw std::invalid_argument("col_summands must agree with the last domain leg of "
-                                            "every tensor in its column");
+        for (auto& row : normalized_grid) {
+            for (auto& op : row) {
+                if (op) {
+                    op =
+                      selected_is_codomain
+                        ? add_trivial_leg(op, std::nullopt, std::nullopt, int64{ -1 }, dummy_label)
+                        : add_trivial_leg(op, std::nullopt, int64{ 0 }, std::nullopt, dummy_label);
+                }
             }
         }
-        if (!col_space) {
-            throw std::invalid_argument(
-              "Must specify col_summands for each entirely empty grid column.");
+        if (selected_is_codomain) {
+            normalized_dom.push_back(-1);
+            std::vector<std::vector<TensorPtr>> column_grid;
+            column_grid.reserve(normalized_grid.front().size());
+            for (auto& op : normalized_grid.front()) {
+                column_grid.push_back({ std::move(op) });
+            }
+            normalized_grid = std::move(column_grid);
+            row_leg_idx = 0;
+        } else {
+            normalized_cod.insert(normalized_cod.begin(), -1);
+            row_leg_idx = 0;
+        }
+        col_leg_idx = static_cast<int64>(normalized_cod.size());
+    }
+
+    auto n_stacked_rows = static_cast<int64>(normalized_grid.size());
+    auto n_stacked_cols =
+      n_stacked_rows > 0 ? static_cast<int64>(normalized_grid[0].size()) : int64{ 0 };
+    for (auto const& row : normalized_grid) {
+        if (static_cast<int64>(row.size()) != n_stacked_cols) {
+            throw std::invalid_argument("grid rows must have equal length");
         }
     }
 
-    std::vector<ElementarySpace::Ptr> left_rest(left_spaces.begin() + 1, left_spaces.end());
-    std::vector<ElementarySpace::Ptr> right_rest(right_spaces.begin() + 1, right_spaces.end());
-    auto left_space = left_spaces[0]->direct_sum(left_rest, row_labels);
-    auto right_space = right_spaces[0]->direct_sum(right_rest, col_labels);
+    auto labels_for_dimension = [&](std::size_t dim) -> std::optional<LegLabelList> {
+        return stack_labels.empty() ? std::nullopt : stack_labels[dim];
+    };
+    auto summands_for_dimension =
+      [&](std::size_t dim) -> std::optional<std::vector<ElementarySpace::Ptr>> {
+        return stack_summands.empty() ? std::nullopt : stack_summands[dim];
+    };
 
-    // direct_sum always wraps in a DirectSumSpace, even for a single row/col.
+    std::optional<LegLabelList> row_labels;
+    std::optional<LegLabelList> col_labels;
+    std::optional<std::vector<ElementarySpace::Ptr>> row_summands;
+    std::optional<std::vector<ElementarySpace::Ptr>> col_summands;
+    if (is_one_dimensional) {
+        if (selected_is_codomain) {
+            row_labels = labels_for_dimension(0);
+            row_summands = summands_for_dimension(0);
+        } else {
+            col_labels = labels_for_dimension(0);
+            col_summands = summands_for_dimension(0);
+        }
+    } else {
+        row_labels = labels_for_dimension(0);
+        col_labels = labels_for_dimension(1);
+        row_summands = summands_for_dimension(0);
+        col_summands = summands_for_dimension(1);
+    }
+    if (row_labels && static_cast<int64>(row_labels->size()) != n_stacked_rows) {
+        throw std::invalid_argument("stack_labels entry must match its grid dimension");
+    }
+    if (col_labels && static_cast<int64>(col_labels->size()) != n_stacked_cols) {
+        throw std::invalid_argument("stack_labels entry must match its grid dimension");
+    }
+    if (row_summands && static_cast<int64>(row_summands->size()) != n_stacked_rows) {
+        throw std::invalid_argument("stack_summands entry must match its grid dimension");
+    }
+    if (col_summands && static_cast<int64>(col_summands->size()) != n_stacked_cols) {
+        throw std::invalid_argument("stack_summands entry must match its grid dimension");
+    }
+
+    auto infer_summands = [&](bool rows_axis,
+                              std::optional<std::vector<ElementarySpace::Ptr>> const& specified,
+                              int64 count) {
+        std::vector<ElementarySpace::Ptr> spaces =
+          specified.value_or(std::vector<ElementarySpace::Ptr>(static_cast<std::size_t>(count)));
+        for (int64 i = 0; i < count; ++i) {
+            auto& current = spaces[static_cast<std::size_t>(i)];
+            if (specified && !current) {
+                throw std::invalid_argument("stack_summands must not contain null spaces");
+            }
+            for (int64 j = 0; j < (rows_axis ? n_stacked_cols : n_stacked_rows); ++j) {
+                auto cell_space = rows_axis ? row_space_for(i, j) : col_space_for(j, i);
+                if (!cell_space) {
+                    continue;
+                }
+                if (!current) {
+                    current = cell_space;
+                } else if (!current->equals_es(*cell_space)) {
+                    throw std::invalid_argument(
+                      "stack_summands must agree with every tensor along its grid slice");
+                }
+            }
+            if (!current) {
+                throw std::invalid_argument(
+                  "Must specify stack_summands for each entirely empty grid slice.");
+            }
+        }
+        return spaces;
+    };
+    auto row_spaces = infer_summands(true, row_summands, n_stacked_rows);
+    auto col_spaces = infer_summands(false, col_summands, n_stacked_cols);
+
+    auto make_stacked_space = [](std::vector<ElementarySpace::Ptr> const& spaces,
+                                 std::optional<LegLabelList> const& summand_labels) {
+        std::vector<ElementarySpace::Ptr> rest(spaces.begin() + 1, spaces.end());
+        return spaces[0]->direct_sum(rest, summand_labels);
+    };
+    auto left_space = make_stacked_space(row_spaces, row_labels);
+    auto right_space = make_stacked_space(col_spaces, col_labels);
+
     auto left_dss = std::dynamic_pointer_cast<DirectSumSpace>(left_space);
     auto right_dss = std::dynamic_pointer_cast<DirectSumSpace>(right_space);
     if (!left_dss || !right_dss) {
@@ -473,23 +643,38 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
         }
         return out;
     };
-    auto left_mult_slices = cell_mult_slices(*left_dss, left_spaces);
-    auto right_mult_slices = cell_mult_slices(*right_dss, right_spaces);
+    auto left_mult_slices = cell_mult_slices(*left_dss, row_spaces);
+    auto right_mult_slices = cell_mult_slices(*right_dss, col_spaces);
 
     std::vector<Leg::Ptr> cod_legs;
+    TensorCPtr normalized_ref;
+    std::vector<TensorCPtr> normalized_ops;
+    for (auto const& row : normalized_grid) {
+        for (auto const& op : row) {
+            if (op) {
+                if (!normalized_ref) {
+                    normalized_ref = op;
+                }
+                normalized_ops.push_back(op);
+            }
+        }
+    }
+    if (!normalized_ref) {
+        throw std::runtime_error("tensor_from_grid: normalized grid contains no tensors");
+    }
     cod_legs.push_back(left_space);
-    auto ref_cod_rest =
-      factors_slice(ref->codomain, 1, static_cast<int64>(ref->codomain->factors.size()));
+    auto ref_cod_rest = factors_slice(
+      normalized_ref->codomain, 1, static_cast<int64>(normalized_ref->codomain->factors.size()));
     cod_legs.insert(cod_legs.end(), ref_cod_rest.begin(), ref_cod_rest.end());
-    std::vector<Leg::Ptr> dom_legs = factors_slice(ref->domain, 0, -1);
+    std::vector<Leg::Ptr> dom_legs = factors_slice(normalized_ref->domain, 0, -1);
     dom_legs.push_back(right_space);
 
     auto codomain = std::make_shared<TensorProduct>(std::move(cod_legs));
     auto domain = std::make_shared<TensorProduct>(std::move(dom_legs));
 
     std::vector<std::vector<TensorCPtr>> cgrid;
-    cgrid.reserve(grid.size());
-    for (auto const& row : grid) {
+    cgrid.reserve(normalized_grid.size());
+    for (auto const& row : normalized_grid) {
         cgrid.emplace_back(row.begin(), row.end());
     }
 
@@ -500,9 +685,20 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
                                    std::move(right_mult_slices),
                                    dtype,
                                    device);
-    LegLabelList labs = labels.value_or(LegLabelList{});
-    if (!labels.has_value()) {
-        labs = Tensor::_init_parse_labels(std::nullopt, codomain, domain);
+    LegLabelList labs;
+    auto const& normalized_labels = normalized_ref->labels.as_list();
+    labs.reserve(normalized_labels.size());
+    for (std::size_t i = 0; i < normalized_labels.size(); ++i) {
+        auto const& candidate = normalized_labels[i];
+        bool matches = true;
+        for (auto const& op : normalized_ops) {
+            auto const& op_labels = op->labels.as_list();
+            if (i >= op_labels.size() || op_labels[i] != candidate) {
+                matches = false;
+                break;
+            }
+        }
+        labs.push_back(matches ? candidate : std::string{});
     }
     auto result = std::make_shared<SymmetricTensor>(std::move(data),
                                                     std::move(codomain),
@@ -510,7 +706,53 @@ tensor_from_grid(std::vector<std::vector<TensorPtr>> grid,
                                                     backend,
                                                     ref->symmetry,
                                                     std::move(labs));
-    return HiddenLegTensor::maybe_wrap(std::move(result));
+    TensorPtr final_result = HiddenLegTensor::maybe_wrap(std::move(result));
+
+    if (is_one_dimensional) {
+        final_result = squeeze_legs(final_result, std::vector<LegRef>{ dummy_label });
+        normalized_dom.erase(std::remove(normalized_dom.begin(), normalized_dom.end(), -1),
+                             normalized_dom.end());
+        normalized_cod.erase(std::remove(normalized_cod.begin(), normalized_cod.end(), -1),
+                             normalized_cod.end());
+    }
+
+    int64 const result_num_cod = final_result->num_codomain_legs();
+    int64 const result_num_legs = final_result->num_legs;
+    std::vector<int64> result_cod_ids = normalized_cod;
+    std::vector<int64> result_dom_ids = normalized_dom;
+    auto result_leg_indices = [&](std::vector<int64> const& cod_ids,
+                                  std::vector<int64> const& dom_ids) {
+        std::vector<int64> by_original(static_cast<std::size_t>(n_legs));
+        for (std::size_t i = 0; i < cod_ids.size(); ++i) {
+            by_original[static_cast<std::size_t>(cod_ids[i])] = static_cast<int64>(i);
+        }
+        for (std::size_t i = 0; i < dom_ids.size(); ++i) {
+            by_original[static_cast<std::size_t>(dom_ids[i])] =
+              result_num_cod + static_cast<int64>(dom_ids.size() - 1 - i);
+        }
+        return by_original;
+    };
+    auto output_indices = result_leg_indices(result_cod_ids, result_dom_ids);
+    std::vector<LegRef> original_cod_refs;
+    std::vector<LegRef> original_dom_refs;
+    original_cod_refs.reserve(static_cast<std::size_t>(n_cod));
+    original_dom_refs.reserve(static_cast<std::size_t>(n_dom));
+    for (int64 i = 0; i < n_cod; ++i) {
+        original_cod_refs.emplace_back(output_indices[static_cast<std::size_t>(i)]);
+    }
+    for (int64 i = n_legs - 1; i >= n_cod; --i) {
+        original_dom_refs.emplace_back(output_indices[static_cast<std::size_t>(i)]);
+    }
+    LevelsSpec restore_levels;
+    restore_levels.resize(static_cast<std::size_t>(result_num_legs));
+    for (int64 i = 0; i < n_legs; ++i) {
+        restore_levels[static_cast<std::size_t>(output_indices[static_cast<std::size_t>(i)])] = i;
+    }
+    return permute_legs(final_result,
+                        std::move(original_cod_refs),
+                        std::move(original_dom_refs),
+                        std::move(restore_levels),
+                        BendRight{ true });
 }
 
 namespace {
@@ -765,7 +1007,7 @@ tensor_subgrid(TensorCPtr tensor,
         throw std::invalid_argument("tensor_subgrid: rows and cols must be non-empty");
     }
 
-    // Summand labels of the selected rows / cols, if the stacking leg is a DirectSumSpace.
+    // Summand labels of the selected rows / columns, if the stacking legs are direct sums.
     auto select_labels =
       [&](LegRef leg,
           std::vector<DirectSumSpace::SummandRef> const& refs) -> std::optional<LegLabelList> {
@@ -793,10 +1035,10 @@ tensor_subgrid(TensorCPtr tensor,
         }
     }
     return tensor_from_grid(std::move(grid),
-                            tensor->labels.as_list(),
+                            std::vector<LegRef>{ row_leg, col_leg },
                             std::nullopt,
-                            select_labels(row_leg, rows),
-                            select_labels(col_leg, cols));
+                            std::vector<std::optional<LegLabelList>>{
+                              select_labels(row_leg, rows), select_labels(col_leg, cols) });
 }
 
 TensorPtr

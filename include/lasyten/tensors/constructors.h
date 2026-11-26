@@ -100,15 +100,12 @@ namespace lasyten {
 /// @param tensor Template tensor whose metadata is copied.
 [[nodiscard]] TensorPtr zero_like(TensorCPtr tensor);
 
-/// Stack a grid of tensors along existing legs.
+/// Stack a one- or two-dimensional grid of tensors along selected legs.
 ///
-/// Null cells are interpreted as all-zero tensors.
-/// The tensors are stacked along the first leg in their codomain and the final leg in their
-/// domain. The resulting legs are
-/// @f$result.codomain[0] = V = \bigoplus_m V_m@f$ and
-/// @f$result.domain[-1] = W = \bigoplus_n W_n@f$, where @f$V_m@f$ is the first codomain leg
-/// of all tensors in the @f$m@f$-th row `grid[m]`, and @f$W_n@f$ is the last domain leg of all
-/// tensors in the @f$n@f$-th column, i.e. for the tensors `[row[n] for row in grid]`.
+/// Null cells are interpreted as all-zero tensors. `stack_legs` specifies the leg stacked along
+/// each grid dimension, in row-major dimension order. A one-dimensional grid has one stacking leg;
+/// a two-dimensional grid has two. Result leg labels are retained only when all non-null cells
+/// have the same label on the corresponding leg.
 ///
 /// Graphically::
 ///
@@ -130,33 +127,21 @@ namespace lasyten {
 /// where @f$p_n : W = \bigoplus_{n'} W_{n'} \to W_n@f$ is the projection map of the direct sum
 /// and @f$i_m : V_m \to \bigoplus_{m'} V_{m'}@f$ the inclusion.
 ///
-/// @param grid Row-major grid of tensors (null cell = zero). All legs except those along
-///     which stacking happens must match across the grid; tensors in the same row share the
-///     first codomain leg, and tensors in the same column share the last domain leg.
-/// @param labels Optional labels for the result; `nullopt` means unlabeled.
+/// @param grid Row-major grid of tensors (null cell = zero). For a one-dimensional grid, use one
+///     row containing its cells. All legs except those along which stacking happens must match.
+/// @param stack_legs Leg reference for each grid dimension. Two-dimensional grids require one
+///     reference per dimension. References may identify any leg; a leg may be bent to place the
+///     first stacking dimension in the codomain and the second in the domain.
 /// @param dtype Optional dtype; `nullopt` uses the common dtype of the grid.
-/// @param row_labels Optional label per grid row, stored as `DirectSumSpace::summand_labels`
-///     on the resulting codomain leg; `nullopt` means unlabeled. If given, must have one
-///     entry per row.
-/// @param col_labels Optional label per grid column, stored as `DirectSumSpace::summand_labels`
-///     on the resulting domain leg; `nullopt` means unlabeled. If given, must have one entry
-///     per column.
-/// @param row_summands Optional space for each grid row, used to determine the summands of the
-///     resulting codomain leg. If omitted, each row must contain a tensor from which its space
-///     can be inferred. If given, must have one entry per row and agree with any tensors in that
-///     row.
-/// @param col_summands Optional space for each grid column, used to determine the summands of the
-///     resulting domain leg. If omitted, each column must contain a tensor from which its space
-///     can be inferred. If given, must have one entry per column and agree with any tensors in
-///     that column.
+/// @param stack_labels Optional summand labels for each stacking dimension.
+/// @param stack_summands Optional explicit summand spaces for each stacking dimension. A missing
+///     entry is inferred from non-null cells; entirely empty slices require an explicit space.
 [[nodiscard]] TensorPtr tensor_from_grid(
   std::vector<std::vector<TensorPtr>> grid,
-  std::optional<LegLabelList> labels = std::nullopt,
+  std::vector<LegRef> stack_legs,
   std::optional<Dtype> dtype = std::nullopt,
-  std::optional<LegLabelList> row_labels = std::nullopt,
-  std::optional<LegLabelList> col_labels = std::nullopt,
-  std::optional<std::vector<ElementarySpace::Ptr>> row_summands = std::nullopt,
-  std::optional<std::vector<ElementarySpace::Ptr>> col_summands = std::nullopt);
+  std::vector<std::optional<LegLabelList>> stack_labels = {},
+  std::vector<std::optional<std::vector<ElementarySpace::Ptr>>> stack_summands = {});
 
 /// Extract cell ``(row, col)`` from a tensor stacked by `tensor_from_grid`.
 ///
@@ -188,10 +173,9 @@ namespace lasyten {
 /// again via `tensor_from_grid` from the cells ``(rows[i], cols[j])``, so its stacking legs are
 /// `DirectSumSpace`s with the selected summands in the given order (and their labels).
 ///
-/// To re-combine subgrids, pass them as cells of a grid to `tensor_from_grid` *without*
-/// `row_labels` / `col_labels`. The stacking legs of the subgrids are `DirectSumSpace`s, so
-/// they are flattened and their `summand_labels` are preserved in the result. Passing explicit
-/// labels would instead raise, as one label cannot name several flattened summands.
+/// To re-combine subgrids, pass them as cells of a grid to `tensor_from_grid` without explicit
+/// `stack_labels`. The stacking legs of the subgrids are `DirectSumSpace`s, so they are flattened
+/// and their `summand_labels` are preserved in the result.
 ///
 /// @param tensor Result of `tensor_from_grid` (or an isomorphic stacked tensor).
 /// @param rows,cols Non-empty lists of summand indices or labels, as in `tensor_grid_cell`.

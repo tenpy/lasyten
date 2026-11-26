@@ -550,9 +550,12 @@ Grid concatenation
 ------------------
 
 ``npc.concatenate`` / ``npc.grid_concat`` / ``npc.grid_outer`` become
-:func:`~lasyten.tensors.tensor_from_grid`: stack a 2D grid of tensors (``None``
-= zero) along the first codomain leg and the last domain leg. Direct sums of
-spaces are also available as :class:`~lasyten.tensors.DirectSum`.
+:func:`~lasyten.tensors.tensor_from_grid`: stack a 1D or 2D grid of tensors
+(``None`` = zero) along the legs selected with ``stack_legs``. For example,
+``tensor_from_grid([A, B], stack_legs=['bond'])`` stacks a flat 1D grid along
+``bond``. Result leg labels are kept only when every non-zero cell has the same
+label on that leg. Direct sums of spaces are also available as
+:class:`~lasyten.tensors.DirectSum`.
 
 
 Backends
