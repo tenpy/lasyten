@@ -22,8 +22,11 @@
 #include <lasyten/tools/warn.h>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
+#include <cmath>
 #include <format>
+#include <functional>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -1212,31 +1215,310 @@ levels_with_hidden(TensorCPtr const& tensor, int64 hidden_idx)
     return levels;
 }
 
-/// Move `moving` onto the same (co)domain as `target`, immediately before (`after=false`)
-/// or after (`after=true`) `target` in that (co)domain.
-[[nodiscard]] TensorPtr
-move_onto_target_side(TensorPtr tensor, LegRef moving, LegRef target, bool after)
+/// Target of a leg move: position `pos` of the resulting codomain or domain, as in `move_leg`.
+struct LegTarget
 {
-    auto moving_v = moving;
-    auto target_v = target;
-    auto [t_in_dom, t_co, t_legs] = tensor->_parse_leg_idx(
-      std::visit([](auto const& k) -> std::variant<int64, std::string> { return k; }, target_v));
-    auto [m_in_dom, m_co, m_legs] = tensor->_parse_leg_idx(
-      std::visit([](auto const& k) -> std::variant<int64, std::string> { return k; }, moving_v));
-    (void)t_legs;
-    int64 tpos = t_co;
-    if (t_in_dom == m_in_dom && m_co < t_co) {
-        // Removing `moving` from the same side shifts the target left.
-        tpos = t_co - 1;
+    bool to_domain;
+    int64 pos;
+};
+
+/// One `move_leg` call of a `MoveLegRoute`.
+struct MoveLegStep
+{
+    LegTarget target;
+    bool bend_right;
+};
+
+/// A way to move a single leg to its target, together with the legs that it crosses.
+struct MoveLegRoute
+{
+    std::vector<MoveLegStep> steps;
+    std::vector<int64> crossed; ///< Indices of the legs crossed, before the move.
+};
+
+/// The two routes to move leg `moving` of a tensor to `target`, see `move_leg_avoiding`.
+///
+/// The routes go around the tensor in opposite directions and cross complementary sets of legs.
+/// If the leg stays in the codomain (domain), the first route is the direct one and the second
+/// one goes around the tensor, i.e., bends once to the left and once to the right. Otherwise, the
+/// first route bends to the right and the second one to the left.
+[[nodiscard]] std::array<MoveLegRoute, 2>
+move_leg_routes(int64 num_legs, int64 num_codomain_legs, int64 moving, LegTarget target)
+{
+    // the other legs, by (co)domain index, i.e. from left to right in both codomain and domain
+    std::vector<int64> codomain;
+    std::vector<int64> domain;
+    for (int64 n = 0; n < num_codomain_legs; ++n) {
+        if (n != moving) {
+            codomain.push_back(n);
+        }
     }
-    int64 insert = after ? tpos + 1 : tpos;
-    auto levels = levels_with_hidden(tensor, m_legs);
-    if (!t_in_dom) {
-        return move_leg(
-          tensor, std::move(moving), insert, std::nullopt, std::move(levels), BendRight{ true });
+    for (int64 n = num_legs - 1; n >= num_codomain_legs; --n) {
+        if (n != moving) {
+            domain.push_back(n);
+        }
     }
-    return move_leg(
-      tensor, std::move(moving), std::nullopt, insert, std::move(levels), BendRight{ true });
+    bool const from_domain = moving >= num_codomain_legs;
+    int64 const p = from_domain ? num_legs - 1 - moving : moving;
+    auto const& src = from_domain ? domain : codomain;
+    auto const& other = from_domain ? codomain : domain;
+    auto const& tgt = target.to_domain ? domain : codomain;
+    int64 const q = to_valid_idx(target.pos, static_cast<int64>(tgt.size()) + 1);
+    auto const slice = [](std::vector<int64> const& v, int64 start, int64 stop) {
+        return std::vector<int64>(v.begin() + start, v.begin() + stop);
+    };
+    auto const join = [](std::vector<std::vector<int64>> parts) {
+        std::vector<int64> res;
+        for (auto const& part : parts) {
+            res.insert(res.end(), part.begin(), part.end());
+        }
+        return res;
+    };
+    auto const src_size = static_cast<int64>(src.size());
+    auto const other_size = static_cast<int64>(other.size());
+    auto const tgt_size = static_cast<int64>(tgt.size());
+    LegTarget const to_other_start{ !target.to_domain, 0 };
+    LegTarget const to_other_end{ !target.to_domain, other_size };
+    if (from_domain == target.to_domain) {
+        MoveLegRoute direct{ { { target, true } }, slice(src, std::min(p, q), std::max(p, q)) };
+        if (q >= p) {
+            // around the left edge to the other side, then around the right edge to the target
+            return { direct,
+                     MoveLegRoute{ { { to_other_start, false }, { target, true } },
+                                   join({ slice(src, 0, p), other, slice(src, q, src_size) }) } };
+        }
+        return { direct,
+                 MoveLegRoute{ { { to_other_end, true }, { target, false } },
+                               join({ slice(src, p, src_size), other, slice(src, 0, q) }) } };
+    }
+    return { MoveLegRoute{ { { target, true } },
+                           join({ slice(src, p, src_size), slice(tgt, q, tgt_size) }) },
+             MoveLegRoute{ { { target, false } }, join({ slice(src, 0, p), slice(tgt, 0, q) }) } };
+}
+
+/// The labels of a tensor's codomain and domain, each from left to right.
+struct LegLayout
+{
+    std::vector<std::string> codomain;
+    std::vector<std::string> domain;
+
+    [[nodiscard]] static LegLayout of(TensorCPtr const& tensor)
+    {
+        auto labs = tensor->labels.as_list();
+        auto const nc = static_cast<std::ptrdiff_t>(tensor->num_codomain_legs());
+        return { std::vector<std::string>(labs.begin(), labs.begin() + nc),
+                 std::vector<std::string>(labs.rbegin(), labs.rend() - nc) };
+    }
+
+    /// Labels in the order of ``Tensor.labels``, i.e. clockwise around the tensor.
+    [[nodiscard]] std::vector<std::string> labels() const
+    {
+        std::vector<std::string> res = codomain;
+        res.insert(res.end(), domain.rbegin(), domain.rend());
+        return res;
+    }
+
+    [[nodiscard]] int64 index(std::string const& label) const
+    {
+        auto labs = labels();
+        return static_cast<int64>(std::find(labs.begin(), labs.end(), label) - labs.begin());
+    }
+
+    /// Where to move `moving` to be in the same (co)domain as `target`, immediately before
+    /// (`after=false`) or after (`after=true`) `target`.
+    [[nodiscard]] LegTarget next_to(std::string const& moving,
+                                    std::string const& target,
+                                    bool after) const
+    {
+        auto const find = [](std::vector<std::string> const& v, std::string const& lab) {
+            return static_cast<int64>(std::find(v.begin(), v.end(), lab) - v.begin());
+        };
+        bool const t_in_dom = find(codomain, target) == static_cast<int64>(codomain.size());
+        auto const& side = t_in_dom ? domain : codomain;
+        int64 tpos = find(side, target);
+        int64 const mpos = find(side, moving);
+        if (mpos < tpos) {
+            // Removing `moving` from the same side shifts the target left.
+            tpos -= 1;
+        }
+        return { t_in_dom, after ? tpos + 1 : tpos };
+    }
+
+    /// The layout after moving `moving` to `target`, as in `move_leg`.
+    [[nodiscard]] LegLayout moved(std::string const& moving, LegTarget target) const
+    {
+        LegLayout res = *this;
+        for (auto* side : { &res.codomain, &res.domain }) {
+            side->erase(std::remove(side->begin(), side->end(), moving), side->end());
+        }
+        auto& side = target.to_domain ? res.domain : res.codomain;
+        int64 const pos = to_valid_idx(target.pos, static_cast<int64>(side.size()) + 1);
+        side.insert(side.begin() + pos, moving);
+        return res;
+    }
+
+    [[nodiscard]] LegLayout without(std::string const& label) const
+    {
+        LegLayout res = *this;
+        for (auto* side : { &res.codomain, &res.domain }) {
+            side->erase(std::remove(side->begin(), side->end(), label), side->end());
+        }
+        return res;
+    }
+};
+
+/// The route chosen by `move_leg_avoiding`.
+struct ChosenRoute
+{
+    MoveLegRoute route;
+    bool crosses_hidden;
+    bool crosses_never_cross;
+};
+
+/// Choose the route for `move_leg_avoiding`, see there.
+[[nodiscard]] ChosenRoute
+choose_route(LegLayout const& layout,
+             std::string const& moving,
+             LegTarget target,
+             std::vector<std::string> const& never_cross,
+             std::vector<std::string> const& must_cross = {})
+{
+    auto const labs = layout.labels();
+    auto const is_hidden = [&](int64 i) {
+        return HiddenLegTensor::is_hidden_leg_label(labs.at(static_cast<std::size_t>(i)));
+    };
+    auto const is_never_cross = [&](int64 i) {
+        auto const& lab = labs.at(static_cast<std::size_t>(i));
+        return std::find(never_cross.begin(), never_cross.end(), lab) != never_cross.end();
+    };
+    auto const crosses = [](MoveLegRoute const& route, auto const& pred) {
+        return std::any_of(route.crossed.begin(), route.crossed.end(), pred);
+    };
+    auto const acceptable = [&](MoveLegRoute const& route) {
+        for (auto const& lab : must_cross) {
+            auto const is_lab = [&](int64 i) {
+                return labs.at(static_cast<std::size_t>(i)) == lab;
+            };
+            if (!crosses(route, is_lab)) {
+                return false;
+            }
+        }
+        return !crosses(route, is_never_cross);
+    };
+    auto const routes = move_leg_routes(static_cast<int64>(labs.size()),
+                                        static_cast<int64>(layout.codomain.size()),
+                                        layout.index(moving),
+                                        target);
+    for (auto const& route : routes) {
+        if (acceptable(route) && !crosses(route, is_hidden)) {
+            return { route, false, false };
+        }
+    }
+    for (auto const& route : routes) {
+        if (acceptable(route)) {
+            return { route, true, false };
+        }
+    }
+    return { routes[0], crosses(routes[0], is_hidden), true };
+}
+
+/// Move a single leg like `move_leg`, but choose the route around the tensor to avoid braids.
+///
+/// The moving leg and all hidden legs have level -1, all public legs level 0 (see
+/// `levels_with_hidden`), i.e. the moving leg passes behind the public legs. Crossing another
+/// hidden leg is a genuine braid, whose chirality is unspecified for non-symmetric braids.
+/// The two routes around the tensor (see `move_leg_routes`) are *not* equivalent for
+/// non-symmetric braids, they differ by the moving leg encircling the tensor. The caller selects
+/// the route by the legs (labels) it must cross (`must_cross`) or not cross (`never_cross`).
+/// We use the first such route that crosses no hidden legs, otherwise the first such route,
+/// otherwise the first route.
+[[nodiscard]] TensorPtr
+move_leg_avoiding(TensorPtr tensor,
+                  std::string const& moving,
+                  LegTarget target,
+                  std::vector<std::string> const& never_cross = {},
+                  std::vector<std::string> const& must_cross = {})
+{
+    auto const chosen =
+      choose_route(LegLayout::of(tensor), moving, target, never_cross, must_cross);
+    for (auto const& step : chosen.route.steps) {
+        auto levels = levels_with_hidden(tensor, tensor->labels.index(moving));
+        std::optional<int64> codomain_pos;
+        std::optional<int64> domain_pos;
+        (step.target.to_domain ? domain_pos : codomain_pos) = step.target.pos;
+        tensor = move_leg(tensor,
+                          LegRef{ moving },
+                          codomain_pos,
+                          domain_pos,
+                          std::move(levels),
+                          BendRight{ step.bend_right });
+    }
+    return tensor;
+}
+
+/// The labels of `layout` clockwise after `label` (excluding it), i.e. in the order in which
+/// they appear on the outer boundary when contracting the leg `label` with another tensor.
+[[nodiscard]] std::vector<std::string>
+clockwise_after(LegLayout const& layout, std::string const& label)
+{
+    auto labs = layout.labels();
+    auto const pos = std::find(labs.begin(), labs.end(), label);
+    std::vector<std::string> res(pos + 1, labs.end());
+    res.insert(res.end(), labs.begin(), pos);
+    return res;
+}
+
+/// Where the identity wire of `move_hidden_leg` starts, and in which order its ends are moved.
+struct IdentityWirePlan
+{
+    bool right_edge;      ///< If the identity is placed right of `B` (``outer(B, I)``), else left.
+    bool int_in_codomain; ///< If the end `int` starts in the codomain, else `open` does.
+    bool open_first;      ///< If `open` is moved next to `axis_B` before `int`.
+};
+
+/// The initial layout of `B_ext` for an `IdentityWirePlan`.
+[[nodiscard]] LegLayout
+identity_wire_layout(LegLayout layout,
+                     IdentityWirePlan plan,
+                     std::string const& int_lab,
+                     std::string const& open_lab)
+{
+    auto const& top = plan.int_in_codomain ? int_lab : open_lab;
+    auto const& bottom = plan.int_in_codomain ? open_lab : int_lab;
+    if (plan.right_edge) {
+        layout.codomain.push_back(top);
+        layout.domain.push_back(bottom);
+    } else {
+        layout.codomain.insert(layout.codomain.begin(), top);
+        layout.domain.insert(layout.domain.begin(), bottom);
+    }
+    return layout;
+}
+
+/// A move of an `IdentityWirePlan`: `moving` right before or after the leg `reference`.
+struct WireMove
+{
+    std::string moving;
+    std::string reference;
+    bool after;
+};
+
+/// The two moves of an `IdentityWirePlan`: `int` right after `axis`, and `open` either right
+/// before `axis` (`behind_axis`, the wire passes behind `axis`) or right after `int`.
+[[nodiscard]] std::array<WireMove, 2>
+identity_wire_moves(IdentityWirePlan plan,
+                    bool behind_axis,
+                    std::string const& axis,
+                    std::string const& int_lab,
+                    std::string const& open_lab)
+{
+    WireMove const int_move{ int_lab, axis, /*after=*/true };
+    if (plan.open_first) {
+        return { WireMove{ open_lab, axis, /*after=*/!behind_axis }, int_move };
+    }
+    return { int_move,
+             behind_axis ? WireMove{ open_lab, axis, /*after=*/false }
+                         : WireMove{ open_lab, int_lab, /*after=*/true } };
 }
 
 #if LASYTEN_HAS_PYTHON // FusionTreeBackend is only built with Python
@@ -1735,10 +2017,72 @@ move_hidden_leg(HiddenLegTensorCPtr A,
     }
 
     auto h_leg = A->get_leg(hidden_idx);
-    bool const flatten_1d = h_leg.dim() == 1.;
+    // For anyons, `dim` is weighted by the quantum dimensions and not exactly an integer.
+    bool const flatten_1d = std::abs(h_leg.dim() - 1.) < 1e-8;
 
-    A_work = std::dynamic_pointer_cast<SymmetricTensor>(move_onto_target_side(
-      A_work, LegRef{ stripped_h }, LegRef{ original_axis_A_label }, /*after=*/false));
+    auto open_lab = unique_temp_label(B_work, "_mhl_open");
+    auto int_lab = unique_temp_label(B_work, "_mhl_int");
+    if (open_lab == int_lab) {
+        int_lab = unique_temp_label(B_work, "_mhl_intX");
+    }
+    LegLayout B_layout = LegLayout::of(B_work);
+    for (auto* side : { &B_layout.codomain, &B_layout.domain }) {
+        for (auto& lab : *side) {
+            if (lab.empty()) {
+                // unique placeholders, to keep track of the crossings of unlabelled legs
+                lab = unique_temp_label(B_work,
+                                        "_mhl_unlabelled_" + std::to_string(&lab - side->data()) +
+                                          (side == &B_layout.domain ? "d" : "c"));
+            }
+        }
+    }
+    LegTarget const open_target = target_codomain_pos.has_value()
+                                    ? LegTarget{ false, *target_codomain_pos }
+                                    : LegTarget{ true, *target_domain_pos };
+
+    // Conventions. Like all hidden legs, the moved leg passes behind the public legs and must not
+    // braid with other hidden legs. Contracting `axis_A` with `axis_B`, the open legs of the
+    // network are, clockwise, the legs of `A` after `axis_A`, then the legs of `B` after `axis_B`.
+    // The result is such that the contraction is preserved if we slide the hidden leg along this
+    // boundary, from its position on `A` to its target position on `B` (*not* around a tensor,
+    // which differs by a braid for non-symmetric braids). The slide passes one of the two gaps
+    // next to the bond: "cw", between the last leg of `A` and the first leg of `B`, or "ccw",
+    // between the last leg of `B` and the first leg of `A`. We choose the one which does not
+    // cross other hidden legs.
+    // `h` needs to be right before `axis_A`, i.e. clockwise before it (codomain) or after it
+    // (domain), next to the cw or ccw gap.
+    bool const A_slot_cw =
+      A_work->labels.index(original_axis_A_label) < A_work->num_codomain_legs();
+    bool slide_cw;
+    {
+        auto const A_after = clockwise_after(LegLayout::of(A_work), original_axis_A_label);
+        auto const B_after =
+          clockwise_after(B_layout.moved(open_lab, open_target), original_axis_B_label);
+        auto const h_pos = std::find(A_after.begin(), A_after.end(), stripped_h);
+        auto const t_pos = std::find(B_after.begin(), B_after.end(), open_lab);
+        auto const hidden_in = [](auto first, auto last) {
+            return std::any_of(first, last, [](std::string const& lab) {
+                return HiddenLegTensor::is_hidden_leg_label(lab);
+            });
+        };
+        bool const cw_hidden =
+          hidden_in(h_pos + 1, A_after.end()) || hidden_in(B_after.begin(), t_pos);
+        bool const ccw_hidden =
+          hidden_in(A_after.begin(), h_pos) || hidden_in(t_pos + 1, B_after.end());
+        // If both or none are possible, use the gap on the side of the slot of `h`.
+        slide_cw = (cw_hidden == ccw_hidden) ? A_slot_cw : !cw_hidden;
+    }
+
+    // Move `h` on `A` right before `axis_A`. If the slide uses the gap on the other side of the
+    // bond, `h` passes behind `axis_A`.
+    {
+        auto const target =
+          LegLayout::of(A_work).next_to(stripped_h, original_axis_A_label, /*after=*/false);
+        std::vector<std::string> const axis_A_only{ original_axis_A_label };
+        A_work = std::dynamic_pointer_cast<SymmetricTensor>(
+          slide_cw == A_slot_cw ? move_leg_avoiding(A_work, stripped_h, target, axis_A_only)
+                                : move_leg_avoiding(A_work, stripped_h, target, {}, axis_A_only));
+    }
     if (!A_work) {
         throw std::runtime_error(
           "move_hidden_leg: expected SymmetricTensor after moving A's hidden");
@@ -1760,21 +2104,86 @@ move_hidden_leg(HiddenLegTensorCPtr A,
     auto pipe_A = A_work->get_leg(A_work->labels.index(original_axis_A_label));
     auto desired_B_legs = pipe_A.dual();
 
-    auto h_space = as_space(h_leg);
-    auto open_lab = unique_temp_label(B_work, "_mhl_open");
-    auto int_lab = unique_temp_label(B_work, "_mhl_int");
-    if (open_lab == int_lab) {
-        int_lab = unique_temp_label(B_work, "_mhl_intX");
+    // We insert an identity wire on the hidden space next to `B`, with ends `int` and `open`,
+    // ``B_ext.get_leg(open) == h_leg``. `int` is moved right after `axis_B` and combined with it,
+    // and `open` becomes the hidden leg of `B2`. The wire leaves the pipe towards the gap of the
+    // slide, i.e. it passes behind `axis_B` if `int` is on the other side, and `open` ends up
+    // right before `axis_B` or right after `int`, respectively. The ends of the wire must not
+    // cross each other, which would twist it, and should not cross the hidden legs of `B`.
+    // We simulate the possible `IdentityWirePlan`s on the labels and use the cheapest valid one.
+    // If all of them cross hidden legs, the moves raise for non-symmetric braids.
+    bool const int_cw_after_axis =
+      B_work->labels.index(original_axis_B_label) < B_work->num_codomain_legs();
+    // `int` is next to the cw gap if it is clockwise after `axis_B`
+    bool const behind_axis = int_cw_after_axis != slide_cw;
+    std::optional<IdentityWirePlan> best_plan;
+    bool best_crosses_hidden = true;
+    std::size_t best_cost = 0;
+    for (bool right_edge : { false, true }) {
+        for (bool int_in_codomain : { true, false }) {
+            for (bool open_first : { true, false }) {
+                IdentityWirePlan const plan{ right_edge, int_in_codomain, open_first };
+                auto layout = identity_wire_layout(B_layout, plan, int_lab, open_lab);
+                bool crosses_hidden = false;
+                bool valid = true;
+                std::size_t cost = 0;
+                std::map<std::string, int> num_crossings; // of the wire, i.e. by both ends
+                auto const moves = identity_wire_moves(
+                  plan, behind_axis, original_axis_B_label, int_lab, open_lab);
+                for (auto const& move : moves) {
+                    auto const& moving = move.moving;
+                    auto const& other = moving == int_lab ? open_lab : int_lab;
+                    auto const target = layout.next_to(moving, move.reference, move.after);
+                    auto const chosen = choose_route(layout, moving, target, { other });
+                    auto const labs = layout.labels();
+                    for (auto i : chosen.route.crossed) {
+                        num_crossings[labs.at(static_cast<std::size_t>(i))] += 1;
+                    }
+                    valid = valid && !chosen.crosses_never_cross;
+                    crosses_hidden = crosses_hidden || chosen.crosses_hidden;
+                    cost += chosen.route.crossed.size();
+                    layout = layout.moved(moving, target);
+                }
+                for (auto const& [lab, num] : num_crossings) {
+                    if ((num % 2 == 1) != (behind_axis && lab == original_axis_B_label)) {
+                        valid = false;
+                    }
+                }
+                if (!valid) {
+                    continue;
+                }
+                if (!best_plan.has_value() || (best_crosses_hidden && !crosses_hidden) ||
+                    (best_crosses_hidden == crosses_hidden && cost < best_cost)) {
+                    best_plan = plan;
+                    best_crosses_hidden = crosses_hidden;
+                    best_cost = cost;
+                }
+            }
+        }
     }
-    auto I = eye(h_space,
-                 A->backend,
-                 LegLabelList{ open_lab, int_lab },
-                 A->dtype,
-                 A->device,
-                 /*diagonal=*/false);
-    auto B_ext = outer(I, B_work);
-    B_ext = move_onto_target_side(
-      std::move(B_ext), LegRef{ int_lab }, LegRef{ original_axis_B_label }, /*after=*/true);
+    if (!best_plan.has_value()) {
+        throw std::logic_error("move_hidden_leg: found no way to insert the identity wire");
+    }
+    auto const plan = *best_plan;
+    auto I = plan.int_in_codomain ? eye(as_space(h_leg.dual()),
+                                        A->backend,
+                                        LegLabelList{ int_lab, open_lab },
+                                        A->dtype,
+                                        A->device,
+                                        /*diagonal=*/false)
+                                  : eye(as_space(h_leg),
+                                        A->backend,
+                                        LegLabelList{ open_lab, int_lab },
+                                        A->dtype,
+                                        A->device,
+                                        /*diagonal=*/false);
+    auto B_ext = plan.right_edge ? outer(B_work, I) : outer(I, B_work);
+    for (auto const& move :
+         identity_wire_moves(plan, behind_axis, original_axis_B_label, int_lab, open_lab)) {
+        auto const& other = move.moving == int_lab ? open_lab : int_lab;
+        auto const target = LegLayout::of(B_ext).next_to(move.moving, move.reference, move.after);
+        B_ext = move_leg_avoiding(std::move(B_ext), move.moving, target, { other });
+    }
     auto int_idx = B_ext->labels.index(int_lab);
     auto [b_in_dom, b_co, b_legs] = B_ext->_parse_leg_idx(int_lab);
     (void)b_co;
@@ -1797,16 +2206,15 @@ move_hidden_leg(HiddenLegTensorCPtr A,
             throw std::runtime_error(
               "move_hidden_leg: expected SymmetricTensor after flattening A");
         }
+        auto b_axis_idx = B_ext->labels.index(original_axis_B_label);
+        B_ext = flatten_pipe_leg_at(B_ext, b_axis_idx);
         auto a_flat = A_work->get_leg(A_work->labels.index(original_axis_A_label));
-        B_ext =
-          replace_legs_space(B_ext, B_ext->labels.index(original_axis_B_label), a_flat.dual());
+        if (!(B_ext->get_leg(b_axis_idx) == a_flat.dual())) {
+            throw std::logic_error("move_hidden_leg: flattened bond legs do not match");
+        }
     }
-    B_ext = move_leg(B_ext,
-                     LegRef{ open_lab },
-                     target_codomain_pos,
-                     target_domain_pos,
-                     levels_with_hidden(B_ext, B_ext->labels.index(open_lab)),
-                     BendRight{ true });
+    // Slide `open` from the gap to its target, along the legs of `B`, i.e. not behind the pipe.
+    B_ext = move_leg_avoiding(std::move(B_ext), open_lab, open_target, { original_axis_B_label });
     auto open_idx = B_ext->labels.index(open_lab);
     B_ext->labels[open_idx] = stripped_h;
 
