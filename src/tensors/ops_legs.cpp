@@ -2128,8 +2128,8 @@ move_hidden_leg(HiddenLegTensorCPtr A,
                 bool valid = true;
                 std::size_t cost = 0;
                 std::map<std::string, int> num_crossings; // of the wire, i.e. by both ends
-                auto const moves = identity_wire_moves(
-                  plan, behind_axis, original_axis_B_label, int_lab, open_lab);
+                auto const moves =
+                  identity_wire_moves(plan, behind_axis, original_axis_B_label, int_lab, open_lab);
                 for (auto const& move : moves) {
                     auto const& moving = move.moving;
                     auto const& other = moving == int_lab ? open_lab : int_lab;
