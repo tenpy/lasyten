@@ -27,13 +27,21 @@ from lasyten.symmetries import (
     LegPipe,
     NoSymmetry,
     SectorArray,
+    SU2_kAnyonCategory,
+    Symmetry,
     SymmetryError,
     TensorProduct,
     is_leg_pipe,
 )
 from lasyten.tensors import ChargedTensor, DiagonalTensor, HiddenLegTensor, LegLabels, Mask, SymmetricTensor, Tensor
 from lasyten.tensors.planar import planar_almost_equal, planar_combine_legs, planar_partial_trace
-from lasyten.testing import assert_equivalent_legs, assert_tensors_almost_equal, random_tensor, swap_gate_numpy
+from lasyten.testing import (
+    assert_equivalent_legs,
+    assert_tensors_almost_equal,
+    random_symmetry_sectors,
+    random_tensor,
+    swap_gate_numpy,
+)
 from lasyten.tools import hdf5_io
 from lasyten.tools.misc import duplicate_entries, inverse_permutation, iter_common_noncommon_sorted_arrays, to_valid_idx
 
@@ -5131,6 +5139,222 @@ def test_move_hidden_leg_leftover_and_existing_hidden(make_compatible_tensor, co
     assert '!k' in B2.labels
     # Sliding ``!charge`` onto B changes its order relative to leftover ``!h2``.
     # Aligning the two ``tdot`` results would braid those hidden wires; check contraction only.
+
+
+def _invertible_sector(symmetry, np_random):
+    """A non-trivial sector with quantum dimension one, or the trivial sector if there is none."""
+    if symmetry.num_sectors < np.inf:
+        candidates = list(symmetry.all_sectors())
+    else:
+        candidates = list(random_symmetry_sectors(symmetry, 10, np_random=np_random))
+    for s in candidates:
+        if not np.all(s == symmetry.trivial_sector) and np.isclose(symmetry.qdim(s), 1):
+            return s
+    return symmetry.trivial_sector
+
+
+def _mps_pair_with_hidden_legs(symmetry, backend, np_random, c_sector, k_sector):
+    """MPS-like ``A, B`` with (co)domains ``[vL, p] <- [!c, vR]`` and ``[vL, p] <- [!k, vR]``.
+
+    ``A.vR`` is dual to ``B.vL``, the one-dimensional hidden legs are in the given sectors.
+    """
+    kwargs = dict(
+        symmetry=symmetry, backend=backend, max_blocks=3, max_multiplicity=3, use_pipes=False, np_random=np_random
+    )
+    c = ElementarySpace.from_defining_sectors(symmetry, [c_sector])
+    k = ElementarySpace.from_defining_sectors(symmetry, [k_sector])
+    A = random_tensor(codomain=[None, None], domain=[c, None], labels=['vL', 'p', 'vR', 'c'], **kwargs)
+    B = random_tensor(codomain=[A.get_leg('vR').dual, None], domain=[k, None], labels=['vL', 'p', 'vR', 'k'], **kwargs)
+    return HiddenLegTensor(A, ['c']), HiddenLegTensor(B, ['k'])
+
+
+def _slide_leg(T, label, to_domain, pos, avoid):
+    """Move leg `label` to position `pos` of the resulting (co)domain, behind the other legs.
+
+    Of the two routes around the tensor, we use the one that does not pass the leg `avoid`.
+    For non-symmetric braids, the routes differ by the leg encircling the tensor.
+    """
+    labels = T.labels.as_list()
+    nc = T.num_codomain_legs
+    n = len(labels)
+    m = labels.index(label)
+    codomain = [i for i in range(nc) if i != m]
+    domain = [i for i in range(n - 1, nc - 1, -1) if i != m]
+    from_domain = m >= nc
+    p = n - 1 - m if from_domain else m
+    src, other = (domain, codomain) if from_domain else (codomain, domain)
+    tgt = domain if to_domain else codomain
+    q = pos % (len(tgt) + 1)
+    if from_domain == to_domain:
+        direct = ([(to_domain, q, True)], src[min(p, q) : max(p, q)])
+        if q >= p:
+            long = ([(not to_domain, 0, False), (to_domain, q, True)], src[:p] + other + src[q:])
+        else:
+            long = ([(not to_domain, len(other), True), (to_domain, q, False)], src[p:] + other + src[:q])
+        routes = [direct, long]
+    else:
+        routes = [([(to_domain, q, True)], src[p:] + tgt[q:]), ([(to_domain, q, False)], src[:p] + tgt[:q])]
+    steps = [st for st, crossed in routes if labels.index(avoid) not in crossed]
+    assert len(steps) == 1
+    for step_to_domain, step_pos, bend_right in steps[0]:
+        levels = [-1 if l in [label, avoid] else 0 for l in T.labels]
+        kwargs = dict(domain_pos=step_pos) if step_to_domain else dict(codomain_pos=step_pos)
+        T = tensors.move_leg(T, label, levels=levels, bend_right=bend_right, **kwargs)
+    return T
+
+
+def _assert_bond_contraction_preserved(A, B, A2, B2, moved):
+    """``tdot(A, B, 'vR', 'vL') == tdot(A2, B2, 'vR', 'vL')``, up to sliding the hidden leg `moved`.
+
+    The hidden leg slides along the open legs of the contraction, behind the public legs, but not past the
+    other hidden leg.
+    """
+
+    def contract(X, Y):
+        X, Y = [T.as_SymmetricTensor() if isinstance(T, HiddenLegTensor) else T for T in [X, Y]]  # strips '!'
+        return tensors.planar_contraction(X, Y, ['vR'], ['vL'], {'p': 'pA'}, {'p': 'pB'})
+
+    expect = contract(A, B)
+    got = contract(A2, B2)
+    lab = moved[1:]
+    avoid = 'k' if lab == 'c' else 'c'
+    # slide `lab` right after (clockwise) its predecessor in `expect`
+    expect_labels = expect.labels.as_list()
+    pred = expect_labels[expect_labels.index(lab) - 1]
+    got_codomain = [l for l in got.codomain_labels if l != lab]
+    got_domain = [l for l in got.domain_labels if l != lab]
+    if pred in got_codomain:
+        got = _slide_leg(got, lab, False, got_codomain.index(pred) + 1, avoid)
+    else:
+        got = _slide_leg(got, lab, True, got_domain.index(pred), avoid)
+    got = tensors.planar_permute_legs(got, codomain=list(expect.codomain_labels), domain=list(expect.domain_labels))
+    assert tensors.almost_equal(expect, got)
+
+
+def _move_onto_hidden_leg_tensor(A, B, direction, target):
+    """Move ``!c`` from `A` onto `B` (``'right'``) or ``!k`` from `B` onto `A` (``'left'``).
+
+    Returns ``A2, B2, moved, receiver``.
+    """
+    if direction == 'right':
+        A2, B2 = tensors.move_hidden_leg(A, B, 'vR', 'vL', '!c', **target)
+        return A2, B2, '!c', B2
+    B2, A2 = tensors.move_hidden_leg(B, A, 'vL', 'vR', '!k', **target)
+    return A2, B2, '!k', A2
+
+
+def _check_moved_onto_hidden_leg_tensor(A, B, A2, B2, moved, flat_bond):
+    A2.test_sanity()
+    B2.test_sanity()
+    giver, receiver = (A2, B2) if moved == '!c' else (B2, A2)
+    assert isinstance(giver, SymmetricTensor) and not isinstance(giver, HiddenLegTensor)
+    assert isinstance(receiver, HiddenLegTensor)
+    assert sorted(receiver.labels[i] for i in receiver.hidden_leg_idcs()) == ['!c', '!k']
+    assert A2.get_leg('vR') == B2.get_leg('vL').dual
+    assert receiver.get_leg(moved) == (A if moved == '!c' else B).get_leg(moved)
+    if flat_bond:
+        assert not is_leg_pipe(A2.get_leg('vR'))
+        assert not is_leg_pipe(B2.get_leg('vL'))
+    _assert_bond_contraction_preserved(A, B, A2, B2, moved)
+
+
+@pytest.mark.parametrize(
+    'target, expect_codomain, expect_domain',
+    [
+        pytest.param(dict(target_domain_pos=0), ['vL', 'p'], ['!moved', '!other', 'vR'], id='domain0'),
+        pytest.param(dict(target_domain_pos=1), ['vL', 'p'], ['!other', '!moved', 'vR'], id='domain1'),
+        pytest.param(dict(target_domain_pos=-1), ['vL', 'p'], ['!other', 'vR', '!moved'], id='domain-1'),
+        pytest.param(dict(target_codomain_pos=0), ['!moved', 'vL', 'p'], ['!other', 'vR'], id='codomain0'),
+        pytest.param(dict(target_codomain_pos=-1), ['vL', 'p', '!moved'], ['!other', 'vR'], id='codomain-1'),
+    ],
+)
+@pytest.mark.parametrize('direction', ['right', 'left'])
+def test_move_hidden_leg_onto_hidden_leg_tensor(
+    direction, target, expect_codomain, expect_domain, compatible_backend, compatible_symmetry, np_random
+):
+    # like `MPS.gauge_total_charge`: the receiving tensor already has its own hidden leg.
+    # For non-symmetric braids, the moved leg must not braid with it. With two hidden legs, this is possible
+    # for every target position, passing behind the public legs (and the bond) instead.
+    sector = _invertible_sector(compatible_symmetry, np_random)
+    A, B = _mps_pair_with_hidden_legs(compatible_symmetry, compatible_backend, np_random, sector, sector)
+    A2, B2, moved, receiver = _move_onto_hidden_leg_tensor(A, B, direction, target)
+    other = '!k' if moved == '!c' else '!c'
+    rename = {'!moved': moved, '!other': other}
+    assert list(receiver.codomain_labels) == [rename.get(l, l) for l in expect_codomain]
+    assert list(receiver.domain_labels) == [rename.get(l, l) for l in expect_domain]
+    _check_moved_onto_hidden_leg_tensor(A, B, A2, B2, moved, flat_bond=True)
+
+
+@pytest.mark.parametrize('A_vR_in_codomain', [False, True])
+@pytest.mark.parametrize('B_vL_in_domain', [False, True])
+@pytest.mark.parametrize('target', [dict(target_domain_pos=0), dict(target_domain_pos=-1), dict(target_codomain_pos=0)])
+@pytest.mark.parametrize('direction', ['right', 'left'])
+def test_move_hidden_leg_bond_leg_positions(
+    direction, target, A_vR_in_codomain, B_vL_in_domain, compatible_backend, compatible_symmetry, np_random
+):
+    # the contraction is preserved, independent of where the contracted legs are (planar bends of A and B)
+    sector = _invertible_sector(compatible_symmetry, np_random)
+    A, B = _mps_pair_with_hidden_legs(compatible_symmetry, compatible_backend, np_random, sector, sector)
+    if A_vR_in_codomain:  # [vL, p, vR] <- [c]
+        A = HiddenLegTensor(
+            tensors.planar_permute_legs(A.as_SymmetricTensor(), codomain=['vL', 'p', 'vR'], domain=['c']), ['c']
+        )
+    if B_vL_in_domain:  # [p, vR] <- [vL, k]
+        B = HiddenLegTensor(
+            tensors.planar_permute_legs(B.as_SymmetricTensor(), codomain=['p', 'vR'], domain=['vL', 'k']), ['k']
+        )
+    A2, B2, moved, _ = _move_onto_hidden_leg_tensor(A, B, direction, target)
+    _check_moved_onto_hidden_leg_tensor(A, B, A2, B2, moved, flat_bond=True)
+
+
+def test_move_hidden_leg_onto_hidden_leg_tensor_braid(compatible_backend, compatible_symmetry, np_random):
+    # With two hidden legs on B, moving '!c' between them changes the cyclic order of the hidden legs,
+    # i.e. it requires a genuine braid. Moving it next to them does not.
+    sector = _invertible_sector(compatible_symmetry, np_random)
+    A, _ = _mps_pair_with_hidden_legs(compatible_symmetry, compatible_backend, np_random, sector, sector)
+    k, k2 = [ElementarySpace.from_defining_sectors(compatible_symmetry, [s]) for s in [sector, sector]]
+    B = random_tensor(
+        symmetry=compatible_symmetry,
+        codomain=[A.get_leg('vR').dual, None],
+        domain=[k, k2, None],
+        labels=['vL', 'p', 'vR', 'k2', 'k'],
+        backend=compatible_backend,
+        max_blocks=3,
+        max_multiplicity=3,
+        use_pipes=False,
+        np_random=np_random,
+    )
+    B = HiddenLegTensor(B, ['k', 'k2'])  # [vL, p] <- [!k, !k2, vR]
+    A2, B2 = tensors.move_hidden_leg(A, B, 'vR', 'vL', '!c', target_domain_pos=0)
+    assert list(B2.domain_labels) == ['!c', '!k', '!k2', 'vR']
+    A2.test_sanity()
+    B2.test_sanity()
+    if not compatible_symmetry.has_symmetric_braid:
+        with pytest.raises(BraidChiralityUnspecifiedError):
+            _ = tensors.move_hidden_leg(A, B, 'vR', 'vL', '!c', target_domain_pos=1)
+        return
+    A2, B2 = tensors.move_hidden_leg(A, B, 'vR', 'vL', '!c', target_domain_pos=1)
+    assert list(B2.domain_labels) == ['!k', '!c', '!k2', 'vR']
+    A2.test_sanity()
+    B2.test_sanity()
+    assert A2.get_leg('vR') == B2.get_leg('vL').dual
+
+
+@pytest.mark.FusionTree
+@pytest.mark.parametrize('target', [dict(target_domain_pos=0), dict(target_domain_pos=1), dict(target_codomain_pos=-1)])
+@pytest.mark.parametrize('c_nontrivial, k_nontrivial', [(True, True), (True, False), (False, True)])
+@pytest.mark.parametrize('direction', ['right', 'left'])
+def test_move_hidden_leg_semions(direction, target, c_nontrivial, k_nontrivial, np_random):
+    # the reproducer from `MPS.gauge_total_charge` for semions: the hidden legs have dim 1 up to rounding,
+    # since `dim` is weighted by the quantum dimension. The bond must still be flattened.
+    sym = Symmetry([SU2_kAnyonCategory(1)])
+    backend = get_backend('fusion_tree', 'numpy')
+    s = _invertible_sector(sym, np_random)
+    assert not np.all(s == sym.trivial_sector)
+    c_sector, k_sector = [s if nontriv else sym.trivial_sector for nontriv in [c_nontrivial, k_nontrivial]]
+    A, B = _mps_pair_with_hidden_legs(sym, backend, np_random, c_sector, k_sector)
+    A2, B2, moved, _ = _move_onto_hidden_leg_tensor(A, B, direction, target)
+    _check_moved_onto_hidden_leg_tensor(A, B, A2, B2, moved, flat_bond=True)
 
 
 def test_move_hidden_leg_errors(make_compatible_tensor, compatible_symmetry):

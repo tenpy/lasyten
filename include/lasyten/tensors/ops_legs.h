@@ -235,13 +235,19 @@ void check_same_legs(TensorCPtr t1, TensorCPtr t2);
 /// `HiddenLegTensor`. `B2` is always a `HiddenLegTensor`.
 ///
 /// The hidden wire is moved by inserting an identity on the hidden space and combining
-/// it with the contracted public axes. If the hidden space is one-dimensional, the
+/// it with the contracted public axes. If the hidden space is one-dimensional (i.e. a single
+/// sector with quantum dimension one and multiplicity one, up to rounding of `Space::dim`), the
 /// resulting bond pipes are flattened to isomorphic `ElementarySpace`s (a charge-label
 /// update). Otherwise the contracted axes remain matching `LegPipe`s that carry the
 /// hidden space through the bond.
 ///
-/// Multiple hidden legs on one tensor are allowed (same-plane labels). Extra hidden-leg
-/// layers / planes for braiding several hidden legs are not implemented yet. If two
+/// Multiple hidden legs on one tensor are allowed (same-plane labels). As for all hidden legs,
+/// the moved leg passes behind the public legs (including the bond), and the direction around
+/// `A` and `B` is chosen such that it does not cross other hidden legs of `A` or `B`. In
+/// particular, the moved leg can be placed next to the existing hidden legs of `B`, e.g.
+/// ``target_domain_pos=0`` for the iMPS example above. A target position that changes the
+/// cyclic order of the hidden legs requires a genuine braid between them, which raises
+/// `BraidChiralityUnspecifiedError` for symmetries with non-symmetric braids. If two
 /// tensors both use the same hidden label (e.g. two iMPS sites with ``!charge``), relabel
 /// one of them before moving.
 ///
